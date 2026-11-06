@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**21** 个（有模块说明 21 个）
-- 公开符号：**164** 个（有 docstring 164 个，合格 164 个）
+- 扫描模块：**24** 个（有模块说明 24 个）
+- 公开符号：**171** 个（有 docstring 171 个，合格 171 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -584,45 +584,45 @@ Returns:
 | `Stats.has_sample` | method | 237 | ✅ |
 | `Stats.to_dict` | method | 245 | ✅ |
 | `DirStat` | class | 255 | ✅ |
-| `DirStat.to_dict` | method | 279 | ✅ |
-| `CaptureMeta` | class | 293 | ✅ |
-| `CaptureMeta.to_dict` | method | 314 | ✅ |
-| `StreamStat` | class | 324 | ✅ |
-| `StreamStat.dir_of` | method | 347 | ✅ |
-| `StreamStat.to_dict` | method | 359 | ✅ |
-| `TcpFeatures` | class | 369 | ✅ |
-| `TcpFeatures.total` | method | 391 | ✅ |
-| `TcpFeatures.has_streams` | method | 408 | ✅ |
-| `TcpFeatures.to_dict` | method | 416 | ✅ |
-| `Features` | class | 427 | ✅ |
-| `Features.has` | method | 445 | ✅ |
-| `Features.to_dict` | method | 456 | ✅ |
-| `Finding` | class | 469 | ✅ |
-| `Finding.validate` | method | 500 | ✅ |
-| `Finding.rank` | method | 521 | ✅ |
-| `Finding.to_dict` | method | 529 | ✅ |
-| `Sufficiency` | class | 543 | ✅ |
-| `Sufficiency.to_dict` | method | 552 | ✅ |
-| `LayerStatus` | class | 563 | ✅ |
-| `LayerStatus.to_dict` | method | 582 | ✅ |
-| `Verdict` | class | 592 | ✅ |
-| `Verdict.to_dict` | method | 616 | ✅ |
-| `Provenance` | class | 627 | ✅ |
-| `Provenance.to_dict` | method | 638 | ✅ |
-| `AnalyzeResult` | class | 653 | ✅ |
-| `AnalyzeResult.by_layer` | method | 672 | ✅ |
-| `AnalyzeResult.worst` | method | 684 | ✅ |
-| `AnalyzeResult.to_dict` | method | 694 | ✅ |
-| `ProbeResult` | class | 704 | ✅ |
-| `ProbeResult.to_dict` | method | 717 | ✅ |
-| `PassiveResult` | class | 728 | ✅ |
-| `PassiveResult.to_dict` | method | 738 | ✅ |
-| `Job` | class | 751 | ✅ |
-| `Job.running` | method | 779 | ✅ |
-| `Job.public` | method | 787 | ✅ |
-| `Job.to_dict` | method | 809 | ✅ |
-| `envelope_ok` | function | 821 | ✅ |
-| `envelope_err` | function | 835 | ✅ |
+| `DirStat.to_dict` | method | 289 | ✅ |
+| `CaptureMeta` | class | 304 | ✅ |
+| `CaptureMeta.to_dict` | method | 325 | ✅ |
+| `StreamStat` | class | 335 | ✅ |
+| `StreamStat.dir_of` | method | 358 | ✅ |
+| `StreamStat.to_dict` | method | 370 | ✅ |
+| `TcpFeatures` | class | 380 | ✅ |
+| `TcpFeatures.total` | method | 402 | ✅ |
+| `TcpFeatures.has_streams` | method | 419 | ✅ |
+| `TcpFeatures.to_dict` | method | 427 | ✅ |
+| `Features` | class | 438 | ✅ |
+| `Features.has` | method | 456 | ✅ |
+| `Features.to_dict` | method | 467 | ✅ |
+| `Finding` | class | 480 | ✅ |
+| `Finding.validate` | method | 511 | ✅ |
+| `Finding.rank` | method | 532 | ✅ |
+| `Finding.to_dict` | method | 540 | ✅ |
+| `Sufficiency` | class | 554 | ✅ |
+| `Sufficiency.to_dict` | method | 563 | ✅ |
+| `LayerStatus` | class | 574 | ✅ |
+| `LayerStatus.to_dict` | method | 593 | ✅ |
+| `Verdict` | class | 603 | ✅ |
+| `Verdict.to_dict` | method | 627 | ✅ |
+| `Provenance` | class | 638 | ✅ |
+| `Provenance.to_dict` | method | 649 | ✅ |
+| `AnalyzeResult` | class | 664 | ✅ |
+| `AnalyzeResult.by_layer` | method | 683 | ✅ |
+| `AnalyzeResult.worst` | method | 695 | ✅ |
+| `AnalyzeResult.to_dict` | method | 705 | ✅ |
+| `ProbeResult` | class | 715 | ✅ |
+| `ProbeResult.to_dict` | method | 728 | ✅ |
+| `PassiveResult` | class | 739 | ✅ |
+| `PassiveResult.to_dict` | method | 749 | ✅ |
+| `Job` | class | 762 | ✅ |
+| `Job.running` | method | 790 | ✅ |
+| `Job.public` | method | 798 | ✅ |
+| `Job.to_dict` | method | 820 | ✅ |
+| `envelope_ok` | function | 832 | ✅ |
+| `envelope_err` | function | 846 | ✅ |
 
 ### `Layer`  (class)
 
@@ -843,6 +843,14 @@ class DirStat
 现有实现把 retrans / dup_ack / zero_win 全部按流累加，导致：
 「客户端重传」既可能是上行丢包、也可能是下行 ACK 丢失，
 而「零窗口」甚至可能来自客户端自己（VDI 场景常见）。
+
+计数口径（三个字段容易混，必须分开记）：
+
+* ``retrans`` —— **数据**重传次数，**不含 SYN**（与 ``analyzer`` 里
+  ``st["retrans"]`` 的口径一致，否则重传率会与现有报告对不上）。
+* ``syn`` —— 该方向 SYN 帧数（**含重传**）。
+* ``syn_retrans`` —— SYN 重传次数。SYN 重传说明「握手包在路上丢了」，
+  是上行连通性信号，与数据重传是两种故障，不能并进 ``retrans``。
 ```
 
 ### `DirStat.to_dict`  (method)
@@ -856,7 +864,8 @@ def to_dict(self) -> dict
 
 Returns:
     dict: ``direction`` 是字符串；``rtt`` 是嵌套的 ``Stats.to_dict()``；
-        其余是 10 个计数字段（packets/bytes/retrans/dup_ack/ooo/zero_win/win_full/rst/syn/data_packets）。
+        其余是 12 个计数字段（packets/bytes/retrans/syn_retrans/dup_ack/
+        ooo/zero_win/win_full/lost_seg/rst/syn/data_packets）。
 ```
 
 ### `CaptureMeta`  (class)
@@ -1605,6 +1614,171 @@ def to_dict(self) -> dict
 Returns:
     dict: 键 ``code``（``ErrorCode.value``）/ ``message`` / ``hint``；
         构造时带了附加参数的话再加 ``detail``。
+```
+
+## `core/extract/__init__.py`
+
+**职责**：extract 层：把 tshark 的原始输出变成可回放的 ``Features``。
+
+_（无公开符号）_
+
+## `core/extract/aggregate.py`
+
+**职责**：把逐行报文聚合成 ``Features``（T04 的聚合层）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `_DirAcc.freeze` | method | 68 | ✅ |
+| `build_features` | function | 251 | ✅ |
+
+### `_DirAcc.freeze`  (method)
+
+```python
+def freeze(self, direction: Direction) -> DirStat
+```
+
+```text
+冻结成不可变的 ``DirStat``。
+
+Args:
+    direction: 该累加器对应的方向。
+
+Returns:
+    DirStat: 计数字段逐一搬过去，``rtt`` 由 ``Stats.from_values`` 现算。
+```
+
+### `build_features`
+
+```python
+def build_features(rows: Sequence[Mapping[str, Any]], meta: Mapping[str, Any] | None=None, stats: Mapping[str, Any] | None=None) -> Features
+```
+
+```text
+把逐行报文聚合成 ``Features``。
+
+Args:
+    rows: 每个报文一行，键是 tshark 字段名（``"tcp.stream"`` 等），
+        值保留原始字符串。由 ``tshark -T fields`` 的输出来。
+    meta: 采集元信息，可选键 ``pcap_file`` / ``pcap_name`` / ``mode`` /
+        ``interface`` / ``bpf``。
+    stats: 兼容 ``analyzer.collect()`` 的统计字典；仅在报文时间戳算不出
+        时长时用它兜底填 ``capture.duration_s``。
+
+Returns:
+    Features: 含 TCP 全量特征与 ``missing`` 清单。
+        ``missing`` 里登记的键表示「这份抓包里没有可算的样本」，
+        规则层必须据此跳过判断，**不得**当成「一切正常」。
+```
+
+## `core/extract/fields.py`
+
+**职责**：tshark 字段清单与「原始字符串 → Python 值」的解析函数。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `parse_flag` | function | 84 | ✅ |
+| `parse_num` | function | 102 | ✅ |
+| `parse_port` | function | 128 | ✅ |
+| `parse_int` | function | 146 | ✅ |
+| `parse_rows` | function | 172 | ✅ |
+
+### `parse_flag`
+
+```python
+def parse_flag(v: Any) -> bool
+```
+
+```text
+把 tshark 的布尔字段转成 ``bool``。
+
+任一逗号分段命中 ``1`` / ``true`` / ``yes`` 即为真（大小写不敏感）。
+这样 ``"True"``、``"1,1"``、``" 1 "`` 都能正确识别。
+
+Args:
+    v: tshark 原始值，可能是 ``"1"`` / ``"0"`` / ``"True"`` / ``"False"`` /
+        ``"1,1"`` / ``None`` / 空串。
+
+Returns:
+    bool: 为真返回 True；空值、``"0"``、``"False"``、无法识别的串返回 False。
+```
+
+### `parse_num`
+
+```python
+def parse_num(v: Any) -> float | None
+```
+
+```text
+把 tshark 的数值字段转成 ``float``；取不到就返回 ``None``。
+
+取逗号聚合值的**第一段**（``"0.123,0.456"`` → ``0.123``）。
+
+为什么返回 ``None`` 而不是 ``0.0``：``0`` 是一个合法测量值
+（零延迟、零窗口），用它表示「没这个字段」会让上层无法区分
+「测到 0」和「没测」，从而把「没样本」误判成「一切正常」。
+
+Args:
+    v: tshark 原始值。
+
+Returns:
+    float | None: 解析成功返回数值；空串 / ``None`` / 非数字返回 None。
+```
+
+### `parse_port`
+
+```python
+def parse_port(v: Any) -> int
+```
+
+```text
+把 tshark 的端口字段转成 ``int``；失败返回 ``0``。
+
+Args:
+    v: tshark 原始值，可能是 ``"443"`` / ``"443,8080"`` / 空串。
+
+Returns:
+    int: 逗号取第一段；空串与非法值返回 0（端口 0 不是合法业务端口，
+        上层可以据此判断「没有端口」）。
+```
+
+### `parse_int`
+
+```python
+def parse_int(v: Any) -> int
+```
+
+```text
+把 tshark 的整数字段转成 ``int``；失败返回 ``0``。
+
+与 :func:`parse_port` 的区别只在于语义：这里用于 frame.number / frame.len /
+tcp.len 这类计数，``0`` 天然表示「没有」。
+
+Args:
+    v: tshark 原始值。
+
+Returns:
+    int: 解析成功返回整数（``"3.0"`` 这类也会转成 3）；失败返回 0。
+```
+
+### `parse_rows`
+
+```python
+def parse_rows(lines: Iterable[str]) -> list[dict[str, str]]
+```
+
+```text
+把 ``tshark -T fields`` 的整段输出解析成行字典列表。
+
+表头行（``-E header=y`` 产生的）会被识别并用作键名；没有表头时按
+:data:`FIELDS` 的顺序对齐。列数不足时补空串 —— tshark 在字段全空的帧上
+会少输出分隔符，直接 ``zip`` 会让后面的字段整体错位。
+
+Args:
+    lines: tshark 输出的行序列（已去掉行尾换行）。
+
+Returns:
+    list[dict[str, str]]: 每个报文一行，键是字段名，值是**原始字符串**
+        （不做类型转换，交给 :func:`parse_flag` 等函数按需解析）。
 ```
 
 ## `core/passive.py`
