@@ -453,11 +453,28 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
                 if len(st["ext_frames"][dst]) < 5:
                     st["ext_frames"][dst].append(frame)
 
+    rc = sink.get("rc")
     err = (sink.get("stderr") or "").strip()
     if st["packets"] == 0:
-        return {}, f"解析失败(rc={sink.get('rc')}): {err[:400] or '未解析到任何报文'}"
+        return {}, f"解析失败(rc={rc}): {err[:400] or '未解析到任何报文'}"
 
     st["duration"] = round(max(0.0, st["last_ts"] - st["first_ts"]), 2)
+
+    # tshark 非 0 退出 = 没读到底（文件写到一半就被分析 / 解析被超时杀掉）。
+    # 这时统计是「残缺」的：少几条会话会让严重项凭空消失（实测 3 项变 0 项），
+    # 多几条半截会话又会伪造「建连无响应」。必须显式失败，不能返回半份结论。
+    # rc=14 是 tshark 的「文件不完整」专用码（cut short），提示要更具体。
+    if rc not in (0, None):
+        if rc == 14 or "cut short" in err.lower():
+            hint = "抓包文件不完整（写盘中断，或抓包进程还没退出就开始分析）"
+        elif rc < 0:
+            hint = "解析进程被超时中断"
+        else:
+            hint = f"解析异常退出（rc={rc}）"
+        return {}, (f"{hint}：只读到 {st['packets']} 个报文，结论不可信。"
+                    f"请等抓包完全结束/文件拷贝完成后再分析；反复出现可换更小的抓包文件。"
+                    f"{(' ' + err.splitlines()[0][:160]) if err else ''}")
+
     if err and log:
         log(f"[提示] tshark 有告警输出：{err.splitlines()[0][:120]}")
     return st, ""

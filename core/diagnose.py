@@ -11,6 +11,7 @@ import argparse
 import datetime as dt
 import json
 import sys
+import time
 from pathlib import Path
 
 CORE = Path(__file__).resolve().parent
@@ -142,8 +143,45 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         return {"ok": False, "degraded": True, "error": f"抓包失败(rc={rc}): {msg.strip()[:400]}"}
 
     logger(f"抓包完成：{pcap.name}（{pcap.stat().st_size / 1024:.0f} KB）")
+
+    # tshark 退出 ≠ 数据已经全部落盘（杀软扫描 / 大文件缓存回写会滞后）。
+    # 若此时立刻分析，tshark 会以 rc=14「cut short」读到一个残缺文件，
+    # 结论随抓包尾部是否已落地而变——这就是「同一文件两次结论不同」的来源。
+    if _wait_file_stable(pcap):
+        logger("抓包文件已落盘稳定，开始分析")
+    else:
+        logger("[提示] 抓包文件 3 秒内仍在变化，分析可能读到不完整内容")
+
     return {"ok": True, "pcap": str(pcap), "interface": tshark.short_name(iface["name"]),
             "interface_index": iface["index"], "bpf": bpf or "无（全网）", "duration": duration}
+
+
+def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
+    """等文件大小连续两次采样不变，确认写盘结束。
+
+    Args:
+        path: 要观察的文件；不存在时直接返回 False。
+        timeout: 最长等待秒数，默认 3.0（抓包刚结束时通常 0.2s 内就稳定）。
+
+    Returns:
+        True 表示已稳定（或本来就是静默的只读文件）；False 表示超时仍在变化。
+
+    Raises:
+        不抛异常。读不到文件（盘符消失、权限不足）按「未稳定」处理。
+    """
+    deadline = time.monotonic() + timeout
+    last = -1
+    while time.monotonic() < deadline:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return False
+        if size == last:
+            return True
+        last = size
+        time.sleep(0.15)
+    return False
+
 
 
 def run_scan(target: str = "", duration: int = 30, interface: str | None = None,

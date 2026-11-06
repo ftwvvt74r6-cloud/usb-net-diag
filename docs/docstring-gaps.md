@@ -36,8 +36,8 @@
 | `core/ai.py:318` | `build_messages` | 缺参数说明、缺返回值说明 |
 | `core/ai.py:411` | `analyze_result` | 无 docstring |
 | `core/analyzer.py:170` | `collect` | 缺参数说明、缺返回值说明 |
-| `core/analyzer.py:556` | `build_findings` | 无 docstring |
-| `core/analyzer.py:826` | `analyze` | 无 docstring |
+| `core/analyzer.py:573` | `build_findings` | 无 docstring |
+| `core/analyzer.py:843` | `analyze` | 无 docstring |
 | `core/app.py:49` | `msgbox` | 缺参数说明 |
 | `core/app.py:57` | `is_admin` | 无 docstring |
 | `core/app.py:64` | `relaunch_as_admin` | 缺返回值说明 |
@@ -47,12 +47,12 @@
 | `core/bootstrap.py:29` | `gen_configs` | 缺返回值说明 |
 | `core/bootstrap.py:71` | `check` | 无 docstring |
 | `core/bootstrap.py:107` | `main` | 无 docstring |
-| `core/diagnose.py:42` | `load_config` | 无 docstring |
-| `core/diagnose.py:65` | `log` | 无 docstring |
-| `core/diagnose.py:70` | `bpf_for` | 缺参数说明、缺返回值说明 |
-| `core/diagnose.py:85` | `capture_live` | 缺参数说明、缺返回值说明 |
-| `core/diagnose.py:149` | `run_scan` | 缺参数说明、缺返回值说明 |
-| `core/diagnose.py:198` | `main` | 无 docstring |
+| `core/diagnose.py:43` | `load_config` | 无 docstring |
+| `core/diagnose.py:66` | `log` | 无 docstring |
+| `core/diagnose.py:71` | `bpf_for` | 缺参数说明、缺返回值说明 |
+| `core/diagnose.py:86` | `capture_live` | 缺参数说明、缺返回值说明 |
+| `core/diagnose.py:187` | `run_scan` | 缺参数说明、缺返回值说明 |
+| `core/diagnose.py:236` | `main` | 无 docstring |
 | `core/passive.py:62` | `engine_status` | 缺返回值说明 |
 | `core/passive.py:392` | `build_flows` | 缺参数说明、缺返回值说明 |
 | `core/passive.py:509` | `run` | 缺参数说明、缺返回值说明 |
