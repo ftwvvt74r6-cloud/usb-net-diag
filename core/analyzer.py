@@ -1172,7 +1172,7 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
             "rst": st["rst"],
             "syn": st["syn"],
             "synack": st["synack"],
-            "dns_total": dns_q_total or sum(st["dns_r"].values()),
+            "dns_total": dns_q_total,
             "dns_resp": sum(st["dns_r"].values()),
             "nxdomain": nx_total,
             "dns_avg_ms": m["dns_avg_ms"],
@@ -1190,10 +1190,13 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
             "icmp_unreach": m["icmp_unreach"],
             "icmp_timeout": m["icmp_timeout"],
             "arp_no_reply": m["arp_no_reply"],
-            # ARP 请求总条数（不只是「无应答」的那些）。证据充分性闸门要用它判断
-            # 「这次抓包到底发过几次 ARP」——只有 1 次请求时判不了「无应答」，
-            # 而 arp_no_reply 恒为 0，看不出这个区别。
+            # ARP 请求总条数（不只是「无应答」的那些）。证据充分性闸门用它报告
+            # 「这次抓包到底发过几次 ARP」，但**维度判据不用它**（见下一行）。
             "arp_req": sum(st["arp_req"].values()),
+            # 同一目标的最大 ARP 请求次数。充分性闸门按「同一目标 ≥ 2 次」判：
+            # 两个不同目标各 1 次（总数 2）时，ARP 规则一条都判不出来，
+            # 不能算「ARP 维度有样本」。
+            "arp_req_max": max(st["arp_req"].values()) if st["arp_req"] else 0,
             "throughput_mbps": m["throughput_mbps"],
             "streams_total": m["streams_total"],
             "external_ips": len(st["ext_dst"]),

@@ -168,12 +168,16 @@
   .vcard.警告::before{background:#f59e0b}
   .vcard.正常{background:linear-gradient(180deg,#f8fffc,#fff);border-color:var(--ok-line)}
   .vcard.正常::before{background:#10b981}
+  /* 「证据不足」是第三态：灰，与「正常」的绿区分 —— 没测到 ≠ 没问题 */
+  .vcard.证据不足{background:linear-gradient(180deg,#f8fafc,#fff);border-color:#cbd5e1}
+  .vcard.证据不足::before{background:#94a3b8}
   .vcard .vtop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .vcard .vt{flex:none;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;
     background:#fff;letter-spacing:.5px;border:1px solid}
   .vcard.严重 .vt{color:#b91c1c;border-color:var(--crit-line)}
   .vcard.警告 .vt{color:#b45309;border-color:var(--warn-line)}
   .vcard.正常 .vt{color:#047857;border-color:var(--ok-line)}
+  .vcard.证据不足 .vt{color:#475569;border-color:#cbd5e1}
   .vcard .vlay{flex:none;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;
     background:rgba(15,23,42,.055);color:#475569}
   .vcard h3{margin:9px 0 0;font-size:16px;line-height:1.5;font-weight:700;letter-spacing:.1px}

@@ -15,8 +15,9 @@ from pathlib import Path
 
 import verdict as verdict_mod
 
-STATUS_TEXT = {"ok": "正常", "warn": "注意", "bad": "异常", "na": "无样本"}
-STATUS_MARK = {"ok": "✅", "warn": "⚠️", "bad": "❌", "na": "—"}
+STATUS_TEXT = {"ok": "正常", "warn": "注意", "bad": "异常", "na": "无样本",
+               "insufficient": "证据不足"}
+STATUS_MARK = {"ok": "✅", "warn": "⚠️", "bad": "❌", "na": "—", "insufficient": "❓"}
 
 
 def _esc(v) -> str:
@@ -75,7 +76,10 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     ]
 
     # ---------------- 一、故障定位 ----------------
-    level_key = {"严重": "bad", "警告": "warn", "正常": "ok"}.get(vd.get("level", ""), "ok")
+    # 「证据不足」必须显示成独立档（❓），不能落进 ✅/「正常」：判定层已经把
+    # 「没样本」和「没问题」分开，渲染层再把它们盖回绿色勾，等于白做。
+    level_key = {"严重": "bad", "警告": "warn", "正常": "ok",
+                 "证据不足": "insufficient"}.get(vd.get("level", ""), "ok")
     L += ["## 一、故障定位", "", f"### {STATUS_MARK.get(level_key, '')} {vd['headline']}", ""]
     L.append(f"**故障层**：{vd.get('layer', '—')}　**影响**：{vd.get('impact', '—')}")
     L.append("")
@@ -280,10 +284,18 @@ def save(result: dict, out_dir: Path) -> dict:
         JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
         因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
         文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
+
+        落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，
+        换机器重跑会让 ``git diff reports/`` 一直脏（``analyze()`` 的原值不动，
+        只在落盘时替换）。
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    meta = result.get("meta") or {}
+    # 浅拷贝 result 与 meta 再归一化：render_markdown / verdict.build 消费的都是归一化后的值。
+    result = dict(result)
+    meta = dict(result.get("meta") or {})
+    meta["tshark_path"] = verdict_mod.TSHARK_PATH_PLACEHOLDER
+    result["meta"] = meta
     raw = Path(str(meta.get("pcap_name") or "report")).stem
     # 文件名来自抓包文件名，可能是上传的任意名字：过滤掉路径分隔符等危险字符
     stem = "".join(c for c in raw if c.isalnum() or c in "._-") or "report"
