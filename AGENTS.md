@@ -108,6 +108,31 @@ tools\python\python.exe scripts\gen_api_doc.py --check 0.95  REM 合格率 <95% 
 **写作纪律**：这条规范的目标是「让不懂网络的人读懂」，不是「让注释看起来很多」。
 给私有函数堆废话注释来刷覆盖率，比不写更糟。
 
+## 4.2 提交前必问：CI 环境里缺什么？
+
+本地能跑 ≠ CI 能跑。这个项目已经因此红过两次（VBS 契约测试、docs 换行）。
+
+| 本机有 | CI 没有 | 后果 |
+|---|---|---|
+| `tools/`（约 360MB 便携环境） | 不存在 | 任何断言 `tools/...` 存在或可执行的测试都会红 |
+| `tshark.exe`（PATH 或 Program Files） | 未安装 Wireshark | 依赖真抓包的测试必须 `skipUnless`，否则红 |
+| 管理员权限 + Npcap | 没有 | 实时抓包、被动监听不可用 |
+| Windows + `core.autocrlf=true` | Linux，两端都是 LF | 生成脚本必须**固定写 LF**，否则产物不可复现 |
+| `logs/` `reports/` `captures/` 历史产物 | 不存在 | 测试不要依赖历史文件 |
+
+提交前用**干净 checkout** 自查（唯一可信的验证方式）：
+
+```bat
+git worktree add --detach .ci-check HEAD
+cd .ci-check
+<python> -m compileall -q core mcp tests
+<python> -c "import sys;sys.path.insert(0,'.');import unittest;unittest.main(module=None,argv=['x','discover','-s','tests','-v'])"
+<python> scripts/gen_api_doc.py --check 0.95
+git -c safe.directory=* diff --exit-code docs/api-reference.md docs/docstring-gaps.md
+cd ..
+git worktree remove --force .ci-check
+```
+
 ---
 
 ## 5. 提交与 PR
@@ -142,6 +167,15 @@ PR  ：必须包含
 5. 改 `rows[]` 文案的 PR 必须附带 `faults_demo` 的**前后报告 diff**。
 
 测试不许依赖 tshark / 网络 / 管理员权限。需要真 pcap 的放 `tests/e2e/` 并打 `@slow` 标记。
+
+### 跑单个测试文件
+
+`tests/` 不是 Python 包（没有 `__init__.py`），所以 `python -m unittest tests.test_xxx`
+会报 `ModuleNotFoundError: No module named 'tests'`。用 discover + 文件名过滤：
+
+```bat
+python -m unittest discover -s tests -p "test_incomplete_input.py" -v
+```
 
 ---
 
