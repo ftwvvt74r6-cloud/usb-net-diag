@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>USB-Net-Diag · 网络诊断控制台</title>
+<style>
+  :root{
+    --bg:#f4f6fa; --panel:#ffffff; --line:#e3e8ef; --text:#0f172a; --muted:#64748b;
+    --accent:#2563eb; --accent-soft:#eff6ff; --ok:#059669; --warn:#d97706; --crit:#dc2626;
+    --radius:14px; --shadow:0 1px 2px rgba(15,23,42,.06), 0 8px 24px -12px rgba(15,23,42,.18);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+  header{background:linear-gradient(120deg,#0f172a,#1e3a8a 55%,#2563eb);color:#fff;padding:18px 28px;
+         display:flex;align-items:center;justify-content:space-between;gap:16px}
+  header .brand{display:flex;align-items:center;gap:12px}
+  header .dot{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.14);
+              display:grid;place-items:center;font-size:17px;border:1px solid rgba(255,255,255,.22)}
+  header h1{font-size:16px;margin:0;letter-spacing:.3px}
+  header p{margin:2px 0 0;font-size:12px;color:#c7d2fe}
+  header .badges{display:flex;gap:8px;flex-wrap:wrap;font-size:12px}
+  .badge{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);
+         padding:4px 10px;border-radius:999px;white-space:nowrap}
+  .badge.bad{background:rgba(220,38,38,.25);border-color:rgba(248,113,113,.6)}
+  .badge.good{background:rgba(5,150,105,.25);border-color:rgba(52,211,153,.55)}
+  main{display:grid;grid-template-columns:340px 1fr;gap:18px;padding:18px 24px 40px;max-width:1440px;margin:0 auto}
+  @media (max-width:1020px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .card h2{font-size:13px;margin:0;padding:14px 16px;border-bottom:1px solid var(--line);
+           color:var(--muted);font-weight:600;letter-spacing:.4px}
+  .card .body{padding:16px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;font-weight:600}
+  input[type=text],input[type=number],input[type=password],select{width:100%;padding:9px 11px;border:1px solid var(--line);
+    border-radius:9px;font:inherit;color:inherit;background:#fbfcfe;outline:none;transition:.15s}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12);background:#fff}
+  .field{margin-bottom:14px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;background:#f1f5f9;padding:4px;border-radius:10px}
+  .modes button{border:0;background:transparent;padding:8px 2px;border-radius:7px;font:inherit;font-size:12px;
+    color:var(--muted);cursor:pointer;font-weight:600;white-space:nowrap}
+  .modes button.active{background:#fff;color:var(--accent);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .btn{width:100%;padding:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;
+       font:inherit;font-weight:600;cursor:pointer;transition:.15s}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--text);font-weight:500}
+  .btn.ghost:hover{background:#f8fafc}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5}
+  .console{background:#0b1220;color:#cbd5e1;border-radius:10px;padding:12px;height:190px;overflow:auto;
+           font:12px/1.6 ui-monospace,Consolas,"Cascadia Mono",monospace;white-space:pre-wrap;word-break:break-all}
+  .console .t{color:#64748b}
+  .console .err{color:#fca5a5}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:10px;margin-bottom:14px}
+  .stat{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:#fbfcfe}
+  .stat b{display:block;font-size:19px;line-height:1.2}
+  .stat span{font-size:11.5px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;background:#fafbfd}
+  tr:hover td{background:#fbfcfe}
+  .sev{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+  .sev.严重{background:#fee2e2;color:var(--crit)}
+  .sev.警告{background:#fef3c7;color:var(--warn)}
+  .sev.提示{background:#e0f2fe;color:#0369a1}
+  .sev.na{background:#f1f5f9;color:var(--muted)}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted)}
+  .empty{padding:36px 16px;text-align:center;color:var(--muted)}
+  .empty b{display:block;color:var(--text);font-size:15px;margin-bottom:6px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .toolbar .btn{width:auto;padding:7px 12px;font-size:12.5px}
+  .spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;
+        display:inline-block;vertical-align:-2px;margin-right:6px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .json{background:#0b1220;color:#a7f3d0;border-radius:10px;padding:11px;font:12px/1.55 ui-monospace,monospace;
+        overflow:auto;margin-top:10px}
+  .fname{font-family:ui-monospace,monospace;font-size:12px}
+  .drop{border:1.5px dashed #cbd5e1;border-radius:10px;padding:14px;text-align:center;color:var(--muted);
+        font-size:12px;cursor:pointer;transition:.15s}
+  .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .hidden{display:none!important}
+  /* ---- AI 设置 ---- */
+  .topbtn{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);
+    border:1px solid rgba(255,255,255,.3);color:#fff;padding:6px 13px;border-radius:999px;
+    font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.15s}
+  .topbtn:hover{background:rgba(255,255,255,.26)}
+  .topbtn .k{font-weight:400;opacity:.8;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+  .topbtn .st{width:7px;height:7px;border-radius:50%;background:#fca5a5;box-shadow:0 0 0 3px rgba(252,165,165,.25)}
+  .topbtn .st.on{background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.25)}
+  .mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:grid;place-items:center;
+    z-index:60;padding:18px;overflow:auto}
+  .modal{width:min(580px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:16px;
+    box-shadow:0 30px 70px -20px rgba(15,23,42,.55)}
+  .modal .mhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+    padding:16px 18px;border-bottom:1px solid var(--line)}
+  .modal .mhead b{font-size:14.5px}
+  .modal .mhead em{display:block;font-style:normal;font-size:11.5px;color:var(--muted);margin-top:4px;font-weight:400}
+  .xbtn{flex:none;border:0;background:#f1f5f9;width:28px;height:28px;border-radius:8px;cursor:pointer;
+    color:var(--muted);font-size:14px;line-height:1}
+  .xbtn:hover{background:#e2e8f0;color:var(--text)}
+  .mbody{padding:16px 18px 4px}
+  .mfoot{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--line);background:#fbfcfe}
+  .mfoot .btn{width:auto;flex:1;padding:10px}
+  .keystate{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-top:7px}
+  .keystate .tag{background:#f1f5f9;border-radius:6px;padding:1px 7px;font-family:ui-monospace,monospace}
+  .msg{margin-top:12px;border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.6}
+  .msg.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
+  .msg.bad{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+  .msg.wait{background:#f8fafc;border:1px solid var(--line);color:var(--muted)}
+  /* ---- 结论卡 ---- */
+  .vcard{border-radius:12px;padding:15px 18px;margin-bottom:14px;border:1px solid}
+  .vcard.严重{background:#fef2f2;border-color:#fecaca}
+  .vcard.警告{background:#fffbeb;border-color:#fde68a}
+  .vcard.正常{background:#ecfdf5;border-color:#a7f3d0}
+  .vcard .vtop{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+  .vcard .vt{flex:none;font-size:11.5px;font-weight:800;padding:3px 11px;border-radius:999px;
+    background:#fff;letter-spacing:.4px;margin-top:1px}
+  .vcard.严重 .vt{color:#b91c1c}
+  .vcard.警告 .vt{color:#b45309}
+  .vcard.正常 .vt{color:#047857}
+  .vcard h3{margin:0;font-size:15.5px;line-height:1.45;font-weight:700}
+  .vcard .vplain{margin:10px 0 0;font-size:13.5px;line-height:1.75;color:#334155}
+  .vcard .vmeta{display:flex;gap:18px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--muted)}
+  .vcard .vmeta b{color:var(--text);font-weight:700}
+  .vp{padding:11px 0 0;border-top:1px dashed rgba(15,23,42,.13);margin-top:12px}
+  .vp .vh{font-size:13px;font-weight:700;margin-bottom:5px}
+  .vp .vl{font-size:13px;line-height:1.72;color:#334155}
+  .vp .vact{font-size:12.5px;line-height:1.7;color:#0f172a;background:rgba(255,255,255,.75);
+    border-left:3px solid var(--accent);padding:6px 10px;border-radius:0 6px 6px 0;margin-top:7px}
+  .vp .vproof{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.6;word-break:break-all}
+  .steps{margin:6px 0 0;padding-left:20px;font-size:13px;line-height:1.85;color:#334155}
+  /* ---- 技术明细折叠 ---- */
+  .tech{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .tech summary{cursor:pointer;padding:10px 14px;font-size:12.5px;color:var(--muted);
+    background:#fafbfd;font-weight:600;user-select:none;list-style:none}
+  .tech summary::-webkit-details-marker{display:none}
+  .tech summary::before{content:"▸";display:inline-block;margin-right:7px;transition:.15s}
+  .tech[open] summary::before{transform:rotate(90deg)}
+  .tech summary:hover{background:#f1f5f9;color:var(--text)}
+  .tech .tbody{padding:12px 14px;border-top:1px solid var(--line)}
+  .tech h5{margin:0 0 7px;font-size:12px;color:var(--text);font-weight:700}
+  .tech table{margin-bottom:15px;font-size:12px}
+  .tech table:last-child{margin-bottom:0}
+  .tech th,.tech td{padding:6px 10px}
+
+  /* ---- 故障定位 ---- */
+  .vcard .vlay{flex:none;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;
+    background:rgba(15,23,42,.06);color:#334155;margin-top:1px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .chip{background:rgba(255,255,255,.8);border:1px solid rgba(15,23,42,.08);border-radius:8px;
+    padding:4px 10px;font-size:11.5px;color:var(--muted)}
+  .chip b{color:var(--text);font-weight:700}
+  .layerbar{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:4px 0 14px}
+  @media (max-width:820px){.layerbar{grid-template-columns:repeat(2,1fr)}}
+  .lay{border:1px solid var(--line);border-left:3px solid #cbd5e1;border-radius:10px;
+    padding:9px 11px;background:#fbfcfe}
+  .lay.ok{border-left-color:#10b981}
+  .lay.warn{border-left-color:#f59e0b;background:#fffdf5}
+  .lay.bad{border-left-color:#ef4444;background:#fef6f6}
+  .lay.na{opacity:.5}
+  .lay .ln{font-size:10.5px;color:var(--muted);font-weight:800;letter-spacing:.6px}
+  .lay .lt{font-size:12.5px;font-weight:700;margin:1px 0 3px}
+  .lay .ld{font-size:10.5px;color:var(--muted);line-height:1.45}
+  .point{border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:#fff}
+  .point .ph{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:6px}
+  .point .pt{font-weight:700;font-size:13.5px}
+  .point .vl{font-size:12.8px;line-height:1.72;color:#334155}
+  .vact{font-size:12.5px;line-height:1.7;color:#0f172a;background:#f8fafc;
+    border-left:3px solid var(--accent);padding:6px 10px;border-radius:0 6px 6px 0;margin-top:8px}
+  .vproof{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.6;word-break:break-all}
+  .tag{font-size:10.5px;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 7px;
+    font-weight:600;white-space:nowrap}
+  .sectitle{font-size:13px;font-weight:700;margin:18px 0 8px;color:#0f172a}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  .kv div{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:11.5px;background:#fbfcfe}
+  .kv b{display:block;font-size:14px;margin-top:1px}
+  .rowbad{color:#b91c1c;font-weight:600}
+  /* ---- 链路体检 ---- */
+  .seg{display:grid;grid-template-columns:88px 1fr 64px;gap:8px;align-items:center;
+    margin:7px 0;font-size:11.5px}
+  .seg .sn{color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .seg .sv{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);font-weight:600}
+  .bar{height:7px;background:#eef2f7;border-radius:4px;overflow:hidden}
+  .bar i{display:block;height:100%;min-width:3px;border-radius:4px;background:#2563eb}
+  .bar i.warn{background:#f59e0b}
+  .bar i.bad{background:#ef4444}
+  .bar i.skip{background:#cbd5e1}
+  .seg.skip{opacity:.55}
+  .pchip{margin-top:10px;padding:9px 11px;border-radius:10px;background:#f8fafc;border:1px solid var(--line);
+    display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:11.5px}
+  .pchip b{font-size:12.5px;color:#0f172a}
+  .pchip span{background:#e0e7ff;color:#3730a3;border-radius:999px;padding:1px 8px;font-weight:700}
+  .pchip em{flex:1 1 100%;font-style:normal;color:var(--muted);line-height:1.55;word-break:break-all}
+  .pchip.warn{background:#fffbeb;border-color:#fde68a}
+  .pchip.warn span{background:#fef3c7;color:#b45309}
+
+  /* ---- 被动监听会话表 ---- */
+  .ftab{width:100%;border-collapse:collapse;font-size:12.5px}
+  .ftab th{position:sticky;top:0;z-index:1}
+  .ftab td{white-space:nowrap}
+  .ftab td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .ftab td.mono{font-family:ui-monospace,Consolas,monospace;font-size:11.5px}
+  .tscroll{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;background:#e0e7ff;color:#3730a3;
+    font-size:11px;font-weight:700;white-space:nowrap}
+  .pill.unk{background:#fef3c7;color:#b45309}
+  .pill.st{background:#f1f5f9;color:#475569}
+  .pill.st.bad{background:#fee2e2;color:#b91c1c}
+  .pev{display:block;font-size:10.5px;color:var(--muted);margin-top:2px;max-width:250px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fsum{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin:10px 0 2px}
+  .fsum b{color:#0f172a}
+
+  /* ---- AI 解读 ---- */
+  .aiout{border:1px solid #dbeafe;background:linear-gradient(180deg,#f7fbff,#fff);border-radius:12px;
+    padding:4px 16px 14px;margin-top:14px}
+  .aiout .aihead{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:11px 0;border-bottom:1px dashed #dbeafe;margin-bottom:10px}
+  .aiout .aihead b{font-size:12.5px;color:var(--accent);letter-spacing:.3px}
+  .aiout .aihead span{font-size:11.5px;color:var(--muted)}
+  .aiout .md{font-size:13.5px;line-height:1.72;color:#1e293b}
+  .aiout .md h4{margin:12px 0 6px;font-size:13px;color:#0f172a}
+  .aiout .md p{margin:6px 0}
+  .aiout .md li{margin:3px 0 3px 2px}
+  .aiout .md code{background:#eef2f7;border-radius:4px;padding:1px 5px;font-family:ui-monospace,monospace;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="dot"><span style="font-size:10.5px;font-weight:800;letter-spacing:.7px">NET</span></div>
+    <div>
+      <h1>USB-Net-Diag · 网络诊断控制台</h1>
+      <p>便携抓包 · L2→L7 分层定位 · 一线运维照做即可</p>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+    <button class="topbtn" id="ai-open" title="配置用于生成结论的大模型接口，可随时修改">
+      <span class="st" id="ai-dot"></span>AI 设置<span class="k" id="ai-badge">未配置</span>
+    </button>
+    <div class="badges" id="badges"><span class="badge">检测环境中…</span></div>
+  </div>
+</header>
+
+<main>
+  <section style="display:flex;flex-direction:column;gap:18px;min-width:0">
+  <div class="card">
+    <h2>诊断参数</h2>
+    <div class="body">
+      <div class="field">
+        <label>诊断模式</label>
+        <div class="modes" id="modes">
+          <button data-mode="live" class="active">定向抓包</button>
+          <button data-mode="scan">全网扫描</button>
+          <button data-mode="passive">被动监听</button>
+          <button data-mode="offline">离线分析</button>
+        </div>
+      </div>
+
+      <div class="field" id="field-target">
+        <label id="target-label">目标 IP / 网段（留空 = 全网）</label>
+        <input type="text" id="target" placeholder="例如 192.168.1.10 或 192.168.1.0/24" />
+      </div>
+
+      <div class="row">
+        <div class="field" id="field-duration">
+          <label id="duration-label">抓包时长（秒）</label>
+          <input type="number" id="duration" value="30" min="5" max="180" step="5" />
+        </div>
+        <div class="field">
+          <label>网卡</label>
+          <select id="iface"><option value="">自动选择</option></select>
+        </div>
+      </div>
+
+      <div class="field hidden" id="field-engine">
+        <label>采集引擎</label>
+        <select id="engine">
+          <option value="auto">自动（优先 Scapy，失败自动回落 tshark）</option>
+          <option value="scapy">Scapy（Python 逐包解析）</option>
+          <option value="tshark">tshark（Wireshark 自带）</option>
+        </select>
+        <div class="hint" id="engine-hint">被动监听只读不发包；会话表按「端口 + 首包特征」识别协议。</div>
+      </div>
+
+      <div class="field hidden" id="field-offline">
+        <label>已有抓包文件</label>
+        <select id="pcap-select"><option value="">— 选择 captures 目录中的文件 —</option></select>
+        <div class="drop" id="drop" style="margin-top:10px">拖拽 pcap / pcapng 到此，或点击选择上传</div>
+        <input type="file" id="file" class="hidden" accept=".pcap,.pcapng,.cap" />
+      </div>
+
+      <button class="btn" id="run">开始诊断</button>
+      <button class="btn ghost hidden" id="pstop" style="margin-top:8px">停止监听</button>
+      <div class="hint" id="hint">实时抓包需要管理员权限与 Npcap 驱动；权限不足时将自动提示改用离线分析。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>链路体检（主动探测·不用抓包）</h2>
+    <div class="body probe">
+      <div class="field">
+        <label>目标域名 / IP</label>
+        <input type="text" id="probe-target" spellcheck="false"
+               placeholder="example.com  或  10.0.0.5:8080  或  10.0.0.5" />
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>端口（留空自动）</label>
+          <input type="number" id="probe-port" min="1" max="65535" placeholder="443" />
+        </div>
+        <div class="field">
+          <label>探测次数</label>
+          <input type="number" id="probe-count" min="1" max="10" value="4" />
+        </div>
+      </div>
+      <div class="field">
+        <label>协议（默认自动识别）</label>
+        <select id="probe-proto">
+          <option value="">自动识别（先看首包再看端口）</option>
+          <option value="http">HTTP（明文）</option>
+          <option value="tls">HTTPS / TLS</option>
+          <option value="smb">SMB 文件共享（445/139）</option>
+          <option value="rdp">RDP 远程桌面（3389）</option>
+          <option value="ssh">SSH</option>
+          <option value="opaque">只测 TCP 连通性</option>
+        </select>
+      </div>
+      <button class="btn ghost" id="probe-run">开始体检</button>
+      <div class="hint">建连后先不发声，读服务端首包（Banner）判断协议，再只发这个协议该发的报文：
+        Web 走 DNS→TCP→TLS→首字节，SMB 走 TCP→SMB 协商，SSH 等看 TCP→Banner 响应，
+        认不出就只报 TCP 建连（Opaque TCP）。不需要管理员权限，也不产生抓包文件。</div>
+      <div id="probe-out"></div>
+    </div>
+  </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:18px;min-width:0">
+    <div class="card">
+      <h2>运行状态</h2>
+      <div class="body">
+        <div class="console" id="console"><span class="t">[就绪] 等待任务…</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="result-title">诊断结果</h2>
+      <div class="body" id="result">
+        <div class="empty"><b>暂无结果</b>抓包或上传 pcap 后点「开始诊断」，会按 L2 链路 → L3 网络 → L4 传输 → L7 应用逐层定位故障。</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="mask hidden" id="ai-mask">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="AI 模型配置">
+    <div class="mhead">
+      <div>
+        <b>AI 模型配置</b>
+        <em>填写后即可在诊断结果里生成 AI 解读，保存后立即生效，随时可改</em>
+      </div>
+      <button class="xbtn" id="ai-close" title="关闭">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="field">
+        <label>服务商预置（选择后自动填地址与模型，可继续手改）</label>
+        <select id="ai-provider"></select>
+      </div>
+      <div class="field">
+        <label>接口地址 Base URL</label>
+        <input type="text" id="ai-base" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
+        <div class="hint">任何 OpenAI 兼容端点都支持；本地模型可填 <span class="mono">http://127.0.0.1:11434/v1</span></div>
+      </div>
+      <div class="field">
+        <label>API Key</label>
+        <input type="password" id="ai-key" spellcheck="false" autocomplete="off" placeholder="粘贴 Key，例如 sk-..." />
+        <div class="keystate" id="ai-keystate"></div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>模型名称</label>
+          <input type="text" id="ai-model" spellcheck="false" placeholder="deepseek-chat" />
+        </div>
+        <div class="field">
+          <label>温度（0 最稳）</label>
+          <input type="number" id="ai-temp" min="0" max="2" step="0.1" value="0.2" />
+        </div>
+      </div>
+      <div class="field">
+        <label>超时（秒）</label>
+        <input type="number" id="ai-timeout" min="10" max="600" step="10" value="90" />
+      </div>
+      <div id="ai-msg"></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="ai-test">测试连接</button>
+      <button class="btn ghost" id="ai-clear">清除 Key</button>
+      <button class="btn" id="ai-save">保存并启用</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let MODE = "live";
+let timer = null;
+let timerP = null;
+let lastLogCount = 0;
+let LAST_RESULT = null;
+let AI_CFG = null;
+
+/* ---------- 模式切换 ---------- */
+function runLabel(){ return MODE === "passive" ? "开始监听" : "开始诊断"; }
+
+$("#modes").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-mode]");
+  if (!b) return;
+  MODE = b.dataset.mode;
+  [...$("#modes").children].forEach((x) => x.classList.toggle("active", x === b));
+  $("#field-target").classList.toggle("hidden", MODE === "offline");
+  $("#field-duration").classList.toggle("hidden", MODE === "offline");
+  $("#field-offline").classList.toggle("hidden", MODE !== "offline");
+  $("#field-engine").classList.toggle("hidden", MODE !== "passive");
+  $("#target-label").textContent = MODE === "passive"
+    ? "目标 IP / 网段（留空 = 全部流量）" : "目标 IP / 网段（留空 = 全网）";
+  $("#duration-label").textContent = MODE === "passive" ? "监听时长（秒）" : "抓包时长（秒）";
+  $("#run").textContent = runLabel();
+  $("#hint").textContent = MODE === "offline"
+    ? "离线分析不需要管理员权限，适合权限受限的目标机器。"
+    : MODE === "scan"
+      ? "全网扫描不设目标过滤，抓取本机网卡全部流量后统一分析，建议 60 秒以上。"
+      : MODE === "passive"
+        ? "被动监听不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。"
+        : "定向抓包只保留与目标 IP 相关的流量，过滤器自动构造为 host <IP>。";
+  if (MODE === "offline") loadCaptures();
+});
+
+/* ---------- 环境信息 ---------- */
+async function boot() {
+  try {
+    const r = await fetch("/api/interfaces").then((x) => x.json());
+    const sel = $("#iface");
+    (r.interfaces || []).forEach((i) => {
+      const o = document.createElement("option");
+      o.value = String(i.index);
+      o.textContent = `${i.index}. ${i.short || i.name}`;
+      sel.appendChild(o);
+    });
+    const badges = [];
+    if (!r.npcap) badges.push('<span class="badge bad">Npcap 未就绪</span>');
+    else badges.push('<span class="badge good">Npcap 就绪</span>');
+    badges.push(r.admin
+      ? '<span class="badge good">管理员权限</span>'
+      : '<span class="badge bad">非管理员（实时抓包受限）</span>');
+    const d = await fetch("/api/doctor").then((x) => x.json());
+    const vm = (d.tshark_version || "").match(/\d+\.\d+\.\d+/);
+    badges.push(`<span class="badge">${vm ? "tshark " + vm[0] : "tshark 未找到"}</span>`);
+    const pe = await fetch("/api/passive").then((x) => x.json()).catch(() => null);
+    const ei = pe && pe.engine_info;
+    if (ei && ei.scapy) {
+      badges.push(`<span class="badge good">Scapy ${esc(ei.scapy_version)}</span>`);
+      $("#engine-hint").textContent = "Scapy " + ei.scapy_version + " 已就绪"
+        + (ei.pcap ? "（Npcap 驱动可用）" : "（未检测到 pcap 驱动）")
+        + "；出错时自动回落 tshark。";
+    } else {
+      badges.push('<span class="badge bad">Scapy 未加载</span>');
+      $("#engine-hint").textContent = "未检测到 Scapy，将使用 tshark 采集（功能一致）。";
+    }
+    $("#badges").innerHTML = badges.join("");
+    if (!r.admin) $("#hint").textContent = "当前非管理员，实时抓包大概率失败，建议使用离线分析或右键以管理员身份运行 start.bat。";
+  } catch (e) {
+    $("#badges").innerHTML = '<span class="badge bad">后端未响应</span>';
+  }
+}
+
+async function loadCaptures() {
+  const r = await fetch("/api/captures").then((x) => x.json()).catch(() => ({ files: [] }));
+  const sel = $("#pcap-select");
+  sel.innerHTML = '<option value="">— 选择 captures 目录中的文件 —</option>';
+  (r.files || []).forEach((f) => {
+    const o = document.createElement("option");
+    o.value = f.name;
+    o.textContent = `${f.name}  (${(f.size / 1024).toFixed(0)} KB · ${f.mtime})`;
+    sel.appendChild(o);
+  });
+}
+
+/* ---------- 上传 ---------- */
+$("#drop").addEventListener("click", () => $("#file").click());
+$("#file").addEventListener("change", () => upload($("#file").files[0]));
+["dragover", "dragenter"].forEach((ev) =>
+  $("#drop").addEventListener(ev, (e) => { e.preventDefault(); $("#drop").classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) =>
+  $("#drop").addEventListener(ev, (e) => { e.preventDefault(); $("#drop").classList.remove("over"); }));
+$("#drop").addEventListener("drop", (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f) upload(f);
+});
+
+async function upload(file) {
+  if (!file) return;
+  $("#hint").textContent = `正在上传 ${file.name} …`;
+  const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
+    method: "POST", body: file,
+  }).then((x) => x.json());
+  if (res.ok) {
+    await loadCaptures();
+    $("#pcap-select").value = res.file;
+    $("#hint").textContent = `已上传：${res.file}（${(res.size / 1024).toFixed(0)} KB），点击开始诊断`;
+  } else {
+    $("#hint").textContent = "上传失败：" + (res.error || "未知错误");
+  }
+}
+
+/* ---------- 启动 ---------- */
+$("#run").addEventListener("click", async () => {
+  if (MODE === "passive") { startPassive(); return; }
+  const payload = { mode: MODE, target: $("#target").value.trim() };
+  if (MODE !== "offline") {
+    payload.duration = parseInt($("#duration").value || "30", 10);
+    payload.interface = $("#iface").value || null;
+  } else {
+    payload.pcap = $("#pcap-select").value;
+    if (!payload.pcap) { $("#hint").textContent = "请先选择或上传一个抓包文件"; return; }
+  }
+  lastLogCount = 0;
+  $("#console").innerHTML = "";
+  $("#run").disabled = true;
+  $("#run").innerHTML = '<span class="spin"></span>诊断中…';
+  const r = await fetch("/api/scan", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((x) => x.json());
+  if (!r.ok) {
+    appendLog("错误：" + (r.error || "启动失败"), true);
+    stopRun();
+    return;
+  }
+  timer = setInterval(poll, 1200);
+  poll();
+});
+
+function stopRun() {
+  if (timer) clearInterval(timer);
+  timer = null;
+  $("#run").disabled = false;
+  $("#run").textContent = "开始诊断";
+}
+
+function appendLog(m, err) {
+  const c = $("#console");
+  const d = document.createElement("div");
+  d.className = err ? "err" : "";
+  d.textContent = m;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+async function poll() {
+  const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
+  if (!s) return;
+  (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
+  lastLogCount = (s.logs || []).length;
+  if (s.state === "done") { stopRun(); render(s.result); }
+  else if (s.state === "error") { stopRun(); appendLog("诊断失败：" + s.error, true); }
+}
+
+/* ---------- 被动监听 ---------- */
+function fmtBytes(n){
+  if(n === null || n === undefined) return "-";
+  if(n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
+  if(n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+
+async function startPassive(){
+  const dur = Math.max(5, Math.min(300, parseInt($("#duration").value || "20", 10)));
+  $("#duration").value = dur;
+  $("#run").disabled = true;
+  $("#run").innerHTML = '<span class="spin"></span>监听中…';
+  $("#pstop").classList.remove("hidden");
+  $("#hint").textContent = "正在监听网卡，期间不要关闭本窗口…";
+  lastLogCount = 0;
+  $("#console").innerHTML = "";
+  const r = await fetch("/api/passive", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target: $("#target").value.trim(),
+      duration: dur,
+      interface: $("#iface").value || null,
+      engine: $("#engine").value,
+    }),
+  }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+  if (!r.ok) {
+    appendLog("监听启动失败：" + (r.error || "未知错误"), true);
+    stopPassiveUI();
+    return;
+  }
+  timerP = setInterval(pollPassive, 1000);
+  pollPassive();
+}
+
+function stopPassiveUI(){
+  if (timerP) clearInterval(timerP);
+  timerP = null;
+  $("#run").disabled = false;
+  $("#run").textContent = runLabel();
+  $("#pstop").classList.add("hidden");
+}
+
+async function pollPassive(){
+  const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
+  if (s) {
+    (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
+    lastLogCount = (s.logs || []).length;
+  }
+  const p = await fetch("/api/passive").then((x) => x.json()).catch(() => null);
+  if (!p) return;
+  if (p.state === "running") {
+    $("#hint").textContent = "已监听 " + Math.round(p.elapsed || 0) + " 秒…";
+    return;
+  }
+  stopPassiveUI();
+  if (p.state === "done") {
+    $("#hint").textContent = "监听完成，可继续分析或再抓一次。";
+    renderPassive(p.result);
+  } else if (p.state === "error") {
+    appendLog("监听失败：" + p.error, true);
+    $("#hint").textContent = "监听失败：" + p.error;
+  }
+}
+
+$("#pstop").onclick = async () => {
+  await fetch("/api/passive/stop", { method: "POST" }).catch(() => {});
+  $("#hint").textContent = "正在停止…";
+};
+
+function renderPassive(res){
+  if (!res || !res.ok) return;
+  const s = res.summary || {};
+  const st = (k, v) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`;
+  const dist = (s.by_proto || []).slice(0, 8).map((p) => {
+    const w = Math.max(3, Math.round(p.flows / Math.max(1, s.flows) * 100));
+    return '<div class="seg"><div class="sn">' + esc(p.proto) + '</div>'
+      + '<div class="bar"><i class="' + (p.unknown ? "warn" : "") + '" style="width:' + w + '%"></i></div>'
+      + '<div class="sv">' + p.flows + ' 条</div></div>';
+  }).join("");
+  const rows = (res.flows || []).map((f) => '<tr>'
+    + '<td class="mono">' + esc(f.src) + '</td>'
+    + '<td class="mono">' + esc(f.dst) + '</td>'
+    + '<td><span class="pill ' + (f.unknown ? "unk" : "") + '">' + esc(f.proto) + '</span>'
+      + '<span class="pev" title="' + esc(f.evidence) + '">' + esc(f.evidence) + '</span></td>'
+    + '<td class="num">' + f.packets + '</td>'
+    + '<td class="num">' + f.avg_size + ' B</td>'
+    + '<td class="num">' + fmtBytes(f.bytes) + '</td>'
+    + '<td><span class="pill st ' + (f.state === "RST 重置" || f.state === "SYN 无响应" ? "bad" : "") + '">'
+      + esc(f.state) + '</span></td>'
+    + '</tr>').join("");
+
+  $("#result-title").textContent = "被动监听结果";
+  $("#result").innerHTML =
+    '<div class="msg ' + (s.unknown ? "wait" : "ok") + '"><b>' + esc(res.headline) + '</b><br>'
+      + esc(res.advice) + '</div>'
+    + '<div class="stats" style="margin-top:12px">'
+      + st("会话", s.flows) + st("报文", s.packets) + st("抓到的流量", fmtBytes(s.bytes))
+      + st("未识别", s.unknown) + st("RST 重置", s.rst) + st("SYN 无响应", s.syn_no_reply)
+    + '</div>'
+    + '<div class="fsum"><span>引擎 <b>' + esc(res.engine)
+      + (res.engine_version ? " " + esc(res.engine_version) : "") + '</b></span>'
+      + '<span>网卡 <b>' + esc(res.interface) + '</b></span>'
+      + '<span>时长 <b>' + res.duration + 's</b></span>'
+      + '<span>过滤器 <b>' + esc(res.bpf || "全部流量") + '</b></span>'
+      + '<span>完成 <b>' + esc(res.at) + '</b></span></div>'
+    + (dist ? '<div class="sectitle">协议分布</div>' + dist : "")
+    + '<div class="sectitle">会话明细（按流量排序，共 ' + (s.flows || 0) + ' 条）</div>'
+    + '<div class="tscroll"><table class="ftab"><thead><tr>'
+      + '<th>源 IP:端口</th><th>目标 IP:端口</th><th>协议 / 识别依据</th>'
+      + '<th style="text-align:right">包数</th><th style="text-align:right">平均包长</th>'
+      + '<th style="text-align:right">总流量</th><th>连接状态</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + '<div class="hint" style="margin-top:10px">Unknown TCP / Unknown UDP 表示既没有首包特征、'
+      + '端口也不在常见画像里，不代表故障；可对可疑 IP 用上面的「链路体检」指定协议再探一次。</div>';
+}
+
+/* ---------- 结果渲染 ---------- */
+function sevClass(s){ return s === "严重" ? "严重" : s === "警告" ? "警告" : s === "提示" ? "提示" : "na"; }
+function ms(v){ return (v === null || v === undefined || v === "") ? "-" : (v >= 1000 ? (v/1000).toFixed(2) + "s" : Math.round(v) + "ms"); }
+function miniTable(head, body){
+  if(!body.length) return "";
+  return '<table><thead><tr>' + head.map(h=>'<th>'+esc(h)+'</th>').join('') + '</tr></thead><tbody>'
+    + body.map(r=>'<tr>' + r.map(c=>'<td>'+c+'</td>').join('') + '</tr>').join('') + '</tbody></table>';
+}
+
+function render(res) {
+  if (!res || !res.ok) return;
+  LAST_RESULT = res;
+  $("#result-title").textContent = "诊断结果";
+  const m = res.meta || {}, sum = res.summary || {}, vd = res.verdict || {};
+  const mt = res.metrics || vd.metrics || {};
+  const lv = vd.level || "正常";
+
+  /* ---- 结论卡：先回答「哪一层坏了」 ---- */
+  const chips = [
+    ["RTT 均值", ms(mt.rtt_samples ? mt.rtt_avg_ms : null)],
+    ["重传率", mt.retrans_rate != null ? mt.retrans_rate.toFixed(2) + "%" : "-"],
+    ["建连失败", mt.conn_fail != null ? mt.conn_fail + " 个" : "-"],
+    ["DNS 均值", ms(mt.dns_samples ? mt.dns_avg_ms : null)],
+    ["HTTP 均值", ms(mt.http_samples ? mt.http_avg_ms : null)],
+    ["吞吐", mt.throughput_mbps != null ? mt.throughput_mbps.toFixed(2) + " Mbps" : "-"],
+  ].map(([k, v]) => '<span class="chip">' + k + ' <b>' + esc(v) + '</b></span>').join("");
+
+  const layerbar = (vd.layers || []).map(x =>
+    '<div class="lay ' + x.status + '"><div class="ln">' + esc(x.id) + '</div>'
+    + '<div class="lt">' + esc(x.name) + '</div><div class="ld">' + esc(x.detail) + '</div></div>').join("");
+
+  const points = (vd.points || []).map((p, i) =>
+    '<div class="point"><div class="ph">'
+    + '<span class="sev ' + sevClass(p.severity) + '">' + esc(p.severity) + '</span>'
+    + '<span class="tag">' + esc(p.layer || "") + '</span>'
+    + '<span class="tag">' + esc(p.protocol || "") + '</span>'
+    + '<span class="pt">' + (i + 1) + '. ' + esc(p.title) + '</span></div>'
+    + '<div class="vl">' + esc(p.plain) + '</div>'
+    + '<div class="vact" style="margin-top:8px">处理：' + esc(p.action) + '</div>'
+    + '<div class="vproof">依据：' + esc(p.proof) + '</div></div>').join("");
+
+  const steps = (vd.next_steps || []).length
+    ? '<div class="sectitle">处置步骤（按顺序执行）</div><ol class="steps">'
+      + vd.next_steps.map(s => '<li>' + esc(s) + '</li>').join("") + '</ol>'
+    : "";
+
+  /* ---- 会话明细：一线最需要的「哪个对端、什么问题」 ---- */
+  const streams = m.streams_top || [];
+  const streamTable = streams.length
+    ? '<div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table>'
+      + '<thead><tr><th>Stream</th><th>客户端 → 服务端</th><th>协议</th><th>包 / 字节</th>'
+      + '<th>握手</th><th>RTT</th><th>重传</th><th>服务端等待</th><th>标记</th><th>帧</th></tr></thead><tbody>'
+      + streams.map(s => {
+          const bad = (s.flags || []).some(f => f.indexOf("无响应") >= 0);
+          return '<tr><td class="mono">#' + s.stream + '</td>'
+            + '<td class="mono">' + esc(s.client) + ':' + esc(s.sport) + ' → ' + esc(s.server) + ':' + esc(s.dport) + '</td>'
+            + '<td>' + esc(s.app || "-") + '</td>'
+            + '<td class="mono">' + s.packets + ' / ' + s.bytes + '</td>'
+            + '<td class="mono">' + (s.handshake_ms != null ? ms(s.handshake_ms) : "-") + '</td>'
+            + '<td class="mono">' + (s.rtt_avg ? ms(s.rtt_avg) : "-") + '</td>'
+            + '<td class="mono">' + (s.retrans || 0) + '</td>'
+            + '<td class="mono">' + (s.think_ms ? ms(s.think_ms) : "-") + '</td>'
+            + '<td class="' + (bad ? "rowbad" : "") + '">' + esc((s.flags || []).join("、") || "—") + '</td>'
+            + '<td class="mono">' + (s.frames || []).map(f => "#" + f).join(",") + '</td></tr>';
+        }).join("")
+      + '</tbody></table></div>'
+    : '<div class="hint">本次没有 TCP 会话。</div>';
+
+  const dnsRows = (m.dns_detail || []).map(d => [
+    esc(d.name), ms(d.ms),
+    '<span class="mono">' + esc({ "0": "成功", "2": "SERVFAIL", "3": "NXDOMAIN", "5": "REFUSED" }[d.rcode] || d.rcode) + '</span>',
+    esc(d.server || "-"), '<span class="mono">#' + d.frame + '</span>',
+  ]);
+  const httpRows = (m.http_slow || []).map(h => [
+    esc(h.method || "-"), esc(h.host), '<span class="mono">' + esc(h.uri || "/") + '</span>',
+    '<b style="color:' + (Number(h.code) >= 500 ? "#b91c1c" : Number(h.code) >= 400 ? "#b45309" : "#047857") + '">' + esc(h.code) + '</b>',
+    ms(h.ms), '<span class="mono">#' + esc(h.stream) + '</span>', '<span class="mono">#' + esc(h.frame) + '</span>',
+  ]);
+  const icmpRows = (m.icmp_detail || []).map(i => [
+    '<span class="mono">' + esc(i.type) + '/' + esc(i.code) + '</span>', esc(i.desc),
+    '<span class="mono">' + esc(i.src) + ' → ' + esc(i.dst) + '</span>', '<span class="mono">#' + esc(i.frame) + '</span>',
+  ]);
+
+  const appBlock = (dnsRows.length || httpRows.length || icmpRows.length)
+    ? '<details class="tech" open><summary>应用层明细（DNS / HTTP / ICMP）</summary><div class="tbody">'
+      + (dnsRows.length ? '<h5>DNS 解析（按耗时降序）</h5>' + miniTable(["域名", "耗时", "结果", "DNS 服务器", "帧"], dnsRows) : "")
+      + (httpRows.length ? '<h5>HTTP 请求（按耗时降序）</h5>' + miniTable(["方法", "Host", "URI", "状态码", "耗时", "Stream", "帧"], httpRows) : "")
+      + (icmpRows.length ? '<h5>ICMP 异常报文</h5>' + miniTable(["类型", "含义", "来源 → 目的", "帧"], icmpRows) : "")
+      + '</div></details>'
+    : "";
+
+  /* ---- 技术明细：专业数据一条不删，默认折叠 ---- */
+  const kv = [
+    ["报文总数", m.packets], ["TCP 报文", m.tcp_packets], ["TCP 会话", m.streams_total],
+    ["抓包时长", m.duration + "s"], ["SYN / SYN-ACK", (m.syn || 0) + " / " + (m.synack || 0)],
+    ["重传 / 乱序", (m.retrans || 0) + " / " + (m.ooo || 0)],
+    ["RST / 零窗口", (m.rst || 0) + " / " + (m.zero_win || 0)],
+    ["DNS 查询 / 响应", (m.dns_total || 0) + " / " + (m.dns_resp || 0)],
+    ["NXDOMAIN", m.nxdomain], ["HTTP 请求 / 5xx", (m.http_req || 0) + " / " + (m.http_err5 || 0)],
+    ["外部目标 IP", m.external_ips], ["抓包文件", m.pcap_name],
+  ].map(([k, v]) => '<div>' + esc(k) + '<b>' + esc(v == null ? "-" : v) + '</b></div>').join("");
+
+  const protoRows = (m.proto_mix || []).map(x => [esc(x.proto), x.count]);
+  const extRows = (m.ext_detail || []).map(e => [
+    esc(e.ip), e.packets, (e.ports || []).join(", ") || "-",
+    (e.risk_ports || []).length ? '<span style="color:#b91c1c">' + e.risk_ports.join(", ") + '</span>' : "-",
+  ]);
+
+  const techBlock = '<details class="tech"><summary>技术明细（采集概况 / 协议分布 / 外部目标）</summary><div class="tbody">'
+    + '<h5>采集概况</h5><div class="kv">' + kv + '</div>'
+    + (protoRows.length ? '<h5 style="margin-top:14px">协议分布</h5>' + miniTable(["协议", "报文数"], protoRows) : "")
+    + (extRows.length ? '<h5 style="margin-top:14px">外部目标与端口</h5>' + miniTable(["外部 IP", "报文数", "涉及端口", "高危端口"], extRows) : "")
+    + '</div></details>';
+
+  /* ---- 安全观察：明确标注为附带项 ---- */
+  const secRows = (res.rows || []).filter(r => r.layer === "安全观察" && r.severity !== "—");
+  const secBlock = secRows.length
+    ? '<details class="tech"><summary>安全观察 · ' + secRows.length + ' 项（附带项，非本次主线）</summary><div class="tbody">'
+      + '<h5>以下内容与网络故障无关，按需处理</h5>'
+      + miniTable(["类别", "发现", "程度", "证据", "建议"],
+          secRows.map(r => [esc(r.category), esc(r.finding),
+            '<span class="sev ' + sevClass(r.severity) + '">' + esc(r.severity) + '</span>',
+            '<span class="mono">' + esc(r.evidence) + '</span>', esc(r.advice)]))
+      + '</div></details>'
+    : "";
+
+  const html = `
+    <div class="vcard ${esc(lv)}">
+      <div class="vtop"><span class="vt">${esc(lv)}</span>
+        <span class="vlay">${esc(vd.layer || "—")}</span>
+        <h3>${esc(vd.headline || "")}</h3></div>
+      <p class="vplain">${esc(vd.plain || "")}</p>
+      <div class="chips">${chips}</div>
+    </div>
+
+    <div class="sectitle">分层定位（自下而上，哪一层红了就先查哪一层）</div>
+    <div class="layerbar">${layerbar}</div>
+
+    ${points ? '<div class="sectitle">问题详解</div>' + points : ""}
+    ${steps}
+
+    <div class="sectitle">会话明细（按问题严重度排序）</div>
+    ${streamTable}
+    ${appBlock}
+
+    <div class="toolbar" style="margin-top:14px">
+      <button class="btn ghost" id="ai-explain">AI 解读</button>
+      <button class="btn ghost" id="copy-json">复制 JSON 摘要</button>
+      <a class="btn ghost" style="text-decoration:none;text-align:center"
+         href="/api/report?path=${encodeURIComponent((res.report?.markdown || "").split(/[\\/]/).pop())}"
+         target="_blank">查看 Markdown 报告</a>
+      <button class="btn ghost" id="dl-json">下载报告 JSON</button>
+    </div>
+    ${techBlock}
+    ${secBlock}
+    <div id="ai-slot"></div>
+    <div class="json">${esc(JSON.stringify(sum))}</div>
+    <div class="hint">抓包文件：<span class="fname">${esc(m.pcap_name || "")}</span> ·
+      网卡：${esc(m.interface || "-")} · 过滤器：<span class="fname">${esc(m.bpf || "-")}</span> ·
+      生成时间：${esc(m.generated_at || "")}</div>
+  `;
+  $("#result").innerHTML = html;
+
+  $("#copy-json").onclick = () => {
+    navigator.clipboard.writeText(JSON.stringify(sum, null, 2));
+    $("#copy-json").textContent = "已复制 ✓";
+    setTimeout(() => ($("#copy-json").textContent = "复制 JSON 摘要"), 1500);
+  };
+  $("#dl-json").onclick = () => {
+    const blob = new Blob([JSON.stringify(res, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (m.pcap_name || "report").replace(/\.[^.]+$/, "") + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  $("#ai-explain").onclick = runAI;
+}
+
+/* ---------- 链路体检 ---------- */
+function probeSegments(res){
+  const segs = res.segments || [];
+  const max = Math.max.apply(null, segs.map(s => s.ms || 0).concat([1]));
+  return segs.map(s => {
+    const w = Math.max(3, Math.round((s.ms || 0) / max * 100));
+    const val = s.ms ? ms(s.ms) : (s.status === "ok" ? "已识别" : "-");
+    return '<div class="seg ' + (s.status === "ok" ? "" : s.status) + '">'
+      + '<div class="sn">' + esc(s.name) + '</div>'
+      + '<div class="bar"><i class="' + esc(s.status) + '" style="width:' + w + '%"></i></div>'
+      + '<div class="sv">' + val + '</div></div>';
+  }).join("");
+}
+
+function probeProtoChip(p){
+  if(!p) return "";
+  const cls = p.confident ? "" : "warn";
+  return '<div class="pchip ' + cls + '"><b>' + esc(p.name) + '</b>'
+    + '<span>' + esc(p.layer || "") + ' 层</span>'
+    + '<em>' + esc(p.basis || "") + '</em></div>';
+}
+
+async function runProbe(){
+  const target = $("#probe-target").value.trim();
+  if(!target){ $("#probe-target").focus(); return; }
+  const btn = $("#probe-run"), out = $("#probe-out");
+  btn.disabled = true; btn.textContent = "体检中…";
+  out.innerHTML = '<div class="msg wait" style="margin-top:12px">正在识别协议并分段探测，最长约 25 秒…</div>';
+  let r;
+  try{
+    r = await fetch("/api/probe", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        target,
+        port: $("#probe-port").value || null,
+        count: parseInt($("#probe-count").value || "4", 10),
+        proto: $("#probe-proto").value || null,
+      }),
+    }).then(x => x.json());
+  }catch(e){ r = { ok:false, error:String(e) }; }
+  btn.disabled = false; btn.textContent = "开始体检";
+
+  if(!r.ok){
+    out.innerHTML = '<div class="msg bad" style="margin-top:12px">' + esc(r.error || "体检失败") + '</div>';
+    return;
+  }
+  const color = r.level === "严重" ? "bad" : r.level === "警告" ? "warn" : "ok";
+  const detail = [];
+  if(r.proto && r.proto.banner_hex) detail.push("首包 0x" + r.proto.banner_hex.replace(/ /g,""));
+  if(r.proto && r.proto.banner_text) detail.push("Banner：" + r.proto.banner_text);
+  if(r.tls && r.tls.ok) detail.push("TLS " + (r.tls.version || "") + " · " + (r.tls.cipher || "")
+    + (r.tls.alpn ? " · " + r.tls.alpn : ""));
+  if(r.tls && r.tls.cert_error) detail.push("证书：不受本机信任（" + r.tls.cert_error.slice(0, 60) + "）");
+  if(r.smb && r.smb.ok) detail.push("SMB " + (r.smb.version || "") + " " + (r.smb.dialect || "")
+    + " · " + (r.smb.status_name || ""));
+  if(r.smb && !r.smb.ok && r.smb.error) detail.push("SMB：" + r.smb.error);
+  if(r.http && r.http.ok) detail.push("HTTP " + r.http.status
+    + (r.http.server ? " · " + r.http.server : "") + " · TTFB " + ms(r.http.ttfb_ms));
+
+  out.innerHTML = '<div class="msg ' + color + '" style="margin-top:12px">'
+    + '<b>' + esc(r.headline) + '</b><br>' + esc(r.advice) + '</div>'
+    + probeProtoChip(r.proto)
+    + '<div style="margin-top:10px">' + probeSegments(r) + '</div>'
+    + '<div class="hint" style="margin-top:8px">目标 <span class="mono">' + esc(r.target) + ':' + r.port
+    + '</span> → <span class="mono">' + esc(r.ip || "-") + '</span>　合计 ' + ms(r.total_ms)
+    + (r.tcp && r.tcp.ok ? '<br>建连 ' + r.tcp.tried + ' 次，失败 ' + r.tcp.fail + ' 次，抖动 '
+       + ms(r.tcp.stats.jitter) : "")
+    + (detail.length ? '<br>' + detail.map(esc).join('　·　') : "") + '</div>';
+}
+
+$("#probe-run").onclick = runProbe;
+$("#probe-target").addEventListener("keydown", (e) => { if(e.key === "Enter") runProbe(); });
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+/* ---------- AI 模型配置 ---------- */
+async function loadAI() {
+  try {
+    AI_CFG = await fetch("/api/ai").then((r) => r.json());
+  } catch (e) {
+    AI_CFG = null;
+  }
+  paintAI();
+  return AI_CFG;
+}
+
+function paintAI() {
+  const ready = !!(AI_CFG && AI_CFG.ready);
+  $("#ai-dot").classList.toggle("on", ready);
+  $("#ai-badge").textContent = ready ? AI_CFG.model : "未配置";
+  $("#ai-open").title = ready
+    ? `当前模型：${AI_CFG.model}（${AI_CFG.base_url}）· 点击可修改`
+    : "尚未配置 AI 模型，点击填写 API Key";
+}
+
+function fillAIForm() {
+  const cfg = AI_CFG;
+  if (!cfg) return;
+  const sel = $("#ai-provider");
+  sel.innerHTML = "";
+  (cfg.presets || []).forEach((p) => {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  });
+  sel.value = cfg.provider || "custom";
+  $("#ai-base").value = cfg.base_url || "";
+  $("#ai-model").value = cfg.model || "";
+  $("#ai-temp").value = cfg.temperature ?? 0.2;
+  $("#ai-timeout").value = cfg.timeout || 90;
+  $("#ai-key").value = "";
+  $("#ai-key").placeholder = cfg.has_key
+    ? `已保存 ${cfg.key_masked}（留空 = 不修改）`
+    : "粘贴 Key，例如 sk-...";
+  $("#ai-keystate").innerHTML = cfg.has_key
+    ? `已配置 <span class="tag">${esc(cfg.key_masked)}</span> · 更新于 ${esc(cfg.updated_at || "-")}`
+    : '<span class="tag">未配置 Key</span> · 只保存在本机 U 盘的 config\\ai-config.json';
+  $("#ai-msg").innerHTML = "";
+}
+
+function collectAI() {
+  const patch = {
+    provider: $("#ai-provider").value,
+    base_url: $("#ai-base").value.trim(),
+    model: $("#ai-model").value.trim(),
+    temperature: parseFloat($("#ai-temp").value || "0.2"),
+    timeout: parseInt($("#ai-timeout").value || "90", 10),
+  };
+  const k = $("#ai-key").value.trim();
+  if (k) patch.api_key = k;   // 留空表示沿用已保存的 Key
+  return patch;
+}
+
+function aiMsg(kind, text) {
+  $("#ai-msg").innerHTML = `<div class="msg ${kind}">${esc(text)}</div>`;
+}
+
+function openAI() {
+  loadAI().then(() => {
+    fillAIForm();
+    $("#ai-mask").classList.remove("hidden");
+    setTimeout(() => $("#ai-base").focus(), 30);
+  });
+}
+
+function closeAI() {
+  $("#ai-mask").classList.add("hidden");
+}
+
+$("#ai-open").onclick = openAI;
+$("#ai-close").onclick = closeAI;
+$("#ai-mask").addEventListener("mousedown", (e) => { if (e.target.id === "ai-mask") closeAI(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAI(); });
+
+$("#ai-provider").addEventListener("change", (e) => {
+  const p = (AI_CFG?.presets || []).find((x) => x.id === e.target.value);
+  if (!p) return;
+  $("#ai-base").value = p.base_url;
+  $("#ai-model").value = p.model;
+});
+
+$("#ai-test").onclick = async () => {
+  const b = $("#ai-test");
+  b.disabled = true;
+  aiMsg("wait", "正在请求模型，最多等待 30 秒…");
+  try {
+    const r = await fetch("/api/ai/test", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectAI()),
+    }).then((x) => x.json());
+    if (r.ok) aiMsg("ok", `连接成功 · ${r.model} · ${r.latency_ms}ms · 模型回复「${r.reply}」`);
+    else aiMsg("bad", "连接失败：" + (r.error || "未知错误"));
+  } catch (e) {
+    aiMsg("bad", "请求异常：" + e);
+  }
+  b.disabled = false;
+};
+
+$("#ai-save").onclick = async () => {
+  const b = $("#ai-save");
+  b.disabled = true;
+  aiMsg("wait", "正在保存…");
+  try {
+    const r = await fetch("/api/ai", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectAI()),
+    }).then((x) => x.json());
+    if (!r.ok) { aiMsg("bad", "保存失败：" + (r.error || "未知错误")); b.disabled = false; return; }
+    AI_CFG = r.config;
+    paintAI();
+    fillAIForm();
+    aiMsg("ok", "已保存并即时生效，正在验证连接…");
+    const t = await fetch("/api/ai/test", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }).then((x) => x.json());
+    if (t.ok) aiMsg("ok", `已启用 · ${t.model} · ${t.latency_ms}ms · 回复「${t.reply}」。现在可在诊断结果里点「AI 解读」。`);
+    else aiMsg("bad", "配置已保存，但连接测试失败：" + (t.error || "未知错误"));
+  } catch (e) {
+    aiMsg("bad", "请求异常：" + e);
+  }
+  b.disabled = false;
+};
+
+$("#ai-clear").onclick = async () => {
+  if (!confirm("确定清除已保存的 API Key？清除后 AI 解读将不可用。")) return;
+  const r = await fetch("/api/ai", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: "" }),
+  }).then((x) => x.json());
+  if (r.ok) { AI_CFG = r.config; paintAI(); fillAIForm(); aiMsg("ok", "已清除 Key。"); }
+  else aiMsg("bad", "清除失败：" + (r.error || "未知错误"));
+};
+
+/* ---------- AI 解读 ---------- */
+async function runAI() {
+  const btn = $("#ai-explain");
+  const slot = $("#ai-slot");
+  if (!AI_CFG || !AI_CFG.ready) {
+    slot.innerHTML = '<div class="aiout"><div class="msg bad">还没有配置 AI 模型。点右上角「AI 设置」填写 API Key 与模型，保存后即可解读。</div></div>';
+    openAI();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "AI 分析中…";
+  slot.innerHTML = '<div class="aiout"><div class="msg wait">模型正在分析本次抓包结果，通常 5～30 秒…</div></div>';
+  let r;
+  try {
+    r = await fetch("/api/ai/analyze", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ result: LAST_RESULT }),
+    }).then((x) => x.json());
+  } catch (e) {
+    r = { ok: false, error: String(e) };
+  }
+  if (!r.ok) {
+    slot.innerHTML = `<div class="aiout"><div class="msg bad">解读失败：${esc(r.error)}</div></div>`;
+    btn.disabled = false;
+    btn.textContent = "AI 解读";
+    return;
+  }
+  slot.innerHTML = `<div class="aiout">
+    <div class="aihead"><b>AI 解读</b><span>${esc(r.model)} · ${((r.latency_ms || 0) / 1000).toFixed(1)}s</span></div>
+    <div class="md">${mdLite(r.analysis)}</div>
+    <div class="toolbar" style="margin:12px 0 0">
+      <button class="btn ghost" id="ai-copy">复制解读</button>
+      ${r.markdown ? `<a class="btn ghost" style="text-decoration:none;text-align:center"
+        href="/api/report?path=${encodeURIComponent(r.markdown)}" target="_blank">查看已存 Markdown</a>` : ""}
+    </div>
+  </div>`;
+  const copy = $("#ai-copy");
+  if (copy) copy.onclick = () => {
+    navigator.clipboard.writeText(r.analysis);
+    copy.textContent = "已复制 ✓";
+    setTimeout(() => (copy.textContent = "复制解读"), 1500);
+  };
+  btn.disabled = false;
+  btn.textContent = "重新解读";
+}
+
+/* 极简 Markdown 渲染：标题 / 列表 / 加粗 / 行内代码 */
+function mdLite(src) {
+  const lines = esc(src).split("\n");
+  let out = "";
+  let inList = false;
+  const closeList = () => { if (inList) { out += "</ul>"; inList = false; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (/^#{1,6}\s+/.test(line)) {
+      closeList();
+      out += `<h4>${line.replace(/^#{1,6}\s+/, "")}</h4>`;
+    } else if (/^[-*•]\s+/.test(line)) {
+      if (!inList) { out += '<ul style="margin:6px 0 6px 20px;padding:0">'; inList = true; }
+      out += `<li>${line.replace(/^[-*•]\s+/, "")}</li>`;
+    } else if (!line) {
+      closeList();
+    } else {
+      closeList();
+      out += `<p>${line}</p>`;
+    }
+  }
+  closeList();
+  return out
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+boot().then(poll).then(loadAI);
+</script>
+</body>
+</html>

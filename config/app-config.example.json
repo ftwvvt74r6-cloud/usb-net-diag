@@ -1,0 +1,8 @@
+{
+  "server_port": 8787,
+  "auto_open_browser": true,
+  "default_duration": 30,
+  "max_duration": 180,
+  "threat_intel_key": "",
+  "notes": "threat_intel_key 填入 AbuseIPDB API Key 可启用威胁情报核对；留空则跳过该步骤。真实的 app-config.json 已被 .gitignore 忽略，请复制本文件为 app-config.json 后使用。"
+}

@@ -1,0 +1,11 @@
+{
+  "provider": "deepseek",
+  "base_url": "https://api.deepseek.com/v1",
+  "api_key": "",
+  "model": "deepseek-chat",
+  "temperature": 0.2,
+  "timeout": 90,
+  "verify_ssl": true,
+  "updated_at": "",
+  "_note": "api_key 留空即可；推荐在界面「AI 设置」里填，会自动写回 ai-config.json。真实的 ai-config.json 含密钥，已被 .gitignore 忽略。"
+}

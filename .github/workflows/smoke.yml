@@ -1,0 +1,43 @@
+name: smoke
+
+# 只做两件事：
+#   1. 所有 Python 源码能不能通过语法编译
+#   2. 启动器 start.bat 引用的入口文件还在不在（AI 重构最容易打断的地方）
+# 不做打包、不发版，架构随便改都不会因为 workflow 而卡住。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-contract:
+    name: 语法检查 + 启动器契约
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Python 语法编译
+        run: python -m compileall -q core mcp tests
+
+      - name: 启动器契约测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 密钥泄露扫描
+        shell: bash
+        run: |
+          set +e
+          git grep -nEI 'sk-[A-Za-z0-9]{16,}|r8_[A-Za-z0-9]{10,}|gh[opsu]_[A-Za-z0-9]{20,}' -- . ':!*.pcap'
+          if [ $? -eq 0 ]; then
+            echo "::error::提交内容里发现疑似 API Key，请删除后到对应平台吊销"
+            exit 1
+          fi
+          echo "未发现疑似密钥"

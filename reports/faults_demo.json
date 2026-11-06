@@ -1,0 +1,658 @@
+{
+  "summary": {
+    "target": "全网",
+    "pcap_file": "F:\\USB-Net-Diag\\captures\\faults_demo.pcap",
+    "critical_count": 3,
+    "warning_count": 5,
+    "retrans_rate": 5.56,
+    "dns_fail_rate": 28.6,
+    "rtt_avg_ms": 54.3,
+    "http_avg_ms": 1209.5,
+    "conn_fail": 1
+  },
+  "meta": {
+    "pcap_file": "F:\\USB-Net-Diag\\captures\\faults_demo.pcap",
+    "pcap_name": "faults_demo.pcap",
+    "packets": 54,
+    "bytes": 7727,
+    "duration": 16.0,
+    "tcp_packets": 36,
+    "tcp_data_packets": 11,
+    "retrans": 2,
+    "retrans_rate": 5.56,
+    "dup_ack": 0,
+    "ooo": 0,
+    "zero_win": 0,
+    "rst": 0,
+    "syn": 9,
+    "synack": 3,
+    "dns_total": 7,
+    "dns_resp": 7,
+    "nxdomain": 2,
+    "dns_avg_ms": 385.3,
+    "dns_fail_rate": 28.6,
+    "dns_timeouts": 0,
+    "http_req": 2,
+    "http_err5": 1,
+    "http_avg_ms": 1209.5,
+    "rtt_avg_ms": 54.3,
+    "rtt_max_ms": 200.0,
+    "rtt_jitter_ms": 61.9,
+    "hs_avg_ms": 63.3,
+    "conn_fail": 1,
+    "conn_refused": 0,
+    "icmp_unreach": 1,
+    "icmp_timeout": 0,
+    "arp_no_reply": 1,
+    "throughput_mbps": 0.0,
+    "streams_total": 4,
+    "external_ips": 2,
+    "http_hosts": [
+      [
+        "www.example.com",
+        1
+      ],
+      [
+        "order.internal",
+        1
+      ]
+    ],
+    "tls_sni": [],
+    "top_external": [
+      [
+        "93.184.216.40",
+        9
+      ],
+      [
+        "93.184.216.34",
+        5
+      ]
+    ],
+    "dns_top": [
+      [
+        "www.example.com",
+        1
+      ],
+      [
+        "slow1.example.com",
+        1
+      ],
+      [
+        "slow2.example.com",
+        1
+      ],
+      [
+        "slow3.example.com",
+        1
+      ],
+      [
+        "nx1.example.com.cn",
+        1
+      ],
+      [
+        "nx2.example.com.cn",
+        1
+      ],
+      [
+        "api.example.com",
+        1
+      ]
+    ],
+    "nx_top": [
+      [
+        "nx1.example.com.cn",
+        1
+      ],
+      [
+        "nx2.example.com.cn",
+        1
+      ]
+    ],
+    "dns_detail": [
+      {
+        "name": "slow1.example.com",
+        "rcode": "0",
+        "ms": 1200.0,
+        "frame": "7",
+        "server": "192.168.1.1"
+      },
+      {
+        "name": "slow2.example.com",
+        "rcode": "0",
+        "ms": 850.0,
+        "frame": "9",
+        "server": "192.168.1.1"
+      },
+      {
+        "name": "slow3.example.com",
+        "rcode": "0",
+        "ms": 600.0,
+        "frame": "11",
+        "server": "192.168.1.1"
+      },
+      {
+        "name": "www.example.com",
+        "rcode": "0",
+        "ms": 15.0,
+        "frame": "4",
+        "server": "192.168.1.1"
+      },
+      {
+        "name": "nx1.example.com.cn",
+        "rcode": "3",
+        "ms": 12.0,
+        "frame": "13",
+        "server": "192.168.1.1"
+      },
+      {
+        "name": "nx2.example.com.cn",
+        "rcode": "3",
+        "ms": 12.0,
+        "frame": "15",
+        "server": "192.168.1.1"
+      },
+      {
+        "name": "api.example.com",
+        "rcode": "0",
+        "ms": 8.0,
+        "frame": "17",
+        "server": "192.168.1.1"
+      }
+    ],
+    "dns_servers": [
+      [
+        "192.168.1.1",
+        7
+      ]
+    ],
+    "dns_rcode": [
+      [
+        "0",
+        5
+      ],
+      [
+        "3",
+        2
+      ]
+    ],
+    "http_codes": [
+      [
+        "200",
+        1
+      ],
+      [
+        "500",
+        1
+      ]
+    ],
+    "http_slow": [
+      {
+        "host": "order.internal",
+        "uri": "/api/orders",
+        "method": "GET",
+        "code": "500",
+        "ms": 2369.0,
+        "frame": "30",
+        "stream": "1"
+      },
+      {
+        "host": "www.example.com",
+        "uri": "/index.html",
+        "method": "GET",
+        "code": "200",
+        "ms": 50.0,
+        "frame": "21",
+        "stream": "0"
+      }
+    ],
+    "streams_top": [
+      {
+        "stream": "2",
+        "client": "192.168.1.100",
+        "sport": "51003",
+        "server": "10.0.0.5",
+        "dport": "8080",
+        "app": "HTTP",
+        "packets": 3,
+        "bytes": 162,
+        "duration": 6.0,
+        "handshake_ms": null,
+        "handshake_total_ms": null,
+        "rtt_avg": 0.0,
+        "rtt_max": 0.0,
+        "retrans": 0,
+        "syn_retrans": 2,
+        "dup_ack": 0,
+        "ooo": 0,
+        "zero_win": 0,
+        "think_ms": null,
+        "srv_bytes": 0,
+        "rst": 0,
+        "flags": [
+          "建连无响应"
+        ],
+        "frames": [
+          "35",
+          "36",
+          "53"
+        ],
+        "score": 110.0
+      },
+      {
+        "stream": "3",
+        "client": "192.168.1.100",
+        "sport": "51004",
+        "server": "93.184.216.40",
+        "dport": "443",
+        "app": "TLS",
+        "packets": 16,
+        "bytes": 4864,
+        "duration": 0.7,
+        "handshake_ms": 40.0,
+        "handshake_total_ms": 40.0,
+        "rtt_avg": 70.0,
+        "rtt_max": 200.0,
+        "retrans": 2,
+        "syn_retrans": 0,
+        "dup_ack": 0,
+        "ooo": 0,
+        "zero_win": 0,
+        "think_ms": 100.0,
+        "srv_bytes": 400,
+        "rst": 0,
+        "flags": [],
+        "frames": [
+          "37",
+          "38",
+          "39"
+        ],
+        "score": 4.0
+      },
+      {
+        "stream": "0",
+        "client": "192.168.1.100",
+        "sport": "51001",
+        "server": "93.184.216.34",
+        "dport": "80",
+        "app": "HTTP",
+        "packets": 9,
+        "bytes": 698,
+        "duration": 0.2,
+        "handshake_ms": 120.0,
+        "handshake_total_ms": 120.0,
+        "rtt_avg": 43.7,
+        "rtt_max": 120.0,
+        "retrans": 0,
+        "syn_retrans": 0,
+        "dup_ack": 0,
+        "ooo": 0,
+        "zero_win": 0,
+        "think_ms": 50.0,
+        "srv_bytes": 106,
+        "rst": 0,
+        "flags": [],
+        "frames": [
+          "18",
+          "19",
+          "20"
+        ],
+        "score": 0.0
+      },
+      {
+        "stream": "1",
+        "client": "192.168.1.100",
+        "sport": "51002",
+        "server": "203.0.113.20",
+        "dport": "80",
+        "app": "HTTP",
+        "packets": 8,
+        "bytes": 673,
+        "duration": 2.5,
+        "handshake_ms": 30.0,
+        "handshake_total_ms": 30.0,
+        "rtt_avg": 44.0,
+        "rtt_max": 100.0,
+        "retrans": 0,
+        "syn_retrans": 0,
+        "dup_ack": 0,
+        "ooo": 0,
+        "zero_win": 0,
+        "think_ms": 2369.0,
+        "srv_bytes": 136,
+        "rst": 0,
+        "flags": [],
+        "frames": [
+          "27",
+          "28",
+          "29"
+        ],
+        "score": 0.0
+      }
+    ],
+    "icmp_detail": [
+      {
+        "type": "3",
+        "code": "3",
+        "desc": "端口不可达",
+        "src": "192.168.1.1",
+        "dst": "192.168.1.100",
+        "frame": "54"
+      }
+    ],
+    "proto_mix": [
+      {
+        "proto": "TCP",
+        "count": 36
+      },
+      {
+        "proto": "UDP",
+        "count": 14
+      },
+      {
+        "proto": "ICMP",
+        "count": 1
+      }
+    ],
+    "retrans_streams": [
+      [
+        "3",
+        2
+      ]
+    ],
+    "ext_detail": [
+      {
+        "ip": "93.184.216.40",
+        "packets": 9,
+        "ports": [
+          "443"
+        ],
+        "risk_ports": []
+      },
+      {
+        "ip": "93.184.216.34",
+        "packets": 5,
+        "ports": [
+          "80"
+        ],
+        "risk_ports": []
+      }
+    ],
+    "cred_events": [],
+    "threat_intel": {},
+    "generated_at": "2026-11-06 17:01:17",
+    "tshark_path": "F:\\USB-Net-Diag\\tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe",
+    "interface": "-",
+    "bpf": "离线分析",
+    "capture_duration": 0
+  },
+  "metrics": {
+    "rtt_avg_ms": 54.3,
+    "rtt_p95_ms": 200.0,
+    "rtt_max_ms": 200.0,
+    "rtt_jitter_ms": 61.9,
+    "rtt_samples": 10,
+    "hs_samples": 3,
+    "dns_samples": 7,
+    "http_samples": 2,
+    "retrans_rate": 5.56,
+    "dup_ack_rate": 0.0,
+    "ooo_rate": 0.0,
+    "dns_avg_ms": 385.3,
+    "dns_p95_ms": 1200.0,
+    "dns_max_ms": 1200.0,
+    "dns_jitter_ms": 460.4,
+    "dns_fail_rate": 28.6,
+    "dns_timeouts": 0,
+    "http_avg_ms": 1209.5,
+    "http_p95_ms": 2369.0,
+    "http_max_ms": 2369.0,
+    "http_err5": 1,
+    "http_err4": 0,
+    "http_err5_rate": 50.0,
+    "hs_avg_ms": 63.3,
+    "hs_max_ms": 120.0,
+    "hs_jitter_ms": 40.3,
+    "conn_fail": 1,
+    "conn_refused": 0,
+    "icmp_unreach": 1,
+    "icmp_timeout": 0,
+    "arp_no_reply": 1,
+    "throughput_mbps": 0.0,
+    "tcp_throughput_mbps": 0.0,
+    "streams_total": 4
+  },
+  "rows": [
+    {
+      "layer": "L4 传输层",
+      "protocol": "TCP",
+      "category": "连接建立",
+      "finding": "1 个连接发出 SYN 后始终没有收到回应，TCP 三次握手未完成",
+      "severity": "严重",
+      "evidence": "10.0.0.5:8080（SYN 3 包）｜帧 #35,#36,#53",
+      "advice": "先用「链路体检」测目标端口是否可达；再查中间防火墙/安全组是否放行该端口、目标服务是否只监听 127.0.0.1、路由是否回指正确。"
+    },
+    {
+      "layer": "L4 传输层",
+      "protocol": "TCP",
+      "category": "传输质量",
+      "finding": "TCP 重传率 5.56%（2/36 个报文），乱序 0.00%，重复 ACK 0.00%",
+      "severity": "严重",
+      "evidence": "Stream 3 192.168.1.100→93.184.216.40:443 重传 2 次",
+      "advice": "重传=发出去的数据没收到确认，等于丢包。先看是否集中在少数对端（对端或中间链路问题），再看是否全网段都高（本机网卡/上行链路问题）。排查顺序：网线/光模块 → 交换机端口（CRC 错包、双工不匹配）→ 无线信号 → 运营商链路。"
+    },
+    {
+      "layer": "L3 网络层",
+      "protocol": "ICMP",
+      "category": "网络可达性",
+      "finding": "收到 1 条 ICMP 不可达、0 条超时",
+      "severity": "警告",
+      "evidence": "192.168.1.1→192.168.1.100 端口不可达(帧 #54)",
+      "advice": "「端口不可达」= 网络通但服务没起；「主机/网络不可达」= 路由或防火墙拦截；「需要分片」= 路径 MTU 小于报文长度，需在 VPN/隧道接口下调小 MTU（如 1400）或修正 MSS。"
+    },
+    {
+      "layer": "L7 应用层",
+      "protocol": "DNS",
+      "category": "域名解析",
+      "finding": "域名解析失败率 29%（NXDOMAIN 2/7）",
+      "severity": "警告",
+      "evidence": "nx1.example.com.cn 失败 1 次；nx2.example.com.cn 失败 1 次",
+      "advice": "先确认 DNS 服务器地址是否写错、域名是否拼错；若配置正常且集中在随机域名，再考虑 DNS 劫持或恶意程序。企业网内可对比 nslookup 与公共 DNS 的结果。"
+    },
+    {
+      "layer": "L7 应用层",
+      "protocol": "DNS",
+      "category": "域名解析",
+      "finding": "DNS 响应平均 385ms、最大 1200ms",
+      "severity": "警告",
+      "evidence": "7 个响应样本，DNS 服务器 192.168.1.1",
+      "advice": "打开网页前的第一段等待常来自这里。换更近的 DNS、开启本地缓存，或检查 DNS 服务器到目标域名的递归解析是否绕行。"
+    },
+    {
+      "layer": "L7 应用层",
+      "protocol": "HTTP",
+      "category": "应用响应",
+      "finding": "1 个请求返回 5xx（服务端错误，占 50%）",
+      "severity": "严重",
+      "evidence": "状态码分布：200×1、500×1",
+      "advice": "5xx 是服务端自己的问题，网络背锅不成立。按状态码查应用日志：500 看异常栈、502/504 看反向代理到后端的连通与超时、503 看是否过载/限流。"
+    },
+    {
+      "layer": "L7 应用层",
+      "protocol": "HTTP",
+      "category": "应用响应",
+      "finding": "HTTP 响应平均 1210ms、P95 2369ms、最慢 2369ms",
+      "severity": "警告",
+      "evidence": "order.internal/api/orders 2369ms → 500；www.example.com/index.html 50ms → 200",
+      "advice": "先区分是「服务端算得慢」还是「网络传得慢」：看同一次请求的 TCP 握手 RTT，若响应时间远大于 RTT，则是服务端处理慢（查慢查询、下游依赖、GC）。"
+    },
+    {
+      "layer": "L2 本地链路",
+      "protocol": "ARP",
+      "category": "本地可达性",
+      "finding": "1 个同网段地址的 ARP 请求没有得到应答",
+      "severity": "警告",
+      "evidence": "192.168.1.50",
+      "advice": "同网段内 ARP 不通，说明对方没开机、IP 冲突、或者接在了不同 VLAN。如果这就是网关地址，那么整台机器的外网访问都会断。"
+    },
+    {
+      "layer": "安全观察",
+      "protocol": "—",
+      "category": "安全观察",
+      "finding": "未发现可疑外联与明文认证（此项为附带观察，不是本工具主线）",
+      "severity": "—",
+      "evidence": "—",
+      "advice": "无需处理"
+    }
+  ],
+  "verdict": {
+    "level": "严重",
+    "headline": "1 个目标端口完全连不上：TCP 握手没有回应",
+    "plain": "表现是：访问这个地址时一直转圈，最后提示「无法连接」或连接超时。网络本身可能是通的，卡在「建立连接」这一步 —— 要么对方端口没有服务在听，要么中间的防火墙/安全组把包丢了。\n\n定位：1 个连接发出 SYN 后始终没有收到回应，TCP 三次握手未完成",
+    "impact": "业务不可用：相关服务连不上",
+    "layer": "L4 传输层｜TCP",
+    "layers": [
+      {
+        "id": "L2",
+        "name": "本地链路",
+        "protocol": "ARP / 以太网",
+        "status": "warn",
+        "severity": "警告",
+        "detail": "ARP 无应答 1 个地址"
+      },
+      {
+        "id": "L3",
+        "name": "网络层",
+        "protocol": "IP / ICMP",
+        "status": "warn",
+        "severity": "警告",
+        "detail": "RTT 均值 54ms，抖动 62ms，ICMP 异常 1 条"
+      },
+      {
+        "id": "L4",
+        "name": "传输层",
+        "protocol": "TCP / UDP",
+        "status": "bad",
+        "severity": "严重",
+        "detail": "重传率 5.56%，建连失败 1，握手均值 63ms"
+      },
+      {
+        "id": "L7",
+        "name": "应用层",
+        "protocol": "DNS / HTTP / TLS",
+        "status": "bad",
+        "severity": "严重",
+        "detail": "DNS 均值 385ms，HTTP 均值 1210ms"
+      }
+    ],
+    "points": [
+      {
+        "severity": "严重",
+        "layer": "L4 传输层",
+        "protocol": "TCP",
+        "category": "连接建立",
+        "title": "建立 TCP 连接这一步失败或偏慢",
+        "plain": "表现是：访问这个地址时一直转圈，最后提示「无法连接」或连接超时。网络本身可能是通的，卡在「建立连接」这一步 —— 要么对方端口没有服务在听，要么中间的防火墙/安全组把包丢了。具体：1 个连接发出 SYN 后始终没有收到回应，TCP 三次握手未完成",
+        "proof": "1 个连接发出 SYN 后始终没有收到回应，TCP 三次握手未完成｜证据：10.0.0.5:8080（SYN 3 包）｜帧 #35,#36,#53",
+        "action": "先用「链路体检」测目标端口是否可达；再查中间防火墙/安全组是否放行该端口、目标服务是否只监听 127.0.0.1、路由是否回指正确。"
+      },
+      {
+        "severity": "严重",
+        "layer": "L4 传输层",
+        "protocol": "TCP",
+        "category": "传输质量",
+        "title": "链路上在丢包，实际速度被拖慢",
+        "plain": "表现是：网页加载到一半卡住、远程桌面一顿一顿、文件传输速度上不去。数据发出去没被对方确认，只能重发；重发越多，有效速度越低。这是链路质量问题，不是应用问题。具体：TCP 重传率 5.56%（2/36 个报文），乱序 0.00%，重复 ACK 0.00%",
+        "proof": "TCP 重传率 5.56%（2/36 个报文），乱序 0.00%，重复 ACK 0.00%｜证据：Stream 3 192.168.1.100→93.184.216.40:443 重传 2 次",
+        "action": "重传=发出去的数据没收到确认，等于丢包。先看是否集中在少数对端（对端或中间链路问题），再看是否全网段都高（本机网卡/上行链路问题）。排查顺序：网线/光模块 → 交换机端口（CRC 错包、双工不匹配）→ 无线信号 → 运营商链路。"
+      },
+      {
+        "severity": "严重",
+        "layer": "L7 应用层",
+        "protocol": "HTTP",
+        "category": "应用响应",
+        "title": "服务端响应异常",
+        "plain": "表现是：网页能打开，但很慢，或者直接报 500/502。网络是通的，问题在服务端处理或应用本身。具体：1 个请求返回 5xx（服务端错误，占 50%）",
+        "proof": "1 个请求返回 5xx（服务端错误，占 50%）｜证据：状态码分布：200×1、500×1",
+        "action": "5xx 是服务端自己的问题，网络背锅不成立。按状态码查应用日志：500 看异常栈、502/504 看反向代理到后端的连通与超时、503 看是否过载/限流。"
+      },
+      {
+        "severity": "警告",
+        "layer": "L2 本地链路",
+        "protocol": "ARP",
+        "category": "本地可达性",
+        "title": "同网段内找不到对方（ARP 无应答）",
+        "plain": "表现是：同一个网段内的设备互相访问不了。二层地址解析都没有回应，说明对方没开机、IP 冲突，或者被划到了不同 VLAN。具体：1 个同网段地址的 ARP 请求没有得到应答",
+        "proof": "1 个同网段地址的 ARP 请求没有得到应答｜证据：192.168.1.50",
+        "action": "同网段内 ARP 不通，说明对方没开机、IP 冲突、或者接在了不同 VLAN。如果这就是网关地址，那么整台机器的外网访问都会断。"
+      },
+      {
+        "severity": "警告",
+        "layer": "L3 网络层",
+        "protocol": "ICMP",
+        "category": "网络可达性",
+        "title": "网络层不通，被设备拦截",
+        "plain": "表现是：某个网段或某台主机完全连不上。ICMP 的提示直接指明了原因：端口不可达=服务没起，主机不可达=路由/防火墙拦了，需要分片=路径 MTU 不匹配。具体：收到 1 条 ICMP 不可达、0 条超时",
+        "proof": "收到 1 条 ICMP 不可达、0 条超时｜证据：192.168.1.1→192.168.1.100 端口不可达(帧 #54)",
+        "action": "「端口不可达」= 网络通但服务没起；「主机/网络不可达」= 路由或防火墙拦截；「需要分片」= 路径 MTU 小于报文长度，需在 VPN/隧道接口下调小 MTU（如 1400）或修正 MSS。"
+      },
+      {
+        "severity": "警告",
+        "layer": "L7 应用层",
+        "protocol": "DNS",
+        "category": "域名解析",
+        "title": "域名解析（DNS）出了问题",
+        "plain": "表现是：网址打不开，但直接用 IP 能打开；或者每次打开网页前都要愣几秒。这一步是上网的第一跳，DNS 慢会让所有网站都显得慢。具体：域名解析失败率 29%（NXDOMAIN 2/7）",
+        "proof": "域名解析失败率 29%（NXDOMAIN 2/7）｜证据：nx1.example.com.cn 失败 1 次；nx2.example.com.cn 失败 1 次",
+        "action": "先确认 DNS 服务器地址是否写错、域名是否拼错；若配置正常且集中在随机域名，再考虑 DNS 劫持或恶意程序。企业网内可对比 nslookup 与公共 DNS 的结果。"
+      }
+    ],
+    "next_steps": [
+      "先用「链路体检」测目标端口是否可达；再查中间防火墙/安全组是否放行该端口、目标服务是否只监听 127.0.0.1、路由是否回指正确。",
+      "重传=发出去的数据没收到确认，等于丢包。先看是否集中在少数对端（对端或中间链路问题），再看是否全网段都高（本机网卡/上行链路问题）。排查顺序：网线/光模块 → 交换机端口（CRC 错包、双工不匹配）→ 无线信号 → 运营商链路。",
+      "5xx 是服务端自己的问题，网络背锅不成立。按状态码查应用日志：500 看异常栈、502/504 看反向代理到后端的连通与超时、503 看是否过载/限流。",
+      "同网段内 ARP 不通，说明对方没开机、IP 冲突、或者接在了不同 VLAN。如果这就是网关地址，那么整台机器的外网访问都会断。",
+      "「端口不可达」= 网络通但服务没起；「主机/网络不可达」= 路由或防火墙拦截；「需要分片」= 路径 MTU 小于报文长度，需在 VPN/隧道接口下调小 MTU（如 1400）或修正 MSS。",
+      "先确认 DNS 服务器地址是否写错、域名是否拼错；若配置正常且集中在随机域名，再考虑 DNS 劫持或恶意程序。企业网内可对比 nslookup 与公共 DNS 的结果。"
+    ],
+    "metrics": {
+      "rtt_avg_ms": 54.3,
+      "rtt_p95_ms": 200.0,
+      "rtt_max_ms": 200.0,
+      "rtt_jitter_ms": 61.9,
+      "rtt_samples": 10,
+      "hs_samples": 3,
+      "dns_samples": 7,
+      "http_samples": 2,
+      "retrans_rate": 5.56,
+      "dup_ack_rate": 0.0,
+      "ooo_rate": 0.0,
+      "dns_avg_ms": 385.3,
+      "dns_p95_ms": 1200.0,
+      "dns_max_ms": 1200.0,
+      "dns_jitter_ms": 460.4,
+      "dns_fail_rate": 28.6,
+      "dns_timeouts": 0,
+      "http_avg_ms": 1209.5,
+      "http_p95_ms": 2369.0,
+      "http_max_ms": 2369.0,
+      "http_err5": 1,
+      "http_err4": 0,
+      "http_err5_rate": 50.0,
+      "hs_avg_ms": 63.3,
+      "hs_max_ms": 120.0,
+      "hs_jitter_ms": 40.3,
+      "conn_fail": 1,
+      "conn_refused": 0,
+      "icmp_unreach": 1,
+      "icmp_timeout": 0,
+      "arp_no_reply": 1,
+      "throughput_mbps": 0.0,
+      "tcp_throughput_mbps": 0.0,
+      "streams_total": 4
+    },
+    "flags": {
+      "network_ok": false,
+      "security_ok": true
+    }
+  }
+}
