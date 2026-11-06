@@ -2315,8 +2315,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 46 | ✅ |
-| `save` | function | 269 | ✅ |
+| `render_markdown` | function | 47 | ✅ |
+| `save` | function | 273 | ✅ |
 
 ### `render_markdown`
 
@@ -2356,6 +2356,10 @@ Note:
     JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
     因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
     文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
+
+    落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，
+    换机器重跑会让 ``git diff reports/`` 一直脏（``analyze()`` 的原值不动，
+    只在落盘时替换）。
 ```
 
 ## `core/rules/__init__.py`
@@ -3066,8 +3070,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 132 | ✅ |
-| `build` | function | 299 | ✅ |
+| `compute_layers` | function | 151 | ✅ |
+| `build` | function | 386 | ✅ |
 
 ### `compute_layers`
 
@@ -3112,7 +3116,8 @@ Note:
 
     1. 抓空包（``packets == 0``）先返回「无法定位」而不是「各层正常」。
     2. 抓到了包但**没有任何可判定维度**时，``level`` 是「证据不足」而不是「正常」。
-       见 :func:`_sufficiency`：判的是「有没有样本可判」，不是「报文够不够多」。
+       见 :func:`_sufficiency`：判的是「每个维度有没有能支撑规则的样本」，
+       不是全局的报文总数。
 ```
 
 ## `mcp/wireshark-mcp/server.py`
