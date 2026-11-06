@@ -95,7 +95,16 @@ def touch() -> None:
 
 
 def request_quit(reason: str = "") -> None:
-    """请求服务退出：先让 HTTP 响应发出去，再关监听。"""
+    """请求服务退出：先让 HTTP 响应发出去，再关监听。
+
+    Args:
+        reason: 退出原因，会写进运行日志（便于事后回答「它怎么就没了」）。
+            留空表示人工触发。
+
+    Returns:
+        None: 不阻塞调用方。真正关监听在后台线程里做，延迟 0.3 秒 ——
+            否则 200 响应还没写回浏览器端口就被关掉，前端只会看到「连接被重置」。
+    """
     if QUIT.is_set():
         return
     if reason:
@@ -171,7 +180,18 @@ def _to_float(v, default: float, lo: float, hi: float) -> float:
 
 
 def doctor_cached(ttl: int = 60) -> dict:
-    """环境自检要跑 tshark -v / -D，较慢；缓存 60 秒，避免首屏卡顿。"""
+    """环境自检（带缓存）。
+
+    自检要跑 ``tshark -v`` / ``tshark -D``，一次 1~2 秒；首屏每次刷新都跑会让界面明显卡顿，
+    所以缓存 :data:`ttl` 秒。用户装完 Npcap 想立刻看到变化时，刷一次缓存过期即可。
+
+    Args:
+        ttl: 缓存有效期（秒）。传 0 表示强制重跑。
+
+    Returns:
+        dict: ``bootstrap.check(verbose=False)`` 的结果，键含
+            ``ok`` / ``tshark`` / ``npcap`` / ``admin`` / ``python`` / ``interfaces`` 等。
+    """
     now = time.time()
     if DOCTOR_CACHE["data"] and now - DOCTOR_CACHE["at"] < ttl:
         return DOCTOR_CACHE["data"]
@@ -193,6 +213,15 @@ def _probe_guarded(target: str, port, count, timeout, proto) -> dict:
 
 
 def log(msg: str) -> None:
+    """写一条运行日志：同时进内存环形缓冲与磁盘日志。
+
+    Args:
+        msg: 日志正文。不需要自己带时间戳，这里会补 ``HH:MM:SS``。
+
+    Returns:
+        None: 内存里最多保留 400 条（超出丢最早的 100 条），界面靠轮询取增量；
+            磁盘那份由 ``diagnose._log_to_file`` 追加，供事后排障。
+    """
     with LOCK:
         JOB["logs"].append({"t": time.strftime("%H:%M:%S"), "m": str(msg)})
         if len(JOB["logs"]) > 400:
@@ -224,6 +253,20 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
 
 
 def start_job(payload: dict) -> dict:
+    """启动一次诊断任务（实时抓包 / 全网扫描 / 离线分析）。
+
+    Args:
+        payload: 前端提交的原始 JSON，键：
+            ``mode``（``live`` / ``scan`` / ``offline``，非法值回落 ``live``）、
+            ``target``（目标 IP/网段/域名，最多 300 字符）、
+            ``duration``（秒，夹在 3 ~ ``max_duration`` 之间）、
+            ``interface``（网卡序号，可空=自动挑）、
+            ``pcap``（仅离线模式；**只接受 captures/ 下的文件名**，防任意文件读取）。
+
+    Returns:
+        dict: 成功 ``{"ok": True}``；已在跑或参数不合法时 ``{"ok": False, "error": "..."}``。
+            任务本身在后台线程执行，进度请轮询 ``/api/status``。
+    """
     cfg = diagnose.load_config()
     with LOCK:
         if JOB["state"] == "running":
@@ -257,7 +300,14 @@ def start_job(payload: dict) -> dict:
 
 # ---------------------------------------------------------------- 被动监听
 def engine_info() -> dict:
-    """缓存采集引擎信息（scapy 导入要 2s，不必每次探测）。"""
+    """当前可用的采集引擎（第一步就告诉用户「能不能用 Scapy」）。
+
+    导入 Scapy 约 2 秒，所以结果进程内缓存一次，不在每次探测时重来。
+
+    Returns:
+        dict: 键 ``engine``（``scapy`` / ``tshark``）、``scapy``（bool）、
+            可选 ``error``（Scapy 不可用时的原因，如 Npcap 缺失）。
+    """
     if not ENGINE_CACHE:
         try:
             ENGINE_CACHE.update(passive.engine_status())
@@ -288,6 +338,17 @@ def _passive_worker(interface: str | None, duration: int, target: str, engine: s
 
 
 def passive_start(payload: dict) -> dict:
+    """启动被动监听（只听不发）。
+
+    Args:
+        payload: 键 ``interface``（网卡序号，空=自动挑）、``duration``（秒，夹在 3~300）、
+            ``target``（只保留与该目标相关的会话，空=全部流量）、
+            ``engine``（``auto`` / ``scapy`` / ``tshark``，非法值回落 ``auto``）。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "engine": "<实际使用的引擎>"}``；
+            已有监听在跑时 ``{"ok": False, "error": "..."}``。
+    """
     with LOCK:
         if PJOB["state"] == "running":
             return {"ok": False, "error": "已有监听任务在执行，请先停止或等待结束"}
@@ -311,6 +372,13 @@ def passive_start(payload: dict) -> dict:
 
 
 def passive_status() -> dict:
+    """被动监听的当前状态与结果（界面每秒轮询它）。
+
+    Returns:
+        dict: 键 ``ok`` / ``state``（``idle``/``running``/``done``/``error``）/
+            ``result``（完成后是 ``passive.run()`` 的结果，运行中为 ``None``）/
+            ``error`` / ``engine`` / ``engine_info`` / ``elapsed``（已运行秒数）。
+    """
     with LOCK:
         snap = {k: PJOB[k] for k in ("state", "result", "error", "engine",
                                      "started_at", "finished_at")}
@@ -322,6 +390,14 @@ def passive_status() -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
+    """本地 Web UI 与 API 的请求处理器。
+
+    安全边界（都在这层落实，下游模块不需要重复做）：
+        * **Host 校验**：只接受 ``127.0.0.1`` / ``localhost``，挡住 DNS 重绑定；
+        * **Origin 校验**：写操作要求同源，挡住跨站请求伪造；
+        * **统一响应头**：CSP / ``X-Frame-Options`` / ``nosniff`` 见 :data:`SECURITY_HEADERS`；
+        * **异常兜底**：任何未捕获异常都转成 500 JSON，不把栈信息漏给浏览器。
+    """
     server_version = "USBNetDiag/1.1"
     protocol_version = "HTTP/1.1"
 
@@ -356,6 +432,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
     def log_message(self, fmt, *args):  # 静音，避免刷屏
+        """屏蔽默认访问日志（每个请求打一行会把控制台刷爆）。
+
+        Args:
+            fmt: ``BaseHTTPRequestHandler`` 传来的格式化模板，这里不用。
+            *args: 模板参数，同样不用。
+
+        Returns:
+            None: 有意为空实现。需要看请求时请用 ``log()`` 写业务日志。
+        """
         return
 
     def _read_json(self) -> dict:
@@ -446,6 +531,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- routes ----------
     def do_GET(self):
+        """处理 GET：静态页 + 只读 API。
+
+        Returns:
+            None: 响应直接写入 socket。失败路径固定三种 ——
+                403（来源不合法）、404（路径不存在）、500（内部错误，栈只进日志）。
+        """
         try:
             self._route_get()
         except BodyTooLarge as exc:
@@ -455,6 +546,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": f"服务内部错误：{type(exc).__name__}: {exc}"}, 500)
 
     def do_POST(self):
+        """处理 POST：启动任务、上传、配置、退出等有副作用的操作。
+
+        Returns:
+            None: 响应直接写入 socket。请求体超过 :data:`MAX_JSON_BODY` 时返回 413，
+                并且会把剩余字节读完再关 —— 否则客户端只会看到「连接被重置」。
+        """
         try:
             self._route_post()
         except BodyTooLarge as exc:
@@ -625,9 +722,22 @@ class DiagServer(ThreadingHTTPServer):
 
 def create_server(port: int = 8787, idle_exit_min: int = 0,
                   quiet: bool = False, register_pid: bool = True) -> tuple[DiagServer | None, str]:
-    """建监听。端口被占用时顺延最多 10 个，返回 (实例, 访问地址)。
+    """建监听。端口被占用时顺延最多 10 个。
 
-    register_pid=False 供自测使用：避免测试实例覆盖正在运行的应用的 PID 文件。
+    Args:
+        port: 起始端口（默认 8787）。
+        idle_exit_min: 无人访问多少分钟后自动退出；0 表示常驻不退出。
+        quiet: True 时不打印启动横幅（静默启动用）。
+        register_pid: 是否写 ``logs/netdiag.pid``。自测传 False，
+            避免测试实例覆盖正在运行的应用的 PID 文件。
+
+    Returns:
+        tuple[DiagServer | None, str]: ``(实例, 访问地址)``；10 个端口都被占用时返回 ``(None, "")``。
+
+    Note:
+        ``allow_reuse_address`` 必须是 **False**。Windows 上它等价于 ``SO_REUSEADDR``，
+        会让两个进程同时绑同一端口，旧进程继续响应新请求 —— 这正是曾经
+        「改了代码却没生效」的根因。
     """
     httpd = None
     url = ""
@@ -658,6 +768,11 @@ def create_server(port: int = 8787, idle_exit_min: int = 0,
 
 
 def main() -> int:
+    """命令行入口：读配置 → 建监听 → 开浏览器 → 阻塞服务。
+
+    Returns:
+        int: 进程退出码。0 正常退出；1 端口全被占用。
+    """
     cfg = diagnose.load_config()
     bootstrap.gen_configs()
     port = int(cfg.get("server_port", 8787))

@@ -671,9 +671,24 @@ def _identify(ip: str, port: int, host: str, path: str, timeout: float,
 
 def run(target: str, port: int | None = None, count: int = 4, timeout: float = 3.0,
         tls_override: bool | None = None, proto: str | None = None) -> dict:
-    """执行一次分段体检，返回各段耗时 + 协议 + 结论。
+    """执行一次分段体检，返回各段耗时、识别出的协议与结论。
 
-    proto 可手动指定 tls/http/smb/rdp/opaque，用于端口不常见的场景。
+    先 ``MSG_PEEK`` 读首包判断对端是什么协议（TLS/HTTP/SMB/SSH/RDP/MySQL/不透明 TCP），
+    再按该协议分段计时 —— 因此端口不常见的服务也能给出有意义的耗时拆解。
+
+    Args:
+        target: 目标，支持 ``host`` / ``host:port`` / ``http://host/path`` / ``[::1]:8080``。
+        port: 显式端口；省略时从 target 或 scheme 推断（HTTPS→443，HTTP→80）。
+        count: 探测次数（取中位数），影响 RTT 抖动估计。
+        timeout: 单段超时秒数。
+        tls_override: 强制走/不走 TLS；``None`` 表示按首包指纹自动判断。
+        proto: 手动指定协议（``tls``/``http``/``smb``/``rdp``/``opaque``），
+            用于端口不常见的场景；非法值忽略。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "target", "ip", "protocol", "segments": [...],
+            "total_ms", "level", "headline", "advice"}``；
+            失败 ``{"ok": False, "error": "..."}``（目标非法、DNS 失败、连接不通）。
     """
     deadline = time.monotonic() + 45
     try:

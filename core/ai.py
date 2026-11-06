@@ -68,6 +68,16 @@ class AIError(RuntimeError):
 
 # ---------------------------------------------------------------- 配置读写
 def load_config() -> dict:
+    """读取 AI 配置文件（``config/ai-config.json``）。
+
+    与 :func:`core.config.load_ai` 的区别：本模块**必须**能在只拷了 ``core/`` 的
+    极简环境里独立工作，所以自带默认值与容错，不依赖 ``core.config``。
+
+    Returns:
+        dict: 键 ``provider`` / ``base_url`` / ``api_key`` / ``model`` / ``temperature`` /
+            ``timeout`` / ``verify_ssl`` / ``updated_at``。
+            文件缺失或损坏时返回全默认值（``api_key`` 为空 = 未配置）。
+    """
     cfg = dict(DEFAULTS)
     if AI_CONFIG.is_file():
         try:
@@ -125,6 +135,15 @@ def _clean(patch: dict) -> dict:
 
 
 def save_config(patch: dict) -> dict:
+    """把前端提交的改动合并进配置文件并原子落盘。
+
+    Args:
+        patch: 只含需要改的键；会被 :func:`_clean` 过滤（非法字符、越界数值、
+            缺字段的 base_url 都会被丢弃，避免写坏配置）。
+
+    Returns:
+        dict: 写回后的完整配置（含新生成的 ``updated_at``）。
+    """
     cfg = load_config()
     cfg.update(_clean(patch or {}))
     cfg["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -134,6 +153,15 @@ def save_config(patch: dict) -> dict:
 
 
 def mask_key(key: str) -> str:
+    """把 API Key 打码后回显给前端（配置页要显示「已填」，但不能显示原文）。
+
+    Args:
+        key: 原始 Key。
+
+    Returns:
+        str: 长度 ≤ 8 时整串星号；更长时保留前 4 后 4，中间 6 个星号。
+            空串返回空串（前端据此显示「未配置」）。
+    """
     key = key or ""
     if not key:
         return ""
@@ -143,6 +171,15 @@ def mask_key(key: str) -> str:
 
 
 def public_config(cfg: dict | None = None) -> dict:
+    """给界面看的安全视图：**不含明文 Key**。
+
+    Args:
+        cfg: 已加载的配置；省略时现场读盘。
+
+    Returns:
+        dict: 除 ``api_key`` 外的全部字段，另加 ``has_key``（bool）与 ``key_hint``
+            （打码后的样子）。这样前端既能显示「已配置」，又拿不到可用凭据。
+    """
     cfg = dict(cfg or load_config())
     key = cfg.get("api_key") or ""
     return {
@@ -189,7 +226,22 @@ def _error_from_body(body: bytes, code: int) -> str:
 
 def chat(messages: list[dict], overrides: dict | None = None,
          timeout: int | None = None, max_tokens: int | None = None) -> str:
-    """调用 /chat/completions，返回纯文本回复。失败抛 AIError。"""
+    """调用 OpenAI 兼容的 ``/chat/completions``，返回纯文本回复。
+
+    Args:
+        messages: 标准对话数组，每项 ``{"role": "system"|"user"|"assistant", "content": str}``。
+        overrides: 临时覆盖配置（如前端「测试连接」时用未保存的新地址），
+            会过 :func:`_clean` 校验。
+        timeout: 覆盖配置里的超时秒数。
+        max_tokens: 覆盖最大输出长度；不传时用服务端默认。
+
+    Returns:
+        str: 模型回复的正文（已去首尾空白）。
+
+    Raises:
+        AIError: 未填 Key、地址非法、HTTP 非 2xx、返回体不是预期 JSON、
+            或拿不到 ``choices[0].message.content``。消息内容可直接展示给用户。
+    """
     cfg = load_config()
     if overrides:
         cfg.update(_clean(overrides))
@@ -260,7 +312,15 @@ def chat(messages: list[dict], overrides: dict | None = None,
 
 
 def test_connection(overrides: dict | None = None) -> dict:
-    """最小代价验证：发一句短提示，看能否拿到回复。"""
+    """最小代价验证配置是否可用（发一句短提示，看能否拿到回复）。
+
+    Args:
+        overrides: 待验证的配置；省略时用磁盘上已保存的那份。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "model": str, "latency_ms": int, "reply": str}``；
+            失败 ``{"ok": False, "error": str}``（``error`` 已含可操作提示）。
+    """
     started = time.time()
     try:
         reply = chat([{"role": "user", "content": "只回复两个字：可用"}],
@@ -316,7 +376,17 @@ SYSTEM_PROMPT = (
 
 
 def build_messages(result: dict, question: str = "") -> list[dict]:
-    """把 diagnose 的结果转成对话消息，保留全部原始观测值供模型引用。"""
+    """把诊断结果转成对话消息，**保留全部原始观测值**供模型引用。
+
+    Args:
+        result: ``diagnose.run_scan()`` 的结果字典（含 ``meta`` / ``rows`` /
+            ``metrics`` / ``verdict``）。
+        question: 用户追加的追问；为空时用内置的「按四段结构分析」提示。
+
+    Returns:
+        list[dict]: 两条消息 —— ``system``（角色约束：不许编造未观测到的事实）
+            与 ``user``（拼好的诊断摘要 + 追问）。
+    """
     result = result or {}
     meta = result.get("meta") or {}
     rows = result.get("rows") or []
@@ -409,6 +479,19 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
 
 
 def analyze_result(result: dict, question: str = "", overrides: dict | None = None) -> dict:
+    """让模型解读一次诊断结果。
+
+    Args:
+        result: 诊断结果字典。
+        question: 用户追问，可空。
+        overrides: 临时覆盖 AI 配置。
+
+    Returns:
+        dict: ``{"ok": True, "analysis": str, "model": str, "latency_ms": int}``。
+
+    Raises:
+        AIError: 上游调用失败（由调用方转成 HTTP 错误信封）。
+    """
     started = time.time()
     text = chat(build_messages(result, question), overrides=overrides)
     cfg = load_config()

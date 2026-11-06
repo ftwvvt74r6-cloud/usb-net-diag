@@ -41,6 +41,12 @@ DEFAULT_CONFIG = {
 
 
 def load_config() -> dict:
+    """读 ``config/app-config.json``（本模块自带的极简版本）。
+
+    Returns:
+        dict: 默认值叠加文件内容。与 :func:`core.config.load_app` 的区别是不做类型收敛 ——
+            这是历史入口，收敛逻辑在新模块里（两者结果在正常配置下一致）。
+    """
     cfg = dict(DEFAULT_CONFIG)
     try:
         if CONFIG.is_file():
@@ -64,12 +70,33 @@ def _log_to_file(line: str) -> None:
 
 
 def log(msg: str) -> None:
+    """默认日志回调：打印到控制台，同时追加到 ``logs/diag_YYYYMMDD.log``。
+
+    Args:
+        msg: 日志正文。
+
+    Returns:
+        None: 写盘失败只影响日志，不影响诊断。
+    """
     print(msg, flush=True)
     _log_to_file(msg)
 
 
 def bpf_for(target: str) -> str:
-    """把目标转成 BPF 过滤器。只接受 IP / CIDR / 域名，避免把任意表达式喂给抓包器。"""
+    """把目标转成 BPF 过滤器表达式。
+
+    只接受 IP / CIDR / 域名，其它字符一律拒绝 —— 过滤器最终会进 tshark 命令行，
+    放任任意表达式等于把抓包器变成可编程工具。
+
+    Args:
+        target: 用户输入的目标，如 ``192.168.1.10`` / ``10.0.0.0/24`` / ``example.com``。
+
+    Returns:
+        str: 可用的 BPF 串；空目标返回空串（表示抓全网）。
+
+    Raises:
+        ValueError: 目标含非法字符或超长（由调用方转成可展示的错误）。
+    """
     t = (target or "").strip()
     if not t:
         return ""
@@ -85,7 +112,24 @@ def bpf_for(target: str) -> str:
 
 def capture_live(target: str = "", duration: int = 30, interface: str | None = None,
                  logger=log) -> dict:
-    """实时抓包，返回 {ok, pcap, interface, bpf} 或 {ok:False, error, degraded}。"""
+    """实时抓包并落盘到 ``captures/``。
+
+    Args:
+        target: 抓包目标（转成 BPF）；空表示全网。
+        duration: 抓包秒数。
+        interface: 网卡序号或名称关键字；空则自动挑选（见 ``tshark.pick_interface``）。
+        logger: 日志回调。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
+            "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
+            "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
+            环境问题，前端据此提示改用离线分析。
+
+    Note:
+        返回前会等文件大小稳定（最多 3 秒）。tshark 进程退出 ≠ 数据已落盘，
+        在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
+    """
     ts = tshark.find_tshark()
     if not ts:
         return {
@@ -186,7 +230,20 @@ def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
 
 def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
              pcap: str | None = None, logger=log) -> dict:
-    """完整诊断：抓包(或复用) → 分析 → 落盘报告。"""
+    """完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告。
+
+    Args:
+        target: 目标 IP/网段/域名；空表示全网。
+        duration: 实时抓包秒数（仅无 ``pcap`` 时生效）。
+        interface: 网卡序号或名称关键字。
+        pcap: 离线分析的抓包路径。只给文件名时会到 ``captures/`` 下找
+            （兼容 U 盘盘符变化）。
+        logger: 日志回调。
+
+    Returns:
+        dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
+            与 ``capture``（本次采集参数）。失败时 ``{"ok": False, "error": "..."}``。
+    """
     cfg = load_config()
     cap: dict = {"ok": True, "bpf": "离线分析", "interface": "-", "duration": 0}
     if pcap:
@@ -234,6 +291,15 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
 
 
 def main(argv: list[str] | None = None) -> int:
+    """``diagnose.py`` 的命令行入口（不开界面也能出报告）。
+
+    Args:
+        argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
+            ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）。
+
+    Returns:
+        int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
+    """
     ap = argparse.ArgumentParser(description="USB-Net-Diag 网络诊断")
     ap.add_argument("--target", default="", help="目标 IP 或 CIDR 网段，留空表示全网扫描")
     ap.add_argument("--duration", type=int, default=load_config()["default_duration"])

@@ -60,7 +60,13 @@ FLAG_FIN, FLAG_SYN, FLAG_RST, FLAG_PSH, FLAG_ACK = 0x01, 0x02, 0x04, 0x08, 0x10
 
 # ---------------------------------------------------------------- 引擎信息
 def engine_status() -> dict:
-    """返回当前可用的采集引擎，供界面/自检显示。"""
+    """检测当前可用的采集引擎。
+
+    Returns:
+        dict: 键 ``engine``（``scapy`` 或 ``tshark``）/ ``scapy``（bool）/
+            ``scapy_version`` / ``pcap``（Scapy 是否绑定到 Npcap）/
+            ``error``（Scapy 不可用的原因，便于界面直接展示）。
+    """
     info = {"engine": "tshark", "scapy": False, "scapy_version": "", "error": ""}
     try:
         import scapy  # noqa: F401
@@ -390,7 +396,20 @@ def _capture_tshark(device: str, duration: int, bpf: str, max_packets: int,
 
 # ---------------------------------------------------------------- 会话聚合
 def build_flows(recs: list[dict]) -> tuple[list[dict], dict]:
-    """把逐包记录聚合成双向会话，并给出协议、状态、包长等信息。"""
+    """把逐包记录聚合成双向会话。
+
+    方向和客户端角色由 SYN 方向推断，不靠端口大小猜；同一对端口的双向流量
+    合并成一条会话，再分别统计上下行。
+
+    Args:
+        recs: 逐包记录列表，每项至少含 ``src_ip`` / ``sport`` / ``dst_ip`` /
+            ``dport`` / ``transport`` / ``size`` / ``ts``。
+
+    Returns:
+        tuple[list[dict], dict]: ``(flows, summary)``。``flows`` 每项含五元组、
+            包数/字节数、协议指纹、状态与应用线索；``summary`` 含会话总数、
+            协议分布、扇出（同一本地端口连多个对端）提示等。
+    """
     agg: dict[tuple, dict] = {}
     total_bytes = 0
     for r in recs:
@@ -509,7 +528,22 @@ def _count_by(flows: list[dict]) -> list[dict]:
 def run(interface: str | None = None, duration: int = 20, target: str = "",
         max_packets: int = 20000, engine: str = "auto", logger=None,
         should_stop=None) -> dict:
-    """监听网卡 duration 秒，返回会话表 + 汇总。engine = auto|scapy|tshark。"""
+    """监听网卡若干秒，返回会话表与汇总。**只听不发**，不构造任何报文。
+
+    Args:
+        interface: 网卡序号或名称关键字；空则自动挑选。
+        duration: 监听秒数，夹在 3~300。
+        target: 只保留与该目标相关的会话（IP/CIDR/域名）；空表示全部流量。
+        max_packets: 包数上限，夹在 200~200000，防止长时间监听把内存吃满。
+        engine: ``auto`` / ``scapy`` / ``tshark``；``auto`` 优先 Scapy，不可用时回落 tshark。
+        logger: 日志回调。
+        should_stop: 可选无参回调，返回 True 时提前结束（界面「停止」按钮用）。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "interface", "duration", "engine", "bpf",
+            "flows": [...], "summary": {...}}``；失败 ``{"ok": False, "error": "..."}``
+            （如没有可用网卡、目标过滤器非法）。
+    """
     duration = max(3, min(int(duration or 20), 300))
     max_packets = max(200, min(int(max_packets or 20000), 200000))
     target = (target or "").strip()

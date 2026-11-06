@@ -47,7 +47,16 @@ def redirect_output() -> None:
 
 
 def msgbox(text: str, title: str = "网络诊断工具", flags: int = MB_ICONINFO) -> None:
-    """没有控制台时唯一的提示手段。"""
+    """弹一个系统消息框 —— 静默启动（无控制台）时唯一的提示手段。
+
+    Args:
+        text: 正文。
+        title: 窗口标题。
+        flags: ``MB_*`` 图标/按钮组合，默认信息图标 + 确定。
+
+    Returns:
+        None: 弹窗失败（如非 Windows）静默忽略，绝不因此让启动流程崩掉。
+    """
     try:
         ctypes.windll.user32.MessageBoxW(None, text, title, flags)
     except Exception:  # noqa: BLE001
@@ -55,6 +64,11 @@ def msgbox(text: str, title: str = "网络诊断工具", flags: int = MB_ICONINF
 
 
 def is_admin() -> bool:
+    """当前进程是否管理员（实时抓包的前提）。
+
+    Returns:
+        bool: 查不到时返回 ``False``，让上层按「无提权」降级处理。
+    """
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:  # noqa: BLE001
@@ -62,7 +76,13 @@ def is_admin() -> bool:
 
 
 def relaunch_as_admin() -> bool:
-    """UAC 提权重启自己；用户点「否」返回 False。"""
+    """用 UAC 提权重启自己。
+
+    Returns:
+        bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
+            False 表示用户点了「否」或调用失败 —— 此时**不要**退出，
+            以普通权限继续跑，实时抓包不可用但离线分析照常。
+    """
     try:
         exe = sys.executable
         # pythonw 提权后仍无控制台；__file__ 用绝对路径，工作目录设为 ROOT
@@ -74,7 +94,14 @@ def relaunch_as_admin() -> bool:
 
 
 def find_running() -> str:
-    """探测本机是否已有实例，返回它的界面地址；没有则空串。"""
+    """探测本机是否已有实例在跑（单实例保护）。
+
+    逐个试 8787~8796 的 ``/api/ping``，并核对 ``app`` 字段是本程序，
+    避免把别的服务误认成自己。
+
+    Returns:
+        str: 已运行实例的界面地址（如 ``http://127.0.0.1:8787/``）；没有则空串。
+    """
     try:
         import server  # noqa: PLC0415
 
@@ -94,6 +121,14 @@ def find_running() -> str:
 
 # --------------------------------------------------------------------- 主流程
 def main() -> int:
+    """静默启动主流程。
+
+    顺序：重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
+
+    Returns:
+        int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」和
+            「已拉起提权进程」两种提前返回）；1 = 端口全被占用。
+    """
     redirect_output()
     as_console = "--console" in sys.argv
     elevated = "--elevated" in sys.argv

@@ -159,6 +159,20 @@ def _flows_markdown(res: dict) -> str:
 
 
 def call_tool(name: str, args: dict) -> dict:
+    """执行一个 MCP 工具调用。
+
+    Args:
+        name: 工具名，见本文件 ``TOOLS`` 定义
+            （``list_interfaces`` / ``doctor`` / ``capture_live_packets`` /
+            ``analyze_pcap`` / ``probe_target`` / ``capture_passive`` 等）。
+        args: 工具参数；数值类参数统一过 ``_num()`` 夹紧，
+            防止模型给个 ``99999`` 把一次调用拖成几分钟。
+
+    Returns:
+        dict: MCP 结果对象 ``{"content": [{"type": "text", "text": ...}], "isError": bool}``。
+            未知工具或参数错误时返回 ``isError=True`` 的文本，不抛异常 ——
+            抛异常会让整轮工具调用失败，模型拿不到任何可读信息。
+    """
     if name == "list_interfaces":
         items = tshark.list_interfaces()
         lines = [f"{i['index']}. {i['name']}" for i in items] or ["未枚举到网卡"]
@@ -218,6 +232,15 @@ def call_tool(name: str, args: dict) -> dict:
 
 
 def handle(msg: dict) -> dict | None:
+    """分发一条 JSON-RPC 消息。
+
+    Args:
+        msg: 已解析的请求对象，需含 ``method``；``id`` 存在时表示要回包。
+
+    Returns:
+        dict | None: 要回给客户端的 JSON-RPC 响应；
+            对通知类消息（``notifications/initialized`` 等）返回 ``None``，表示不回包。
+    """
     method = msg.get("method", "")
     mid = msg.get("id")
 
@@ -250,6 +273,13 @@ def handle(msg: dict) -> dict | None:
 
 
 def main() -> int:
+    """stdio 主循环：按行读 JSON-RPC → 分发 → 按行写回。
+
+    为什么是一行一条：MCP 的 stdio 传输用换行分隔消息，不能用「读满缓冲区」的方式。
+
+    Returns:
+        int: 进程退出码。0 = stdin 关闭（客户端主动断开），属正常结束。
+    """
     for line in sys.stdin.buffer:
         line = line.strip()
         if not line:

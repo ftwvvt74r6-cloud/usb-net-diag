@@ -81,7 +81,17 @@ def _sort_key(r: dict) -> tuple:
 
 
 def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]:
-    """每层一个状态块，UI 用横条展示「哪一层红了」。"""
+    """为每一层算一个状态块（UI 用横条展示「哪一层红了」）。
+
+    Args:
+        rows: 旧 ``rows[]``；安全观察行**不参与**主判定。
+        meta: 采集元信息；``L4`` 在没有 TCP 报文时标为 ``na``（没样本，别报正常）。
+        metrics: 指标表，供状态块填明细。
+
+    Returns:
+        list[dict]: 每项 ``{"id", "name", "protocol", "status"（ok/warn/bad/na）,
+            "severity", "detail", "count"}``。
+    """
     out: list[dict] = []
     for d in LAYERS:
         mine = [r for r in rows if r.get("layer", "").startswith(d["id"])]
@@ -166,7 +176,21 @@ def _headline(main: dict, meta: dict, m: dict) -> str:
 
 
 def build(result: dict) -> dict:
-    """返回 {level, headline, plain, layer, layers[], points[], next_steps[], metrics, flags}"""
+    """生成最终判定：一句话结论 + 分层状态 + 处置建议。
+
+    Args:
+        result: 诊断结果字典（``meta`` / ``rows`` / ``metrics`` / ``summary``）。
+
+    Returns:
+        dict: 键 ``level``（严重/警告/提示/正常）/ ``headline``（一句话结论）/
+            ``plain``（白话解释）/ ``layer``（问题所在层）/ ``layers``（四层状态）/
+            ``points``（问题明细）/ ``next_steps``（按优先级排序的处置建议）/
+            ``metrics`` / ``flags``。
+
+    Note:
+        抓空包（``packets == 0``）时会先返回「无法定位」而不是「各层正常」，
+        这是避免「没抓到 = 没问题」这类误报的第一道闸门。
+    """
     result = result or {}
     meta = result.get("meta") or {}
     rows = result.get("rows") or []

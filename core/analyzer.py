@@ -20,7 +20,15 @@ import math
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from tshark import find_tshark, iter_lines
+try:                                              # 场景一：脚本方式（core/ 在 sys.path）
+    from tshark import find_tshark, iter_lines
+except ModuleNotFoundError:                        # 场景二：包方式（from core.analyzer import ...）
+    import sys as _sys
+
+    _CORE_DIR = str(Path(__file__).resolve().parent)
+    if _CORE_DIR not in _sys.path:
+        _sys.path.insert(0, _CORE_DIR)
+    from tshark import find_tshark, iter_lines
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -168,7 +176,21 @@ def _guess_app(dport: str, sport: str) -> str:
 
 
 def collect(pcap: Path, log=None) -> tuple[dict, str]:
-    """流式解析 pcap，返回 (stats, error)。"""
+    """流式解析 pcap，边读边聚合。
+
+    一次 tshark 调用取全所需字段，避免对同一文件扫多遍；输出按行消费，
+    几十万行的 pcap 也不会把内存吃满。
+
+    Args:
+        pcap: 抓包文件路径。
+        log: 可选日志回调 ``log(str)``，用于输出进度与 tshark 告警首行。
+
+    Returns:
+        tuple[dict, str]: ``(stats, error)``。``stats`` 是全部计数器与时间戳的聚合字典；
+            ``error`` 为空串表示成功。**非空时必须整体放弃结论** ——
+            tshark 退出码非 0（典型：文件不完整 rc=14、被超时杀掉 rc<0）意味着
+            只读到一部分报文，此时算出来的「严重 0 条」是假象（见 docs/t00-findings.md）。
+    """
     tshark = find_tshark()
     if not tshark:
         return {}, "未找到 tshark，请检查 tools/WiresharkPortable 是否完整"
@@ -571,6 +593,18 @@ def _metrics(st: dict, streams: list[dict]) -> dict:
 # ---------------------------------------------------------------- 分层发现
 
 def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
+    """把统计聚合翻译成「按层归类的发现」，供 UI 与报告消费。
+
+    Args:
+        st: :func:`collect` 的统计字典（各类计数器）。
+        m: :func:`_metrics` 算出的比率与时延指标（``retrans_rate`` / ``rtt_avg_ms`` 等）。
+        streams: :func:`_stream_rows` 聚合出的会话列表。
+
+    Returns:
+        list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``，
+            全部是**中文文案**（历史包袱，PR2 起改由规则引擎产出 ``findings_v2``）。
+            没有异常时仍会有一条「安全观察」行，表示「检查过，没发现」。
+    """
     rows: list[dict] = []
     takes = st["duration"] or 0
 
@@ -840,7 +874,133 @@ def _cred_events(st: dict) -> list[dict]:
     return out
 
 
+def _ensure_root_on_path() -> None:
+    """把项目根目录挂到 ``sys.path``，让 ``core.*`` 形式的包内导入可用。
+
+    背景：本模块历史上是**扁平模块**（``import analyzer``，靠 ``diagnose`` 把
+    ``core/`` 塞进 ``sys.path``）。新增的 ``core/rules/legacy_map.py`` 用的是
+    包相对导入（``from ..contracts import``），必须以项目根为锚点才能加载。
+
+    Returns:
+        None。副作用是修改进程级 ``sys.path``，只在缺失时插入，重复调用无副作用。
+    """
+    import sys
+
+    root = str(ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
+def _build_findings_v2(rows: list, log=None) -> list[dict]:
+    """把旧 ``rows[]`` 映射成结构化 ``findings_v2``（T03 迁移桥）。
+
+    **只读 rows，不修改它**：旧的 UI / Markdown / AI 出口继续消费 ``rows``，
+    这里只是额外产出一份带机器码的结论，供下游逐步切换。
+
+    Args:
+        rows: :func:`build_findings` 产出的旧结构中文字典列表。
+        log: 可选日志回调 ``log(str)``；用于提示「有行没被映射」这类迁移期问题。
+
+    Returns:
+        可直接 JSON 序列化的字典列表（``Finding.to_dict()`` 的结果）。
+        映射失败时返回空列表 —— **绝不抛异常**，否则会让整次诊断失败。
+
+    Note:
+        返回的是 dict 而非 ``Finding`` 对象，因为结果会被 ``server.py``
+        直接 ``json.dumps`` 下发，dataclass 无法序列化。
+    """
+    try:
+        _ensure_root_on_path()
+        from core.rules.legacy_map import coverage, map_rows
+
+        findings = map_rows(rows)
+        unmatched = coverage(rows)["unmatched"]
+        if unmatched and log:
+            log(f"[提示] {unmatched} 条发现未命中迁移映射表（findings_v2 会少这几条）")
+        return [f.to_dict() for f in findings]
+    except Exception as exc:                       # noqa: BLE001  迁移期兜底，不影响主流程
+        if log:
+            log(f"[提示] findings_v2 生成失败，已跳过（不影响原有结论）：{exc}")
+        return []
+
+
+_TSHARK_VERSION: dict[str, str | None] = {"v": None}
+
+
+def _tshark_version() -> str:
+    """取 tshark 版本串，进程内缓存（``--version`` 约 200~400ms，不宜每次诊断都跑）。
+
+    Returns:
+        形如 ``"TShark (Wireshark) 4.7.4 ..."`` 的首行；取不到时返回空串。
+    """
+    if _TSHARK_VERSION["v"] is not None:
+        return _TSHARK_VERSION["v"]
+    value = ""
+    try:
+        from tshark import run
+
+        exe = find_tshark()
+        if exe:
+            rc, out, err = run([str(exe), "--version"], timeout=20)
+            text = (out or err or "").strip()
+            if text:
+                value = text.splitlines()[0].strip()[:120]
+    except Exception:                              # noqa: BLE001  版本缺失不该影响诊断
+        value = ""
+    _TSHARK_VERSION["v"] = value
+    return value
+
+
+def _build_provenance() -> dict:
+    """组装可复现信息（评审 4.1 第 5 条）：同样的输入为什么结论不同，靠它回答。
+
+    Returns:
+        可直接 JSON 序列化的字典，键同 :class:`core.contracts.Provenance` 字段。
+        任一来源取不到时该键为空串，不抛异常。
+
+    Note:
+        ``config_sha256`` 只覆盖 app 配置与阈值，**不含 AI Key**（见 core.config）。
+    """
+    info = {
+        "app_version": "",
+        "schema_version": "",
+        "tshark_version": _tshark_version(),
+        "rules_version": "legacy",
+        "config_sha256": "",
+        "prompt_version": "",
+        "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        _ensure_root_on_path()
+        from core import contracts
+        from core.config import config_sha256
+
+        info["schema_version"] = contracts.SCHEMA_VERSION
+        info["config_sha256"] = config_sha256()
+    except Exception:                              # noqa: BLE001
+        pass
+    try:
+        info["app_version"] = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    return info
+
+
 def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> dict:
+    """离线分析一个 pcap，产出完整结果字典。
+
+    Args:
+        pcap: 抓包文件路径（``Path`` 或字符串）。
+        target: 本次诊断目标的展示用名字（IP/域名），可空。
+        ti_key: 威胁情报 API Key；为空则跳过可疑外联核对。
+        log: 可选日志回调 ``log(str)``。
+
+    Returns:
+        dict: 成功时 ``ok=True``，键含 ``meta``（采集与明细）、``metrics``（扁平指标）、
+            ``rows``（中文发现列表）、``summary``（计数摘要），以及 T03 新增的
+            ``findings_v2``（带机器码的结构化结论）与 ``provenance``（可复现信息）。
+            文件不存在或解析失败时返回 ``{"ok": False, "error": "..."}``。
+    """
     pcap = Path(pcap)
     if not pcap.is_file():
         return {"ok": False, "error": f"抓包文件不存在: {pcap}"}
@@ -868,7 +1028,7 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
         "conn_fail": m["conn_fail"],
     }
 
-    return {
+    result = {
         "ok": True,
         "meta": {
             "pcap_file": str(pcap),
@@ -940,6 +1100,11 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
         "rows": rows,
         "summary": summary,
     }
+
+    # ---- T03：增量产出结构化结论。旧的 rows[] / meta / metrics 一个字都不动 ----
+    result["findings_v2"] = _build_findings_v2(rows, log=log)
+    result["provenance"] = _build_provenance()
+    return result
 
 
 PROTO_NAMES = {"6": "TCP", "17": "UDP", "1": "ICMP", "2": "IGMP", "47": "GRE", "50": "ESP", "51": "AH"}

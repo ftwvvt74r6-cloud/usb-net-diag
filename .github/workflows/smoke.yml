@@ -41,3 +41,28 @@ jobs:
             exit 1
           fi
           echo "未发现疑似密钥"
+
+  api-docs:
+    # 纯标准库，与平台无关，跑在 ubuntu 上最便宜。
+    # 两道闸门：覆盖率达标 + 提交的文档与源码一致（防止手改自动生成的文件）。
+    name: 接口注释覆盖率
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 注释覆盖率 ≥ 95%
+        run: python scripts/gen_api_doc.py --check 0.95
+
+      - name: 文档与源码同步（禁止手改 api-reference / docstring-gaps）
+        run: |
+          python scripts/gen_api_doc.py
+          if ! git diff --exit-code docs/api-reference.md docs/docstring-gaps.md; then
+            echo "::error::docs/api-reference.md 或 docs/docstring-gaps.md 与源码不一致：请本地重跑 scripts/gen_api_doc.py 并提交结果"
+            exit 1
+          fi
+          echo "文档与源码一致"
+

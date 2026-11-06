@@ -22,12 +22,28 @@ CONFIG_DIR = ROOT / "config"
 
 
 def write_json(path: Path, data: dict) -> None:
+    """写 JSON 文件（自动建父目录，统一缩进与不转义中文）。
+
+    Args:
+        path: 目标文件。
+        data: 待写入的对象。
+
+    Returns:
+        None: 写失败会让异常抛出去 —— 配置文件写不出来是硬故障，应当尽早暴露。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def gen_configs() -> dict:
-    """用当前盘符重写 MCP 与 Harness 配置（U 盘盘符变化后自动适配）。"""
+    """用当前盘符重写 MCP 与 Harness 配置。
+
+    U 盘盘符从 F: 变成 G: 后，MCP 客户端里写死的绝对路径全部失效；
+    每次启动重算一遍，是「插到任何机器都能用」的前提。
+
+    Returns:
+        dict: 写出的文件路径，键 ``mcpServersFile`` / ``harnessFile`` 等，供日志展示。
+    """
     python = PYTHON_EXE if PYTHON_EXE.is_file() else Path(sys.executable)
     tshark_path = tshark.find_tshark() or TSHARK_EXE
 
@@ -69,6 +85,16 @@ def _scapy_version() -> str:
 
 
 def check(verbose: bool = True) -> dict:
+    """环境自检：tshark、Npcap、管理员权限、网卡、Scapy 是否就绪。
+
+    Args:
+        verbose: True 时向标准输出打印人类可读的检查过程。
+
+    Returns:
+        dict: 键含 ``ok``（总体是否可用）、``root`` / ``python`` / ``python_exe`` /
+            ``tshark`` / ``tshark_version`` / ``npcap`` / ``admin`` /
+            ``interfaces``（网卡列表）/ ``scapy``。界面顶部的环境徽章就吃这份数据。
+    """
     ts = tshark.find_tshark()
     npcap = tshark.npcap_installed()
     admin = tshark.is_admin()
@@ -105,6 +131,15 @@ def check(verbose: bool = True) -> dict:
 
 
 def main(argv=None) -> int:
+    """``bootstrap.py`` 的命令行入口（供 ``doctor.bat`` 与自测调用）。
+
+    Args:
+        argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--check``（只自检）、
+            ``--npcap``（只查 Npcap，就绪返回 0）、``--quiet``（少打印）。
+
+    Returns:
+        int: 0 正常；``--npcap`` 模式下 Npcap 未装返回 1。
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="仅自检")
     ap.add_argument("--npcap", action="store_true", help="仅检查 Npcap：就绪返回 0，否则返回 1")
