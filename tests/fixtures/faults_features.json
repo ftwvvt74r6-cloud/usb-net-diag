@@ -1,0 +1,410 @@
+{
+  "app": {},
+  "arp": {},
+  "capture": {
+    "bpf": "",
+    "bytes": 7727,
+    "duration_s": 16.0,
+    "first_ts": 1700000000.0,
+    "interface": "",
+    "last_ts": 1700000016.0,
+    "mode": "offline",
+    "packets": 54,
+    "pcap_file": "faults_demo.pcap",
+    "pcap_name": "faults_demo.pcap"
+  },
+  "derived": {},
+  "dns": {},
+  "generated_at": "2026-11-06T15:20:07+00:00",
+  "http": {},
+  "icmp": {},
+  "missing": [
+    "tls.sni"
+  ],
+  "schema_version": "2.1",
+  "source_pcap": "faults_demo.pcap",
+  "tcp": {
+    "bytes": 6397,
+    "conn_fail": 1,
+    "conn_refused": 0,
+    "dir_totals": {
+      "c2s": {
+        "bytes": 4945,
+        "data_packets": 8,
+        "direction": "c2s",
+        "dup_ack": 0,
+        "lost_seg": 2,
+        "ooo": 0,
+        "packets": 21,
+        "retrans": 2,
+        "rst": 0,
+        "rtt": {
+          "avg": 103.0,
+          "jitter": 78.0,
+          "max": 200.0,
+          "n": 3,
+          "p95": 200.0
+        },
+        "syn": 6,
+        "syn_retrans": 2,
+        "win_full": 0,
+        "zero_win": 0
+      },
+      "s2c": {
+        "bytes": 1452,
+        "data_packets": 3,
+        "direction": "s2c",
+        "dup_ack": 0,
+        "lost_seg": 0,
+        "ooo": 0,
+        "packets": 15,
+        "retrans": 0,
+        "rst": 0,
+        "rtt": {
+          "avg": 33.4,
+          "jitter": 37.6,
+          "max": 120.0,
+          "n": 7,
+          "p95": 120.0
+        },
+        "syn": 0,
+        "syn_retrans": 0,
+        "win_full": 0,
+        "zero_win": 0
+      }
+    },
+    "dup_ack_rate": 0.0,
+    "handshake": {
+      "avg": 63.3,
+      "jitter": 40.3,
+      "max": 120.0,
+      "n": 3,
+      "p95": 120.0
+    },
+    "ooo_rate": 0.0,
+    "packets": 36,
+    "retrans_rate": 5.56,
+    "rtt": {
+      "avg": 54.3,
+      "jitter": 61.9,
+      "max": 200.0,
+      "n": 10,
+      "p95": 200.0
+    },
+    "streams": [
+      {
+        "app_hint": "",
+        "bytes": 698,
+        "client": {
+          "ip": "192.168.1.100",
+          "kind": "client",
+          "label": "",
+          "port": 51001
+        },
+        "dirs": {
+          "Direction.C2S": {
+            "bytes": 376,
+            "data_packets": 1,
+            "direction": "c2s",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 5,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 9.0,
+              "jitter": 0.0,
+              "max": 9.0,
+              "n": 1,
+              "p95": 9.0
+            },
+            "syn": 1,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          },
+          "Direction.S2C": {
+            "bytes": 322,
+            "data_packets": 1,
+            "direction": "s2c",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 4,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 61.0,
+              "jitter": 59.0,
+              "max": 120.0,
+              "n": 2,
+              "p95": 120.0
+            },
+            "syn": 0,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          }
+        },
+        "frames": [
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26
+        ],
+        "handshake_ms": 120.0,
+        "packets": 9,
+        "server": {
+          "ip": "93.184.216.34",
+          "kind": "server",
+          "label": "",
+          "port": 80
+        },
+        "state": "正常关闭",
+        "stream": "0",
+        "think_ms": null
+      },
+      {
+        "app_hint": "",
+        "bytes": 673,
+        "client": {
+          "ip": "192.168.1.100",
+          "kind": "client",
+          "label": "",
+          "port": 51002
+        },
+        "dirs": {
+          "Direction.C2S": {
+            "bytes": 321,
+            "data_packets": 1,
+            "direction": "c2s",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 4,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 100.0,
+              "jitter": 0.0,
+              "max": 100.0,
+              "n": 1,
+              "p95": 100.0
+            },
+            "syn": 1,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          },
+          "Direction.S2C": {
+            "bytes": 352,
+            "data_packets": 1,
+            "direction": "s2c",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 4,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 16.0,
+              "jitter": 14.0,
+              "max": 30.0,
+              "n": 2,
+              "p95": 30.0
+            },
+            "syn": 0,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          }
+        },
+        "frames": [
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34
+        ],
+        "handshake_ms": 30.0,
+        "packets": 8,
+        "server": {
+          "ip": "203.0.113.20",
+          "kind": "server",
+          "label": "",
+          "port": 80
+        },
+        "state": "正常关闭",
+        "stream": "1",
+        "think_ms": null
+      },
+      {
+        "app_hint": "",
+        "bytes": 162,
+        "client": {
+          "ip": "192.168.1.100",
+          "kind": "client",
+          "label": "",
+          "port": 51003
+        },
+        "dirs": {
+          "Direction.C2S": {
+            "bytes": 162,
+            "data_packets": 0,
+            "direction": "c2s",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 3,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 0.0,
+              "jitter": 0.0,
+              "max": 0.0,
+              "n": 0,
+              "p95": 0.0
+            },
+            "syn": 3,
+            "syn_retrans": 2,
+            "win_full": 0,
+            "zero_win": 0
+          },
+          "Direction.S2C": {
+            "bytes": 0,
+            "data_packets": 0,
+            "direction": "s2c",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 0,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 0.0,
+              "jitter": 0.0,
+              "max": 0.0,
+              "n": 0,
+              "p95": 0.0
+            },
+            "syn": 0,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          }
+        },
+        "frames": [
+          35,
+          36,
+          53
+        ],
+        "handshake_ms": null,
+        "packets": 3,
+        "server": {
+          "ip": "10.0.0.5",
+          "kind": "server",
+          "label": "",
+          "port": 8080
+        },
+        "state": "无响应",
+        "stream": "2",
+        "think_ms": null
+      },
+      {
+        "app_hint": "",
+        "bytes": 4864,
+        "client": {
+          "ip": "192.168.1.100",
+          "kind": "client",
+          "label": "",
+          "port": 51004
+        },
+        "dirs": {
+          "Direction.C2S": {
+            "bytes": 4086,
+            "data_packets": 6,
+            "direction": "c2s",
+            "dup_ack": 0,
+            "lost_seg": 2,
+            "ooo": 0,
+            "packets": 9,
+            "retrans": 2,
+            "rst": 0,
+            "rtt": {
+              "avg": 200.0,
+              "jitter": 0.0,
+              "max": 200.0,
+              "n": 1,
+              "p95": 200.0
+            },
+            "syn": 1,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          },
+          "Direction.S2C": {
+            "bytes": 778,
+            "data_packets": 1,
+            "direction": "s2c",
+            "dup_ack": 0,
+            "lost_seg": 0,
+            "ooo": 0,
+            "packets": 7,
+            "retrans": 0,
+            "rst": 0,
+            "rtt": {
+              "avg": 26.7,
+              "jitter": 9.4,
+              "max": 40.0,
+              "n": 3,
+              "p95": 40.0
+            },
+            "syn": 0,
+            "syn_retrans": 0,
+            "win_full": 0,
+            "zero_win": 0
+          }
+        },
+        "frames": [
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52
+        ],
+        "handshake_ms": 40.0,
+        "packets": 16,
+        "server": {
+          "ip": "93.184.216.40",
+          "kind": "server",
+          "label": "",
+          "port": 443
+        },
+        "state": "正常关闭",
+        "stream": "3",
+        "think_ms": null
+      }
+    ]
+  },
+  "tls": {}
+}

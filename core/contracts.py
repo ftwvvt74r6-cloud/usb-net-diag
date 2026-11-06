@@ -26,7 +26,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from typing import Any, Iterable, Mapping, Sequence
 
-SCHEMA_VERSION = "2.0"
+SCHEMA_VERSION = "2.1"
 
 #: ``RULE_ID`` 形态：大写点分，如 ``L4.RETRANS.HIGH`` / ``L7.DNS.FAIL``。
 RULE_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(\.[A-Z0-9_]+)+$")
@@ -258,16 +258,26 @@ class DirStat:
     现有实现把 retrans / dup_ack / zero_win 全部按流累加，导致：
     「客户端重传」既可能是上行丢包、也可能是下行 ACK 丢失，
     而「零窗口」甚至可能来自客户端自己（VDI 场景常见）。
+
+    计数口径（三个字段容易混，必须分开记）：
+
+    * ``retrans`` —— **数据**重传次数，**不含 SYN**（与 ``analyzer`` 里
+      ``st["retrans"]`` 的口径一致，否则重传率会与现有报告对不上）。
+    * ``syn`` —— 该方向 SYN 帧数（**含重传**）。
+    * ``syn_retrans`` —— SYN 重传次数。SYN 重传说明「握手包在路上丢了」，
+      是上行连通性信号，与数据重传是两种故障，不能并进 ``retrans``。
     """
 
     direction: Direction
     packets: int = 0
     bytes: int = 0
     retrans: int = 0
+    syn_retrans: int = 0     #: 该方向 SYN 重传次数（上行连通性信号，不计入 retrans）
     dup_ack: int = 0
     ooo: int = 0
     zero_win: int = 0
     win_full: int = 0
+    lost_seg: int = 0        #: ``tcp.analysis.lost_segment`` 命中数（对端宣告丢了段）
     rst: int = 0
     syn: int = 0
     data_packets: int = 0
@@ -281,7 +291,8 @@ class DirStat:
 
         Returns:
             dict: ``direction`` 是字符串；``rtt`` 是嵌套的 ``Stats.to_dict()``；
-                其余是 10 个计数字段（packets/bytes/retrans/dup_ack/ooo/zero_win/win_full/rst/syn/data_packets）。
+                其余是 12 个计数字段（packets/bytes/retrans/syn_retrans/dup_ack/
+                ooo/zero_win/win_full/lost_seg/rst/syn/data_packets）。
         """
         return to_jsonable(self)
 
