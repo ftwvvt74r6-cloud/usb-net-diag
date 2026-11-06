@@ -16,6 +16,17 @@
 * 证据不足的文案来自 ``core/copy/zh-CN.json``（copy 缺失时回退内联常量）；
 * ``empty_capture`` 的期望值（expected.json）必须有人读。
 
+第 2 轮审查修复补充的口径：
+
+* 证据不足时**没有样本行的层**在 ``layers[]`` 里必须是 ``na``，不许是 ``ok``
+  （有真实样本行、判定为正常的层仍保持 ``ok``）；
+* AI 解读的 prompt 顶部必须带 ``level`` / ``headline`` / ``sufficiency``，
+  不能只给模型 ``L2：ok`` 这种分层机器码（模型会据此写「网络正常」）；
+* copy 用例的断言口径是「输出跟着 copy 表变」：patch 文案**来源**也要生效，
+  否则把 ``_load_copy`` 改成 ``return {}`` 照样全绿（第 2 轮审查的证伪手法）；
+* copy 表结构畸形（``next_step`` 是列表、模板不是字符串……）必须回退内联常量，
+  不许把 ``AttributeError`` 抛给用户。
+
 纯函数用例不依赖 tshark，CI 干净环境也能跑完整套维度口径校验；
 涉及 ``analyze()`` 现跑的用例在无 tshark 时跳过。
 """
@@ -36,6 +47,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core import verdict                                        # noqa: E402
+from core import ai as ai_mod                                    # noqa: E402
 from core.analyzer import analyze                               # noqa: E402
 from core.tshark import find_tshark                            # noqa: E402
 
@@ -193,6 +205,98 @@ class SufficiencyPureTests(unittest.TestCase):
         self.assertFalse(v["sufficiency"]["ok"])
 
 
+class InsufficientLayerTests(unittest.TestCase):
+    """第 2 轮 F1：证据不足时没有样本的层必须 ``na``，渲染层不许再给 ✅ 正常。"""
+
+    def _statuses(self, v: dict) -> dict:
+        return {x["id"]: x["status"] for x in v["layers"]}
+
+    def test_no_sample_layers_are_na_not_ok(self):
+        # 审查给的五维度全不成立输入（rows 为空）：四层都没样本，谁都不许是 ok。
+        v = _verdict(_base_meta())
+        self.assertFalse(v["sufficiency"]["ok"])
+        self.assertEqual(self._statuses(v),
+                         {"L2": "na", "L3": "na", "L4": "na", "L7": "na"})
+
+    def test_layer_with_test_row_keeps_ok(self):
+        # 反向钉子：「有真实样本且判定为正常」的层仍保持 ok。
+        # analyzer 契约里 "—" = 测了正常（见 analyzer.NEUTRAL_SEVERITY），不算没样本。
+        rows = [{"layer": "L2 本地链路", "protocol": "ARP", "category": "本地可达性",
+                 "finding": "构造：测了正常", "severity": "—",
+                 "evidence": "—", "advice": "无需处理"}]
+        v = _verdict(_base_meta(), rows)
+        self.assertEqual(v["level"], "证据不足")        # 五维度仍然全不成立
+        st = self._statuses(v)
+        self.assertEqual(st["L2"], "ok", "有样本行（—=测了正常）的层应保持 ok")
+        self.assertEqual(st["L3"], "na")
+        self.assertEqual(st["L7"], "na")
+
+    def test_neutral_fallback_rows_do_not_fake_samples(self):
+        # empty_capture 的真实行形状：L3 那条「未收到 ICMP…三层转发正常」是
+        # analyzer 无条件产出的兜底中性行（没有 ICMP/RTT 样本也写正常），
+        # L4/L7 是 "na" 行。这些都不算样本：四层必须仍是 na，
+        # 否则真实样本（empty_capture）渲染出来 L3 还是 ✅。
+        rows = [
+            {"layer": "L3 网络层", "protocol": "ICMP/IP", "category": "网络可达性",
+             "finding": "未收到 ICMP 不可达/超时，三层转发正常", "severity": "—",
+             "evidence": "—", "advice": "无需处理"},
+            {"layer": "L4 传输层", "protocol": "TCP", "category": "连接建立",
+             "finding": "未检测到 TCP 会话（抓包周期内无 TCP 流量）", "severity": "na",
+             "evidence": "报文 3 个", "advice": "确认抓包网卡与过滤器是否选对"},
+            {"layer": "L7 应用层", "protocol": "DNS", "category": "域名解析",
+             "finding": "未检测到 DNS 报文", "severity": "na",
+             "evidence": "—", "advice": "如需验证 DNS，可在体检页直接测域名解析耗时"},
+        ]
+        v = _verdict(_base_meta(), rows)
+        self.assertEqual(v["level"], "证据不足")
+        self.assertEqual(self._statuses(v),
+                         {"L2": "na", "L3": "na", "L4": "na", "L7": "na"})
+
+    def test_insufficient_markdown_has_no_ok_layers(self):
+        # 直接钉渲染产物：结论是「证据不足」时，L2/L3/L7 不许出现 ✅ 正常。
+        # report 用扁平导入（import verdict），所以 core/ 必须在 sys.path 上。
+        core_dir = str(ROOT / "core")
+        sys.path.insert(0, core_dir)
+        try:
+            import report
+            md = report.render_markdown({"meta": _base_meta(), "rows": [],
+                                         "metrics": {}, "summary": {}})
+        finally:
+            sys.path.remove(core_dir)
+        table = [ln for ln in md.splitlines() if ln.startswith("| L")]
+        self.assertEqual(len(table), 4, "分层定位表应有四层")
+        for ln in table:
+            with self.subTest(line=ln):
+                self.assertNotIn("✅", ln, f"证据不足时这一层不许显示正常：{ln}")
+                self.assertIn("无样本", ln)
+
+
+class AiPromptSyncTests(unittest.TestCase):
+    """第 2 轮 F2：AI 解读 prompt 顶部必须带规则引擎结论，不能只给分层机器码。"""
+
+    def _prompt(self, v: dict) -> str:
+        res = {"meta": {}, "rows": [], "metrics": {}, "verdict": v}
+        return ai_mod.build_messages(res)[1]["content"]
+
+    def test_prompt_top_carries_level_and_headline(self):
+        v = _verdict(_base_meta())
+        p = self._prompt(v)
+        self.assertIn(v["level"], p)
+        self.assertIn(v["headline"], p)
+        # 必须排在分层指标之前：模型先读到结论，才不会被 L2：ok 带偏。
+        self.assertLess(p.index(v["headline"]), p.index("【分层指标】"))
+
+    def test_prompt_flags_insufficient_sufficiency(self):
+        p = self._prompt(_verdict(_base_meta()))
+        self.assertIn("证据充分性：不足", p)
+        self.assertIn("禁止输出「网络正常」", p)
+
+    def test_prompt_says_sufficient_when_ok(self):
+        m = _base_meta(); m["dns_total"] = 1
+        p = self._prompt(_verdict(m))
+        self.assertIn("证据充分性：充分", p)
+
+
 class SufficiencySecurityTests(unittest.TestCase):
     """审查阻塞 2：只有安全观察命中时，命中必须留在 points 里。"""
 
@@ -232,6 +336,63 @@ class SufficiencyCopyTests(unittest.TestCase):
             v = _verdict(_base_meta())
         self.assertEqual(v["next_steps"], list(verdict.INSUFFICIENT_STEPS))
         self.assertIn("没有一个可判定的维度", v["points"][0]["proof"])
+
+    def test_output_follows_monkeypatched_copy_table(self):
+        """第 2 轮 F3a：把 ``_load_copy`` 换成自定义表，用户可见文案必须跟着变。
+
+        断言口径是「输出跟着 copy 表变」，不是「内联常量与 copy 逐字相等」——
+        后者在「copy 断开、回退内联」时照样成立（第 2 轮审查证伪手法）。
+        """
+        custom = {
+            "next_step": {"collect_longer": "自定义：加长抓包",
+                          "confirm_traffic_path": "自定义：确认路径"},
+            "insufficient": {"no_decidable_dimension": "自定义证词：报文 {packets} 个"},
+        }
+        with mock.patch.object(verdict, "_load_copy", return_value=custom):
+            v = _verdict(_base_meta())
+        self.assertEqual(v["next_steps"],
+                         ["自定义：加长抓包", "自定义：确认路径"])
+        self.assertEqual(v["points"][0]["action"], "自定义：加长抓包")
+        self.assertEqual(v["points"][0]["proof"], "自定义证词：报文 3 个")
+
+    def test_copy_source_disconnect_turns_red(self):
+        """第 2 轮 F3a 的反向钉子：patch 文案**来源**也必须生效。
+
+        为什么不能只 patch ``verdict._load_copy``：那证明不了它真的去读了 copy ——
+        把 ``_load_copy`` 改成 ``return {}`` 时，那条用例照样 PASS（内联回退与
+        copy 表逐字相同，正是第 2 轮审查的证伪手法）。从来源打补丁，
+        「断开 copy」这个变异才会真的变红。
+        """
+        custom = {
+            "next_step": {"collect_longer": "来源级自定义一",
+                          "confirm_traffic_path": "来源级自定义二"},
+            "insufficient": {"no_decidable_dimension": "来源级证词：{packets}"},
+        }
+        with mock.patch("core.config.load_copy", return_value=custom):
+            v = _verdict(_base_meta())
+        self.assertEqual(v["next_steps"], ["来源级自定义一", "来源级自定义二"])
+        self.assertEqual(v["points"][0]["proof"], "来源级证词：3")
+
+    def test_malformed_copy_falls_back_without_crash(self):
+        """第 2 轮 F3b：copy 表结构畸形时必须回退内联常量，不许抛异常。
+
+        这些是本 PR 新增的崩溃路径（以前 copy 无人消费）：
+        ``{"next_step": []}`` → ``'list' object has no attribute 'get'``；
+        ``{"insufficient": {"no_decidable_dimension": {...}}}`` →
+        ``'dict' object has no attribute 'format'``。
+        """
+        bad_tables = (
+            {"next_step": []},
+            {"insufficient": {"no_decidable_dimension": {"packets": 3}}},
+            {"next_step": {"collect_longer": 123}},
+            [],
+        )
+        for bad in bad_tables:
+            with self.subTest(bad=bad), \
+                    mock.patch("core.config.load_copy", return_value=bad):
+                v = _verdict(_base_meta())
+            self.assertEqual(v["next_steps"], list(verdict.INSUFFICIENT_STEPS))
+            self.assertIn("没有一个可判定的维度", v["points"][0]["proof"])
 
     def test_offline_steps_use_offline_copy(self):
         # 审查建议 12：离线（--pcap）场景没有网卡可换，第一条建议换离线版。
@@ -292,6 +453,9 @@ class SufficiencyAnalyzeTests(unittest.TestCase):
             self.assertEqual(v["level"], "证据不足")
             self.assertFalse(v["sufficiency"]["ok"])
             self.assertIn("no_decidable_dimension", v["sufficiency"]["reasons"])
+            # 第 2 轮 F1：没有样本的层在渲染层不许再是 ✅（L3 的兜底中性行不算样本）。
+            self.assertEqual({x["id"]: x["status"] for x in v["layers"]},
+                             {"L2": "na", "L3": "na", "L4": "na", "L7": "na"})
 
 
 if __name__ == "__main__":

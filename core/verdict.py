@@ -31,6 +31,11 @@ SEV_ORDER = {"严重": 0, "警告": 1, "提示": 2, "—": 3, "na": 4}
 #: 也不得影响 ``flags.network_ok`` 与 ``summary`` 的计数。
 PROBLEM_SEVERITIES = ("严重", "警告")
 
+#: 算作「该层有真实样本」的严重度：``"—"`` 表示测了正常（见 analyzer.NEUTRAL_SEVERITY），
+#: 其余三种表示真判出了东西。只有 ``"na"``（没样本，见 analyzer.NO_SAMPLE_SEVERITY）
+#: 不算样本 —— 证据不足时正是这些层必须显示成 ``na``，而不是 ``ok``。
+SAMPLE_SEVERITIES = ("严重", "警告", "提示", "—")
+
 # ---------- 证据充分性：判「有没有可判定的维度」，不判「报文总数」 ----------
 #
 # 为什么没有「报文总数 < N」或「抓包时长 < N 秒」这类总闸：
@@ -148,13 +153,19 @@ def _sort_key(r: dict) -> tuple:
             CAT_RANK.get(r.get("category"), 9))
 
 
-def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]:
+def compute_layers(rows: list[dict], meta: dict, metrics: dict,
+                   sufficient: bool = True) -> list[dict]:
     """为每一层算一个状态块（UI 用横条展示「哪一层红了」）。
 
     Args:
         rows: 旧 ``rows[]``；安全观察行**不参与**主判定。
         meta: 采集元信息；``L4`` 在没有 TCP 报文时标为 ``na``（没样本，别报正常）。
         metrics: 指标表，供状态块填明细。
+        sufficient: 证据是否充分（即 ``verdict.sufficiency.ok``）。为 ``False`` 时，
+            **没有真实样本行的层**一律置为 ``na``：否则会出现「结论是证据不足、
+            分层表却显示 ✅ 正常」的自相矛盾。有样本行（含 ``"—"``=测了正常）的层
+            仍按样本判定，保持 ``ok``。例外是 L3 的兜底中性行：它没有 ICMP/RTT
+            样本时也会写「三层转发正常」，这种行不算样本。
 
     Returns:
         list[dict]: 每项 ``{"id", "name", "protocol", "status"（ok/warn/bad/na）,
@@ -172,6 +183,21 @@ def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]:
                  "—": "ok", "na": "na"}.get(status, "ok")
         if d["id"] == "L4" and not meta.get("tcp_packets"):
             state = "na"
+        else:
+            # 该层有没有真实样本行：``"—"``（测了正常）与三种发现都算，只有 ``"na"`` 不算。
+            has_sample = any(r.get("severity") in SAMPLE_SEVERITIES for r in net)
+            # L3 的「未收到 ICMP 不可达/超时，三层转发正常」是 analyzer **无条件**产出的
+            # 兜底行：一个 ICMP / RTT 样本都没有时它照样写「正常」。这种行不能算样本，
+            # 否则空抓包（empty_capture：ARP×1 + ICMP echo×1 + UDP×1）的 L3 仍会 ✅。
+            if d["id"] == "L3":
+                has_sample = has_sample and bool(
+                    _int(meta.get("icmp_unreach")) + _int(meta.get("icmp_timeout"))
+                    or _int(metrics.get("rtt_samples")))
+            # 证据不足时「—」不再自动等于 ok：没样本的层必须显示第三态。
+            # 判定层已经说「无法判断」，分层表就不能再给绿色勾 —— 这是 T06
+            # 要根除的「没抓到=没问题」。
+            if not sufficient and not has_sample:
+                state = "na"
         out.append({
             "id": d["id"], "name": d["name"], "protocol": d["protocol"],
             "status": state, "severity": status,
@@ -263,16 +289,35 @@ def _load_copy() -> dict:
     """读 ``core/copy/zh-CN.json`` 文案表。
 
     Returns:
-        dict: 文案表。文件缺失 / 包导入失败时返回空表，**不抛异常** ——
-            调用方必须用内联常量兜底，保证「copy 不可达」时结论照常可出。
+        dict: 文案表。以下任一情况都返回空表、**不抛异常**，由调用方回退内联常量：
+            文件缺失 / 包导入失败 / **结构不合法**（顶层不是对象，或本模块消费的
+            ``next_step`` / ``insufficient`` 不是「字符串键 → 字符串值」的映射）。
+
+    Note:
+        copy 表是本 PR 新增的消费点：以前 copy 无人消费，畸形表不会有人崩；
+        现在 ``{"next_step": []}`` 会让 ``verdict.build`` 抛 ``AttributeError``，
+        ``{"insufficient": {"no_decidable_dimension": {...}}}`` 会抛
+        ``'dict' object has no attribute 'format'``。所以「读不到」与
+        「读到了但形状不对」走同一条回退路径，绝不让报告渲染崩在文案表上。
     """
     try:
         if str(_ROOT) not in sys.path:
             sys.path.insert(0, str(_ROOT))
         from core.config import load_copy
-        return load_copy() or {}
+        table = load_copy() or {}
     except Exception:                              # noqa: BLE001
         return {}
+    if not isinstance(table, dict):
+        return {}
+    # 只校验本模块消费的两块：其它 section 畸形与我们无关，不该拖累这两块。
+    for section in ("next_step", "insufficient"):
+        values = table.get(section, {})
+        if not isinstance(values, dict):
+            return {}
+        if not all(isinstance(k, str) and isinstance(v, str)
+                   for k, v in values.items()):
+            return {}
+    return table
 
 
 def _is_offline(meta: dict) -> bool:
@@ -313,7 +358,8 @@ def _insufficient_reason_args(meta: dict, packets: int) -> dict:
 def _insufficient_proof(meta: dict, packets: int) -> str:
     """证据不足点的 proof 文案：copy 模板优先，缺失/缺占位符时回退内联。
 
-    两份文案共用同一组占位符，改一边必须同步另一边（tests 里钉着相等性）。
+    两份文案共用同一组占位符，改一边必须同步另一边；copy 表可用时以它为准
+    （tests 用自定义表断言输出跟着 copy 表变，不是断言两份「逐字相等」）。
     """
     args = _insufficient_reason_args(meta, packets)
     tpl = _load_copy().get("insufficient", {}).get(INSUFFICIENT_REASON)
@@ -419,7 +465,8 @@ def build(result: dict) -> dict:
                       "请重新抓一次再判断。"),
             "impact": "无法定位（抓包为空，没有任何数据）",
             "layer": "—",
-            "layers": compute_layers([], meta, m),
+            # 空包是「证据不足」的极端情形：四层都没有样本，不许显示成 ✅ 正常。
+            "layers": compute_layers([], meta, m, sufficient=False),
             "points": [{
                 "severity": "警告", "layer": "—", "protocol": "—", "category": "采集有效性",
                 "title": "本次采集没有数据",
@@ -555,7 +602,8 @@ def build(result: dict) -> dict:
         "plain": plain,
         "impact": impact,
         "layer": layer,
-        "layers": compute_layers(rows, meta, m),
+        # 证据不足时没有样本的层要显示成 na（见 compute_layers 的 sufficient 参数）。
+        "layers": compute_layers(rows, meta, m, sufficient=suff.ok),
         "points": points,
         "next_steps": steps[:6],
         "metrics": m,

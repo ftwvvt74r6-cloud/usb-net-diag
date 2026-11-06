@@ -200,6 +200,13 @@
   .lay .ln{font-size:10px;color:#94a3b8;font-weight:800;letter-spacing:.7px}
   .lay .lt{font-size:12.5px;font-weight:700;margin:1px 0 2px}
   .lay .ld{font-size:10.5px;color:var(--muted);line-height:1.5}
+  /* 状态徽标：把「无样本」写成字，不能只靠颜色 —— 没测到 ≠ 没问题 */
+  .lay .lst{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;
+    font-size:9.5px;font-weight:700;vertical-align:middle;background:#f1f5f9;color:#64748b}
+  .lay.ok .lst{background:#ecfdf5;color:#047857}
+  .lay.warn .lst{background:#fffbeb;color:#b45309}
+  .lay.bad .lst{background:#fef2f2;color:#b91c1c}
+  .lay.na .lst{background:#e2e8f0;color:#475569}
 
   /* ---------------- 问题详解 ---------------- */
   .sectitle{font-size:12px;font-weight:700;margin:16px 0 8px;color:#334155;
@@ -918,9 +925,13 @@ function render(res) {
     ["吞吐", mt.throughput_mbps != null ? mt.throughput_mbps.toFixed(2) + " Mbps" : "-"],
   ].map(([k, v]) => '<span class="chip">' + k + ' <b>' + esc(v) + '</b></span>').join("");
 
+  /* 「无样本」是第三态：状态写进徽标文字，不能只靠颜色/透明度表达 */
+  const LAY_STATUS = { ok: "正常", warn: "注意", bad: "异常", na: "无样本" };
   const layerbar = (vd.layers || []).map(x =>
     '<div class="lay ' + x.status + '"><div class="ln">' + esc(x.id) + '</div>'
-    + '<div class="lt">' + esc(x.name) + '</div><div class="ld">' + esc(x.detail) + '</div></div>').join("");
+    + '<div class="lt">' + esc(x.name) + '<span class="lst">'
+    + esc(LAY_STATUS[x.status] || x.status) + '</span></div>'
+    + '<div class="ld">' + esc(x.detail) + '</div></div>').join("");
 
   const points = (vd.points || []).map((p, i) =>
     '<div class="point"><div class="ph">'
