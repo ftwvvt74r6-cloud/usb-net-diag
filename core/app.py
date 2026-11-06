@@ -144,7 +144,10 @@ def main() -> int:
         if not elevated and relaunch_as_admin():
             return 0
         if not as_console:
-            print("[i] 未获得管理员权限：实时抓包可能受限，离线分析与链路体检可用。")
+            msgbox("未获得管理员权限：实时抓包与被动监听将不可用"
+                   "（离线分析、链路体检仍可用）。\n\n"
+                   "如需完整功能，请关闭后右键 NetDiag.vbs 选择"
+                   "「以管理员身份运行」，或用 start.bat 启动。")
 
     import bootstrap  # noqa: PLC0415
     import diagnose  # noqa: PLC0415
