@@ -118,8 +118,8 @@ def analyze_result(result: dict, question: str='', overrides: dict | None=None) 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `collect` | function | 170 | ⚠️ 缺参数说明、缺返回值说明 |
-| `build_findings` | function | 556 | ⚠️ 无 docstring |
-| `analyze` | function | 826 | ⚠️ 无 docstring |
+| `build_findings` | function | 573 | ⚠️ 无 docstring |
+| `analyze` | function | 843 | ⚠️ 无 docstring |
 
 ### `collect`
 
@@ -267,12 +267,12 @@ def main(argv=None) -> int
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 42 | ⚠️ 无 docstring |
-| `log` | function | 65 | ⚠️ 无 docstring |
-| `bpf_for` | function | 70 | ⚠️ 缺参数说明、缺返回值说明 |
-| `capture_live` | function | 85 | ⚠️ 缺参数说明、缺返回值说明 |
-| `run_scan` | function | 149 | ⚠️ 缺参数说明、缺返回值说明 |
-| `main` | function | 198 | ⚠️ 无 docstring |
+| `load_config` | function | 43 | ⚠️ 无 docstring |
+| `log` | function | 66 | ⚠️ 无 docstring |
+| `bpf_for` | function | 71 | ⚠️ 缺参数说明、缺返回值说明 |
+| `capture_live` | function | 86 | ⚠️ 缺参数说明、缺返回值说明 |
+| `run_scan` | function | 187 | ⚠️ 缺参数说明、缺返回值说明 |
+| `main` | function | 236 | ⚠️ 无 docstring |
 
 ### `load_config`
 
