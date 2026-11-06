@@ -166,6 +166,21 @@ def _stats(values: list[float]) -> dict:
     }
 
 
+#: 行的严重度只有下面两个取值**不是故障**；其余取值（严重/警告/提示）
+#: 都会被下游当成「有发现」，进 points、进报告、进 AI 提示词。
+#:
+#: * :data:`NEUTRAL_SEVERITY` —— 测了，正常。可以报绿色。
+#: * :data:`NO_SAMPLE_SEVERITY` —— 没样本，测不了。**不能报绿色**：
+#:   「没抓到 TCP 会话」和「TCP 一切正常」是两件事，混成一个标记就是误报。
+#:   取值 ``"na"`` 对齐 :class:`core.contracts.Severity.NA` 与
+#:   ``verdict.compute_layers()`` 的 ``status="na"``。
+NEUTRAL_SEVERITY = "—"
+NO_SAMPLE_SEVERITY = "na"
+
+#: 算作「故障」的严重度。中性行与无样本行都不在其中。
+FAULT_SEVERITIES = ("严重", "警告")
+
+
 def _row(layer: str, protocol: str, category: str, finding: str, severity: str,
          evidence: str, advice: str) -> dict:
     return {
@@ -689,6 +704,15 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``，
             全部是**中文文案**（历史包袱，PR2 起改由规则引擎产出 ``findings_v2``）。
             没有异常时仍会有一条「安全观察」行，表示「检查过，没发现」。
+
+    Note:
+        ``severity`` 有三种非故障取值：``"严重"/"警告"/"提示"`` 之外，
+        ``"—"`` 表示「测了，正常」，``"na"`` 表示「没样本」（见 :data:`NEUTRAL_SEVERITY`
+        与 :data:`NO_SAMPLE_SEVERITY`）。两者都不是问题，但只有前者能报绿色。
+
+        中性行（``"—"``）的保留与否**不在产出的位置决定**，而是最后按 ``category``
+        统一裁定：同类别只要出现过故障行，中性行一律丢弃。否则会出现
+        「传输质量正常」与「出现 TCP 零窗口」并列这种自相矛盾的报告。
     """
     rows: list[dict] = []
     takes = st["duration"] or 0
@@ -696,7 +720,7 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
     # ============ L4 连接建立 ============
     if m["streams_total"] == 0:
         rows.append(_row("L4 传输层", "TCP", "连接建立",
-                         "未检测到 TCP 会话（抓包周期内无 TCP 流量）", "—",
+                         "未检测到 TCP 会话（抓包周期内无 TCP 流量）", NO_SAMPLE_SEVERITY,
                          f"报文 {st['packets']} 个", "确认抓包网卡与过滤器是否选对"))
     else:
         if m["conn_fail"]:
@@ -730,16 +754,18 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                 f"共 {sum(1 for x in streams if x['handshake_ms'] is not None)} 个完整握手样本",
                 "握手慢=syn/syn-ack 往返慢。跨地域/跨国访问属正常；同城专线出现该值，"
                 "检查链路质量、是否绕行、是否有代理或 VPN 中转。"))
-        if not any(r["category"] == "连接建立" and r["severity"] in ("严重", "警告") for r in rows):
-            note = f"其中 {m['conn_refused']} 个被 RST（偶发，多为对端主动关闭）" \
-                if m["conn_refused"] else "—"
-            rows.append(_row("L4 传输层", "TCP", "连接建立",
-                             f"建连正常（{m['streams_total']} 个会话，握手平均 "
-                             f"{m['hs_avg_ms']:.0f}ms）", "—", note, "无需处理"))
+        # 中性行照常产出，是否该留下由函数末尾的「阶段二」统一裁定。
+        # 就地判断靠不住：后面还可能追加同类别故障行（零窗口就是这么漏的）。
+        note = f"其中 {m['conn_refused']} 个被 RST（偶发，多为对端主动关闭）" \
+            if m["conn_refused"] else "—"
+        rows.append(_row("L4 传输层", "TCP", "连接建立",
+                         f"建连正常（{m['streams_total']} 个会话，握手平均 "
+                         f"{m['hs_avg_ms']:.0f}ms）", NEUTRAL_SEVERITY, note, "无需处理"))
 
     # ============ L4 传输质量 ============
     if st["tcp_packets"] == 0:
-        rows.append(_row("L4 传输层", "TCP", "传输质量", "未检测到 TCP 报文", "—", "—", "确认抓包过滤器"))
+        rows.append(_row("L4 传输层", "TCP", "传输质量", "未检测到 TCP 报文",
+                         NO_SAMPLE_SEVERITY, "—", "确认抓包过滤器"))
     else:
         rr = m["retrans_rate"]
         if rr >= 5:
@@ -765,7 +791,7 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         else:
             rows.append(_row("L4 传输层", "TCP", "传输质量",
                              f"传输质量正常（重传率 {rr:.2f}%，乱序 {m['ooo_rate']:.2f}%）",
-                             "—", f"{st['tcp_packets']} 个 TCP 报文", "无需处理"))
+                             NEUTRAL_SEVERITY, f"{st['tcp_packets']} 个 TCP 报文", "无需处理"))
         if st["zero_win"] >= 3 or st["win_full"] >= 10:
             rows.append(_row(
                 "L4 传输层", "TCP", "传输质量",
@@ -804,7 +830,8 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
     dns_q_total = sum(st["dns_q"].values())
     if dns_q_total == 0 and not st["dns_r"]:
         rows.append(_row("L7 应用层", "DNS", "域名解析",
-                         "未检测到 DNS 报文（可能全部走了 DoH/DoT 或使用 hosts 解析）", "—",
+                         "未检测到 DNS 报文（可能全部走了 DoH/DoT 或使用 hosts 解析）",
+                         NO_SAMPLE_SEVERITY,
                          "—", "如需验证 DNS，可在体检页直接测域名解析耗时"))
     else:
         total = dns_q_total or sum(st["dns_r"].values())
@@ -840,10 +867,9 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                 f"{'、'.join(ip for ip, _ in st['dns_servers'].most_common(2)) or '-'}",
                 "打开网页前的第一段等待常来自这里。换更近的 DNS、开启本地缓存，"
                 "或检查 DNS 服务器到目标域名的递归解析是否绕行。"))
-        if not any(r["category"] == "域名解析" and r["severity"] in ("严重", "警告") for r in rows):
-            rows.append(_row("L7 应用层", "DNS", "域名解析",
-                             f"解析正常（{dns_q_total or total} 次查询，平均 "
-                             f"{m['dns_avg_ms']:.0f}ms）", "—", "—", "无需处理"))
+        rows.append(_row("L7 应用层", "DNS", "域名解析",
+                         f"解析正常（{dns_q_total or total} 次查询，平均 "
+                         f"{m['dns_avg_ms']:.0f}ms）", NEUTRAL_SEVERITY, "—", "无需处理"))
 
     # ============ L7 HTTP 响应 ============
     if st["http_req"]:
@@ -873,10 +899,9 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                 f"最慢 {m['http_max_ms']:.0f}ms", "警告", detail,
                 "先区分是「服务端算得慢」还是「网络传得慢」：看同一次请求的 TCP 握手 RTT，"
                 "若响应时间远大于 RTT，则是服务端处理慢（查慢查询、下游依赖、GC）。"))
-        if not any(r["category"] == "应用响应" and r["severity"] in ("严重", "警告") for r in rows):
-            rows.append(_row("L7 应用层", "HTTP", "应用响应",
-                             f"HTTP 响应正常（{st['http_req']} 个请求，平均 "
-                             f"{m['http_avg_ms']:.0f}ms）", "—", "—", "无需处理"))
+        rows.append(_row("L7 应用层", "HTTP", "应用响应",
+                         f"HTTP 响应正常（{st['http_req']} 个请求，平均 "
+                         f"{m['http_avg_ms']:.0f}ms）", NEUTRAL_SEVERITY, "—", "无需处理"))
     elif st["tls_sni"] or st["tls_alert"]:
         sev = "提示" if st["tls_alert"] >= 10 else "—"
         rows.append(_row("L7 应用层", "TLS", "TLS 会话",
@@ -937,9 +962,23 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         rows.extend(sec)
     else:
         rows.append(_row("安全观察", "—", "安全观察",
-                         "未发现可疑外联与明文认证（此项为附带观察，不是本工具主线）", "—",
-                         "—", "无需处理"))
-    return rows
+                         "未发现可疑外联与明文认证（此项为附带观察，不是本工具主线）",
+                         NEUTRAL_SEVERITY, "—", "无需处理"))
+
+    # ============ 阶段二：抑制自相矛盾的中性行 ============
+    # 为什么不在产出的地方就地判断：中性行与故障行的产出顺序没有保证。
+    # 「传输质量正常」在重传率达标时就先产出，零窗口行是之后才追加的 ——
+    # 就地判断那一步还看不见它，于是同一份报告里同时出现
+    # 「传输质量正常（重传率 0.00%）」和「出现 TCP 零窗口 5 次」（见 code-index #29）。
+    # 所以先按原顺序把两类行都产出，最后按 category 统一裁定：
+    # 某个 category 只要存在故障行，就丢弃该 category 的中性行。
+    #
+    # 只丢中性行（"—"）：无样本行（"na"）本来就不会与故障行同类别
+    # （没有样本就判不出故障），保留它才能让读者看见「这一类没测到」。
+    # 顺序不变：下面的列表推导保持 rows 原有的相对次序。
+    fault_cats = {r["category"] for r in rows if r.get("severity") in FAULT_SEVERITIES}
+    return [r for r in rows
+            if not (r.get("severity") == NEUTRAL_SEVERITY and r.get("category") in fault_cats)]
 
 
 def _cred_events(st: dict) -> list[dict]:
