@@ -30,6 +30,11 @@ except ModuleNotFoundError:                        # 场景二：包方式（fro
         _sys.path.insert(0, _CORE_DIR)
     from tshark import find_tshark, iter_lines
 
+try:                                              # 场景一：extract 作为顶层包（core/ 在 sys.path）
+    from extract.fields import parse_flag as _parse_flag
+except ModuleNotFoundError:                        # 场景二：包方式（from core.analyzer import ...）
+    from core.extract.fields import parse_flag as _parse_flag
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # 单次抓包解析的字段集合（一次 tshark 调用取全，避免多次扫描 pcap）
@@ -59,6 +64,7 @@ FIELDS = [
     "tcp.analysis.lost_segment",
     "tcp.analysis.ack_rtt",
     "udp.dstport",
+    "dns.id",
     "dns.qry.name",
     "dns.flags.rcode",
     "dns.flags.response",
@@ -104,7 +110,23 @@ def _num(v, default: float = 0.0) -> float:
 
 
 def _flag(v) -> bool:
-    return str(v).strip().lower() in ("1", "true", "yes")
+    """tshark 布尔字段 → ``bool``；逗号聚合值任一段为真即真。
+
+    为什么不能只做精确匹配：``-E occurrence=a -E aggregator=,`` 下，
+    同一帧出现两次 ``tcp.analysis.duplicate_ack`` 会输出 ``"1,1"``。
+    旧实现 ``str(v).strip().lower() in ("1", "true", "yes")`` 会把它判成 False，
+    于是「重复 ACK」恒为 0 —— 依赖 dup-ACK 的方向判定整条链路是死的。
+
+    解析规则直接复用 :func:`core.extract.fields.parse_flag`，不在这里再写一份，
+    避免两层对「什么算真」的理解漂移。
+
+    Args:
+        v: tshark 原始值，可能是 ``"1"`` / ``"0"`` / ``"True"`` / ``"1,1"`` / 空串。
+
+    Returns:
+        bool: 任一分段命中 ``1`` / ``true`` / ``yes``（大小写不敏感）即为真。
+    """
+    return _parse_flag(v)
 
 
 def _port(v) -> int:
@@ -158,7 +180,7 @@ def _new_stream(sid: str) -> dict:
         "packets": 0, "bytes": 0, "first": 0.0, "last": 0.0,
         "syn": 0, "syn_ts": 0.0, "synack_ts": 0.0, "ack_ts": 0.0,
         "retrans": 0, "syn_retrans": 0, "fast_retrans": 0, "dup_ack": 0, "ooo": 0,
-        "zero_win": 0, "win_full": 0, "lost": 0, "rst": 0, "fin": 0,
+        "zero_win": 0, "win_full": 0, "lost": 0, "rst": 0, "rst_hs": 0, "fin": 0,
         "cli_data_last": 0.0, "first_resp": 0.0, "think_ms": None,
         "srv_bytes": 0, "rtt": [], "app": "", "frames": [],
     }
@@ -173,6 +195,50 @@ def _guess_app(dport: str, sport: str) -> str:
         if p in ports:
             return name
     return "TCP"
+
+
+def _is_handshake_rst(stream: dict, from_client: bool) -> bool:
+    """判断这次 RST 是不是「握手阶段被对端拒绝」。
+
+    只有「客户端发出 SYN → 三次握手完成之前 → 服务端回 RST」才算
+    「对方明确拒绝」（端口没开 / 被 ACL 或限流主动拒绝）。
+
+    两种情况**不算**拒绝，必须排除，否则 ``conn_refused`` 会被高估：
+
+    * 已建立连接之后再收到 RST —— 那是「连接被中断」，不是「被拒」；
+    * 抓包从中途开始、没看到 SYN —— 无从判断，宁可不算。
+
+    Args:
+        stream: 该 TCP 流的聚合字典，需含 ``syn`` / ``synack_ts`` / ``ack_ts``。
+        from_client: 这个 RST 是否由客户端发出（对端拒绝才是我们要的）。
+
+    Returns:
+        bool: True 表示应计入 ``conn_refused``。
+
+    Note:
+        只用于 ``conn_refused`` 这一个口径；``streams[].rst`` 的含义
+        （该流出现过多少次 RST）保持不变，报告渲染仍依赖它。
+    """
+    if from_client:
+        return False
+    return bool(stream.get("syn")) and not stream.get("synack_ts") and not stream.get("ack_ts")
+
+
+def _dns_timeout_count(q_ids, r_ids) -> int:
+    """按 transaction id 配对，统计「发出查询但没收到响应」的次数。
+
+    为什么不能用「查询数 − 响应数」：那只是数量差。响应重传、多问题单包、
+    上游缓存返回多次，都会让差值失真 —— 重传一次就同时多算一次超时、
+    少算一次失败。
+
+    Args:
+        q_ids: 查询侧的 ``(DNS 服务器, transaction id)`` 集合。
+        r_ids: 响应侧的 ``(DNS 服务器, transaction id)`` 集合。
+
+    Returns:
+        int: 只有查询、没有对应响应的键数量。
+    """
+    return len(set(q_ids) - set(r_ids))
 
 
 def collect(pcap: Path, log=None) -> tuple[dict, str]:
@@ -215,6 +281,8 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
         "dns_q": Counter(), "dns_r": Counter(), "dns_nx": Counter(), "dns_rcode": Counter(),
         "dns_times": [], "dns_detail": [], "nx_frames": defaultdict(list),
         "dns_servers": Counter(),
+        # 按 (DNS 服务器, transaction id) 配对，用于判「查询发出后没有对应响应」
+        "dns_q_ids": set(), "dns_r_ids": set(),
         "http_req": 0, "http_codes": Counter(), "http_times": [], "http_detail": [],
         "http_hosts": Counter(), "http_pending": {},
         "icmp_types": Counter(), "icmp_detail": [],
@@ -318,6 +386,8 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             if is_rst:
                 st["rst"] += 1
                 s["rst"] += 1
+                if _is_handshake_rst(s, from_client):
+                    s["rst_hs"] += 1
             if is_fin:
                 st["fin"] += 1
                 s["fin"] += 1
@@ -369,6 +439,15 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
         if qname:
             is_resp = _flag(r.get("dns.flags.response"))
             rcode = r.get("dns.flags.rcode", "")
+            dns_id = r.get("dns.id", "")
+            if dns_id:
+                # 查询与响应都用「DNS 服务器的 IP + transaction id」做键：
+                # 查询包的服务器是目的地址，响应包的服务器是源地址。
+                # 同一个 id 从不同服务器发出不会被误配成一对。
+                if is_resp:
+                    st["dns_r_ids"].add((src, dns_id))
+                else:
+                    st["dns_q_ids"].add((dst, dns_id))
             for name in [x.strip().rstrip(".") for x in qname.split(",") if x.strip()]:
                 if is_resp:
                     st["dns_r"][name] += 1
@@ -562,7 +641,11 @@ def _metrics(st: dict, streams: list[dict]) -> dict:
     err5 = sum(v for k, v in codes.items() if k.startswith("5"))
     err4 = sum(v for k, v in codes.items() if k.startswith("4"))
     conn_fail = sum(1 for x in streams if "建连无响应" in (x["flags"] or []))
-    conn_refused = sum(1 for x in streams if x["rst"])
+    # 只认「握手阶段被对端 RST」。已建连后的 RST 属于连接中断，
+    # 不计入「被拒」——旧实现用 x["rst"] 判，会把正常关闭的 RST 也算进来。
+    # 从 st 里取（st["streams"] 不对外暴露），避免给 _stream_rows 的投影加键
+    # 而改变 meta.streams_top 的报告结构。
+    conn_refused = sum(1 for s in st["streams"].values() if s.get("rst_hs"))
     arp_no_reply = [ip for ip, n in st["arp_req"].items() if n >= 2 and ip not in st["arp_rep"]]
     return {
         "rtt_avg_ms": rtt["avg"], "rtt_p95_ms": rtt["p95"], "rtt_max_ms": rtt["max"],
@@ -574,7 +657,9 @@ def _metrics(st: dict, streams: list[dict]) -> dict:
         "dns_avg_ms": dns["avg"], "dns_p95_ms": dns["p95"], "dns_max_ms": dns["max"],
         "dns_jitter_ms": dns["jitter"],
         "dns_fail_rate": round(_pct(nx, dns_q_total), 1) if dns_q_total else 0.0,
-        "dns_timeouts": max(0, dns_q_total - sum(st["dns_r"].values())),
+        # 超时 = 按 transaction id 配对后「有问无答」的数量。
+        # 旧口径 max(0, 查询数 − 响应数) 只是数量差，响应重传/多问题单包都会让它失真。
+        "dns_timeouts": _dns_timeout_count(st.get("dns_q_ids", ()), st.get("dns_r_ids", ())),
         "http_avg_ms": http["avg"], "http_p95_ms": http["p95"], "http_max_ms": http["max"],
         "http_err5": err5, "http_err4": err4,
         "http_err5_rate": round(_pct(err5, st["http_req"]), 1) if st["http_req"] else 0.0,
@@ -625,7 +710,9 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                 f"{detail}｜帧 {frames}",
                 "先用「链路体检」测目标端口是否可达；再查中间防火墙/安全组是否放行该端口、"
                 "目标服务是否只监听 127.0.0.1、路由是否回指正确。"))
-        refused = [x for x in streams if x["rst"]][:3]
+        # 证据只列「握手期被拒」的流，与 conn_refused 的口径保持一致；
+        # 若还按 x["rst"] 取，会把正常关闭的 RST 流写进证据里，读者会以为它也拒绝了连接。
+        refused = [s for s in st["streams"].values() if s.get("rst_hs")][:3]
         if m["conn_refused"] >= 2:
             detail = "；".join(f"{x['server']}:{x['dport']}" for x in refused)
             rows.append(_row(

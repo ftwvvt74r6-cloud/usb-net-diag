@@ -150,8 +150,12 @@ def _headline(main: dict, meta: dict, m: dict) -> str:
             return f"{m['conn_refused']} 个连接被对方拒绝（RST）"
         return f"建立连接偏慢：TCP 握手平均 {m.get('hs_avg_ms', 0):.0f}ms"
     if cat == "传输质量":
-        if m.get("zero_win", 0) >= 3 and m.get("retrans_rate", 0) < 2:
-            return "接收端处理不过来：出现 TCP 零窗口，不是网络慢"
+        # 零窗口看的是「接收方缓冲区被塞满」，不是链路丢包 —— 这两个结论的
+        # 排查方向完全相反（查接收端应用 vs 查网络）。
+        # 计数在 meta["zero_win"]，metrics 里没有这个键：早先读 m 的那版
+        # 永远取到默认值 0，分支从不成立，零窗口场景会被误报成「链路上在丢包」。
+        if meta.get("zero_win", 0) >= 3 and m.get("retrans_rate", 0) < 2:
+            return "接收端处理不过来：出现 TCP 零窗口（接收缓冲区已满），不是网络慢"
         return f"链路上在丢包：TCP 重传率 {m.get('retrans_rate', 0):.2f}%"
     if cat == "网络时延":
         return (f"网络往返偏慢：RTT 平均 {m.get('rtt_avg_ms', 0):.0f}ms、"

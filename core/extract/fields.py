@@ -56,6 +56,7 @@ FIELDS: tuple[str, ...] = (
     "tcp.analysis.lost_segment",
     "tcp.analysis.ack_rtt",
     "udp.dstport",
+    "dns.id",
     "dns.qry.name",
     "dns.flags.rcode",
     "dns.flags.response",
