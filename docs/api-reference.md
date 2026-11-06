@@ -203,9 +203,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 244 | ✅ |
-| `build_findings` | function | 680 | ✅ |
-| `analyze` | function | 1076 | ✅ |
+| `collect` | function | 259 | ✅ |
+| `build_findings` | function | 695 | ✅ |
+| `analyze` | function | 1115 | ✅ |
 
 ### `collect`
 
@@ -248,6 +248,15 @@ Returns:
     list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``，
         全部是**中文文案**（历史包袱，PR2 起改由规则引擎产出 ``findings_v2``）。
         没有异常时仍会有一条「安全观察」行，表示「检查过，没发现」。
+
+Note:
+    ``severity`` 有三种非故障取值：``"严重"/"警告"/"提示"`` 之外，
+    ``"—"`` 表示「测了，正常」，``"na"`` 表示「没样本」（见 :data:`NEUTRAL_SEVERITY`
+    与 :data:`NO_SAMPLE_SEVERITY`）。两者都不是问题，但只有前者能报绿色。
+
+    中性行（``"—"``）的保留与否**不在产出的位置决定**，而是最后按 ``category``
+    统一裁定：同类别只要出现过故障行，中性行一律丢弃。否则会出现
+    「传输质量正常」与「出现 TCP 零窗口」并列这种自相矛盾的报告。
 ```
 
 ### `analyze`
@@ -2361,15 +2370,15 @@ _（无公开符号）_
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `LegacyPattern` | class | 59 | ✅ |
-| `match` | function | 183 | ✅ |
-| `is_normal` | function | 209 | ✅ |
-| `to_finding` | function | 225 | ✅ |
-| `map_rows` | function | 287 | ✅ |
-| `find_unmatched` | function | 304 | ✅ |
-| `coverage` | function | 318 | ✅ |
-| `mapped_rule_ids` | function | 342 | ✅ |
-| `missing_from_registry` | function | 354 | ✅ |
+| `LegacyPattern` | class | 64 | ✅ |
+| `match` | function | 188 | ✅ |
+| `is_normal` | function | 214 | ✅ |
+| `to_finding` | function | 240 | ✅ |
+| `map_rows` | function | 302 | ✅ |
+| `find_unmatched` | function | 319 | ✅ |
+| `coverage` | function | 333 | ✅ |
+| `mapped_rule_ids` | function | 357 | ✅ |
+| `missing_from_registry` | function | 369 | ✅ |
 
 ### `LegacyPattern`  (class)
 
@@ -2416,7 +2425,17 @@ Args:
     row: 旧结构的一行。
 
 Returns:
-    bool: 严重度为「—」或文案里出现「正常/未发现」等词时为 True。
+    bool: 严重度为 ``"—"``（测了，正常）时为 True；``"na"``（没样本）不再
+        走严重度分支，而是**按文案**判（「未检测到…」这类陈述同样不产出 Finding）。
+
+Note:
+    为什么 ``"na"`` 不算 normal：它是第三种状态，回答的是「没测到」而不是「没问题」。
+    ``SEVERITY_MAP`` 里两者已经分开（``Severity.OK`` vs ``Severity.NA``），
+    这里也必须分开，否则下游想统计「有多少项真验过」时会把它算进去。
+
+    ⚠️ 副作用：``"na"`` 行现在靠 ``NORMAL_HINTS``（「未检测到」等词）兜住。
+    哪天文案改成「无样本」而不含这些词，这些行会立刻变成 ``find_unmatched``
+    的漏项 —— 改文案（PR F）时必须同步往 ``NORMAL_HINTS`` 里加词。
 ```
 
 ### `to_finding`
@@ -3047,8 +3066,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 83 | ✅ |
-| `build` | function | 182 | ✅ |
+| `compute_layers` | function | 100 | ✅ |
+| `build` | function | 203 | ✅ |
 
 ### `compute_layers`
 
