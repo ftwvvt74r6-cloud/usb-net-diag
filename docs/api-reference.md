@@ -1492,7 +1492,7 @@ Returns:
     str: 可用的 BPF 串；空目标返回空串（表示抓全网）。
 
 Raises:
-    ValueError: 目标含非法字符或超长（由调用方转成可展示的错误）。
+    ValueError: 目标含非法字符，或长度超过 200 个字符（由调用方转成可展示的错误）。
 ```
 
 ### `capture_live`
@@ -2650,12 +2650,12 @@ Returns:
 | `find_npcap_installer` | function | 76 | ✅ |
 | `run` | function | 103 | ✅ |
 | `iter_lines` | function | 135 | ✅ |
-| `version` | function | 204 | ✅ |
-| `list_interfaces` | function | 225 | ✅ |
-| `pick_interface` | function | 266 | ✅ |
-| `probe_interface` | function | 289 | ✅ |
-| `is_admin` | function | 314 | ✅ |
-| `npcap_installed` | function | 331 | ✅ |
+| `version` | function | 210 | ✅ |
+| `list_interfaces` | function | 231 | ✅ |
+| `pick_interface` | function | 272 | ✅ |
+| `probe_interface` | function | 295 | ✅ |
+| `is_admin` | function | 320 | ✅ |
+| `npcap_installed` | function | 337 | ✅ |
 
 ### `short_name`
 

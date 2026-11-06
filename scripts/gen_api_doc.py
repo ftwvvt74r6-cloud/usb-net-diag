@@ -20,6 +20,8 @@
 2. **公开符号**：名字不以 ``_`` 开头（类里的 dunder 也跳过）。
 3. **不做解释**：模块/函数原有的 docstring 原样搬进文档；缺的就是缺的，列在 gaps 里，
    **不替作者编**。这样「文档写了什么」永远是作者的责任。
+4. **输出固定 LF**：产物必须能跨平台逐字节复现 —— 否则 Windows 写 CRLF、
+   Linux 写 LF，doc-sync 闸门就变成与平台相关的。
 """
 
 from __future__ import annotations
@@ -388,9 +390,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     (root / args.out).parent.mkdir(parents=True, exist_ok=True)
-    (root / args.out).write_text(reference, encoding="utf-8")
+    (root / args.out).write_text(reference, encoding="utf-8", newline="\n")
     (root / args.gaps).parent.mkdir(parents=True, exist_ok=True)
-    (root / args.gaps).write_text(gaps, encoding="utf-8")
+    (root / args.gaps).write_text(gaps,     encoding="utf-8", newline="\n")
 
     print(f"模块 {stats['modules']} 个（有说明 {stats['modules_with_doc']}）"
           f"｜公开符号 {stats['symbols']} 个（合格 {stats['symbols_ok']}）"

@@ -21,6 +21,10 @@ VBS = ROOT / "NetDiag.vbs"
 STOP_VBS = ROOT / "NetDiag-stop.vbs"
 ICO = ROOT / "NetDiag.ico"
 
+# 便携运行环境不进仓库，CI 的干净 checkout 里没有这两个目录，
+# 不能拿磁盘存在性去校验（与 tests/test_launcher_contract.py 保持同一约定）。
+SKIP_PREFIX = ("tools", "harness")
+
 # NetDiag.vbs 的写法：pyw = root & "\tools\python\pythonw.exe"
 # 抓 root & "\xxx" 里的相对路径，交给磁盘校验。
 REF_PATTERN = re.compile(r'root\s*&\s*"\\([^"]+)"')
@@ -54,11 +58,19 @@ class VbsLauncherContract(unittest.TestCase):
                 "没能从 NetDiag.vbs 解析出入口路径，脚本格式可能被整体改写了",
             )
             for ref in refs:
+                if ref.split("\\")[0].lower() in SKIP_PREFIX:
+                    continue      # 便携运行环境不进仓库，CI 里无法校验
                 target = ROOT.joinpath(*ref.split("\\"))
                 self.assertTrue(
                     target.is_file(),
                     f"NetDiag.vbs 引用了不存在的路径：{ref}（双击后会静默失败）",
                 )
+            # 上面跳过了 tools/，这里用纯文本断言补住这个盲区：
+            # 不需要磁盘上有该文件，只要求 vbs 仍然指向便携 Python 的 pythonw.exe。
+            self.assertIn(
+                "tools\\python\\pythonw.exe", _read(VBS),
+                "NetDiag.vbs 不再指向便携 Python 的 pythonw.exe",
+            )
 
         # ---- 3. 停止器依赖的两个约定 ----
         with self.subTest("server.py 保留 /api/quit 与 netdiag.pid"):
