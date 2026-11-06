@@ -42,20 +42,44 @@ def _find(base: str) -> Path | None:
 
 
 def short_name(name: str) -> str:
-    """把 tshark -D 的长设备名精简为括号内的网卡别名。"""
+    """把 ``tshark -D`` 的长设备名精简成括号里的网卡别名。
+
+    Args:
+        name: 形如 ``1. \\Device\\NPF_{GUID} (以太网)`` 的原始串。
+
+    Returns:
+        str: 括号内的可读名（``以太网``）；不含括号时原样返回。
+    """
     m = re.search(r"\(([^()]*)\)\s*$", name or "")
     return m.group(1).strip() if m else (name or "")
 
 
 def find_tshark() -> Path | None:
+    """定位 ``tshark.exe``。
+
+    Returns:
+        Path | None: 按「环境变量 ``TSHARK_PATH`` → 便携目录 → 系统安装目录 → PATH」
+            的顺序找；都没找到返回 ``None``（调用方据此报 ``E_NO_TSHARK``）。
+    """
     return _find("tshark")
 
 
 def find_dumpcap() -> Path | None:
+    """定位 ``dumpcap.exe``（长时间抓包用它比 tshark 更省资源）。
+
+    Returns:
+        Path | None: 找不到时返回 ``None``。
+    """
     return _find("dumpcap")
 
 
 def find_npcap_installer() -> Path | None:
+    """在 ``tools/`` 下找 Npcap 离线安装包。
+
+    Returns:
+        Path | None: 匹配 ``npcap-*.exe`` 的第一个；没有则 ``None``
+            （此时前端提示用户自己去装）。
+    """
     for p in (ROOT / "tools").glob("npcap-*.exe"):
         return p
     for p in ROOT.glob("tools/npcap*.exe"):
@@ -77,7 +101,17 @@ def _env() -> dict:
 
 
 def run(args: list[str], timeout: int = 180) -> tuple[int, str, str]:
-    """执行子进程，返回 (returncode, stdout, stderr)。不抛异常。"""
+    """跑一个子进程并收集输出。**不抛异常**，一切失败都折成返回码。
+
+    Args:
+        args: 完整命令行（argv 列表，不经 shell，因此目标串里的特殊字符不会被解释）。
+        timeout: 超时秒数，超时后子进程被杀。
+
+    Returns:
+        tuple[int, str, str]: ``(returncode, stdout, stderr)``。约定返回码：
+            正常为子进程自身退出码；``-9`` 超时；``-2`` 找不到可执行文件；``-3`` 其它 OS 错误。
+            因此调用方判断失败**不要**只看 ``rc != 0``，要区分这几个负数。
+    """
     try:
         proc = subprocess.run(
             args,
@@ -99,9 +133,24 @@ def run(args: list[str], timeout: int = 180) -> tuple[int, str, str]:
 
 
 def iter_lines(args: list[str], timeout: int = 900, sink: dict | None = None):
-    """流式读取子进程 stdout，逐行 yield，避免大 pcap 的输出整份进内存。
+    """流式读取子进程 stdout，逐行 yield。
 
-    结束时把 {"rc": 返回码, "stderr": 错误输出} 写回 sink。
+    大 pcap 的 ``-T fields`` 输出可能有几十万行，整份读进内存会撑爆便携环境，
+    所以边读边吐。
+
+    Args:
+        args: 完整命令行（argv 列表）。
+        timeout: 超时秒数；到点直接 kill 子进程（其余行不再产出）。
+        sink: 可选字典，函数结束前会写入 ``{"rc": 退出码, "stderr": 错误输出}``。
+            调用方**必须**检查它 —— tshark 对不完整文件返回 14、
+            被杀返回负数，只凭「有没有收到行」无法区分「读完了」和「读到一半」。
+
+    Yields:
+        str: 一行输出（已去掉行尾换行符）。
+
+    Note:
+        这是生成器：不把 ``sink`` 传进去就永远拿不到退出码，
+        会把「解析中断」误当成「解析完成」（T00 的根因）。
     """
     import threading
 
@@ -153,6 +202,15 @@ def iter_lines(args: list[str], timeout: int = 900, sink: dict | None = None):
 
 
 def version(tshark: Path | None = None) -> str:
+    """取 tshark 版本串。
+
+    Args:
+        tshark: 可执行文件路径；省略时自动查找。
+
+    Returns:
+        str: 版本首行，如 ``"TShark (Wireshark) 4.7.4 ..."``；
+            找不到时返回 ``"未找到 tshark"``，取不到版本时返回 ``"tshark 版本未知 (rc=N)"``。
+    """
     tshark = tshark or find_tshark()
     if not tshark:
         return "未找到 tshark"
@@ -165,7 +223,16 @@ def version(tshark: Path | None = None) -> str:
 
 
 def list_interfaces(tshark: Path | None = None) -> list[dict]:
-    """解析 `tshark -D`，返回 [{'index':1,'name':'以太网','raw':'...'}]"""
+    """列出可用于抓包的网卡（解析 ``tshark -D``）。
+
+    Args:
+        tshark: 可执行文件路径；省略时自动查找。
+
+    Returns:
+        list[dict]: 每项 ``{"index": int, "name": str, "raw": str}``。
+            ``name`` 保留原串（含括号别名），展示前请过 ``short_name()``；
+            找不到 tshark 或没有网卡时返回空列表。
+    """
     tshark = tshark or find_tshark()
     if not tshark:
         return []
@@ -197,7 +264,17 @@ PREFER_HINTS = ("以太网", "ethernet", "wlan", "wi-fi", "wireless", "无线")
 
 
 def pick_interface(interfaces: list[dict]) -> dict | None:
-    """挑选默认网卡：按业务优先级排序，跳过回环/虚拟/蓝牙适配器。"""
+    """挑一块「像样」的默认网卡。
+
+    按业务优先级：先按 :data:`PREFER_HINTS` 找物理网卡（以太网/Wi-Fi），
+    再用 :data:`SKIP_HINTS` 排掉回环、蓝牙、虚拟网卡（VMware/Hyper-V 等）。
+
+    Args:
+        interfaces: ``list_interfaces()`` 的返回值。
+
+    Returns:
+        dict | None: 选中的那一项；输入为空时返回 ``None``。
+    """
     if not interfaces:
         return None
     good = [i for i in interfaces if not any(s in i["name"].lower() for s in SKIP_HINTS)]
@@ -210,7 +287,19 @@ def pick_interface(interfaces: list[dict]) -> dict | None:
 
 
 def probe_interface(tshark_path: Path, candidates: list[dict], seconds: int = 2) -> dict | None:
-    """逐个网卡试抓 2 秒，返回第一个有流量的网卡。"""
+    """逐个网卡试抓几秒，返回第一个真有流量的。
+
+    用户机器上常有一堆虚拟网卡（VPN、Docker、VMware），名字看不出哪个通外网；
+    用「抓两秒看有没有包」比猜名字可靠。
+
+    Args:
+        tshark_path: tshark 可执行文件路径。
+        candidates: 候选网卡列表（最多试前 5 个，避免启动时等太久）。
+        seconds: 每个网卡试抓的秒数。
+
+    Returns:
+        dict | None: 第一个抓到包的网卡项；都没流量返回 ``None``。
+    """
     for i in candidates[:5]:
         rc, out, err = run(
             [str(tshark_path), "-i", str(i["index"]), "-a", f"duration:{seconds}",
@@ -223,6 +312,12 @@ def probe_interface(tshark_path: Path, candidates: list[dict], seconds: int = 2)
 
 
 def is_admin() -> bool:
+    """当前进程是否管理员。
+
+    Returns:
+        bool: Windows 上问 ``IsUserAnAdmin()``；非 Windows 看 ``geteuid()==0``。
+            查不到时返回 ``False``（保守：宁可提示「可能抓不了包」）。
+    """
     if os.name != "nt":
         return os.geteuid() == 0 if hasattr(os, "geteuid") else True
     try:
@@ -234,10 +329,15 @@ def is_admin() -> bool:
 
 
 def npcap_installed() -> bool:
-    """检测 Npcap 是否安装（看驱动文件优先，最后才问服务状态）。
+    """检测 Npcap 是否就绪（优先看文件，最后才问服务状态）。
 
-    只查文件系统是最快的（毫秒级）；`sc query` 在受限环境里可能卡住，
-    因此放最后并把超时压到 5 秒，且不再依赖它的输出做唯一判据。
+    只查文件系统是毫秒级；``sc query`` 在受限环境里可能卡住，因此放最后、
+    超时压到 5 秒，且不再把它的输出当唯一判据（服务名可能是 ``npcap`` 或 ``npf``，
+    输出还是本地化的）。
+
+    Returns:
+        bool: 命中安装目录 / ``wpcap.dll`` / ``drivers/npcap.sys`` / ``Packet.dll``
+            任一即 True；非 Windows 恒 True。
     """
     if os.name != "nt":
         return True

@@ -1,0 +1,142 @@
+{
+  "_meta": {
+    "schema_version": "2.0",
+    "lang": "zh-CN",
+    "note": "唯一的中文文案来源。规则、verdict、report 都不许内联中文。占位符用 {name}，渲染层 str.format(**args)。"
+  },
+  "layer": {
+    "l2": "L2 本地链路",
+    "l3": "L3 网络层",
+    "l4": "L4 传输层",
+    "l7": "L7 应用层",
+    "sec": "安全观察"
+  },
+  "layer_protocol": {
+    "l2": "ARP / 以太网",
+    "l3": "IP / ICMP",
+    "l4": "TCP / UDP",
+    "l7": "DNS / HTTP / TLS",
+    "sec": "—"
+  },
+  "severity": {
+    "critical": "严重",
+    "warning": "警告",
+    "info": "提示",
+    "ok": "正常",
+    "na": "无样本"
+  },
+  "state": {
+    "ok": "正常",
+    "warn": "注意",
+    "bad": "异常",
+    "na": "无样本",
+    "insufficient": "证据不足"
+  },
+  "category": {
+    "collect": "采集有效性",
+    "l2_arp": "本地可达性",
+    "net_unreach": "网络可达性",
+    "net_latency": "网络时延",
+    "connect": "连接建立",
+    "transport": "传输质量",
+    "dns": "域名解析",
+    "app": "应用响应",
+    "tls": "TLS 会话",
+    "sec_exfil": "可疑外联",
+    "sec_scan": "端口扫描",
+    "sec_plaintext": "明文凭证"
+  },
+  "direction": {
+    "c2s": "客户端→服务端",
+    "s2c": "服务端→客户端",
+    "bidir": "双向"
+  },
+  "headline": {
+    "VERDICT.OK": "各层指标正常，本次未发现网络故障",
+    "VERDICT.OK.BASELINE": "各层指标正常，且与基线一致",
+    "VERDICT.SEC_ONLY": "网络连通性正常，但发现了安全隐患",
+    "VERDICT.INSUFFICIENT": "证据不足，本次无法判定",
+    "VERDICT.EMPTY": "这次没抓到任何报文，无法定位",
+    "L2.ARP.NO_REPLY": "{count} 个同网段地址的 ARP 请求没有得到应答",
+    "L3.ICMP.UNREACH": "网络层被拦截：收到 {count} 条 ICMP 不可达/超时",
+    "L3.RTT.HIGH": "网络往返偏慢：RTT 平均 {rtt}ms、抖动 {jitter}ms",
+    "L4.CONNECT.NO_RESPONSE": "{count} 个目标端口完全连不上：TCP 握手没有回应",
+    "L4.CONNECT.RST": "{count} 个连接被对方拒绝（RST）",
+    "L4.RETRANS.HIGH": "链路上在丢包：TCP 重传率 {retrans_rate}%",
+    "L4.RETRANS.HIGH.UP": "疑似上行丢包：客户端重传 {c2s_retrans} 次，且服务端持续返回重复 ACK（重传率 {retrans_rate}%）",
+    "L4.RETRANS.HIGH.DOWN": "疑似下行丢包：服务端重传 {s2c_retrans} 次，且客户端持续返回重复 ACK（重传率 {retrans_rate}%）",
+    "L4.RETRANS.HIGH.BIDIR": "双向都在丢包：重传率 {retrans_rate}%，优先排查中间链路设备",
+    "L4.RETRANS.HIGH.UNKNOWN": "链路上在丢包：重传率 {retrans_rate}%（方向未定，建议同时开路径探测）",
+    "L4.ZEROWIN.CLIENT": "客户端处理不过来：客户端通告了 TCP 零窗口，接收缓冲区已满",
+    "L4.ZEROWIN.SERVER": "服务端处理不过来：服务端通告了 TCP 零窗口，接收缓冲区已满",
+    "L7.DNS.FAIL": "域名解析出问题：失败率 {rate}%",
+    "L7.DNS.SLOW": "DNS 解析偏慢：平均 {avg}ms",
+    "L7.HTTP.5XX": "服务端报错：{count} 个请求返回 5xx",
+    "L4.CONNECT.SLOW_HANDSHAKE": "建立连接偏慢：TCP 握手平均 {hs_avg_ms}ms",
+    "L7.DNS.TIMEOUT": "{timeouts} 次 DNS 查询没有响应",
+    "L7.HTTP.4XX": "{err4} 个请求返回 4xx（客户端/权限问题）",
+    "L7.HTTP.SLOW": "服务端响应偏慢：HTTP 平均 {avg_ms}ms",
+    "L7.TLS.ALERTS": "TLS 会话有告警（{sni_count} 个 SNI）",
+    "SEC.EXFIL": "发现可疑外联端口（{count} 条）",
+    "SEC.SCAN": "发现疑似端口扫描",
+    "SEC.PLAINTEXT": "发现明文传输的账号口令（{count} 项）"
+  },
+  "impact": {
+    "default": "需关注",
+    "collect": "结论不可信",
+    "l2_arp": "同网段互访失败：可能整段网络中断",
+    "net_unreach": "部分业务不通：特定网段/主机访问失败",
+    "net_latency": "操作变慢：每次交互都要多等几十到几百毫秒",
+    "connect": "业务不可用：相关服务连不上",
+    "transport": "体验变差：速度下降、卡顿",
+    "dns": "上网变慢或打不开：所有依赖域名的访问都受影响",
+    "app": "业务报错或明显变慢：问题在服务端",
+    "tls": "部分站点提示不安全或握手失败",
+    "sec_exfil": "与网络故障无关，属附带安全隐患",
+    "sec_scan": "与网络故障无关，属附带观察项",
+    "sec_plaintext": "与网络故障无关，建议单独处理凭证泄露",
+    "ok": "未见异常"
+  },
+  "advice": {
+    "L2.ARP.ADVICE": "同网段内 ARP 不通，说明对方没开机、IP 冲突、或接在了不同 VLAN。如果这就是网关地址，整台机器的外网访问都会断。",
+    "L3.ICMP.ADVICE": "「端口不可达」= 网络通但服务没起；「主机/网络不可达」= 路由或防火墙拦截；「需要分片」= 路径 MTU 小于报文长度，需在 VPN/隧道接口下调小 MTU（如 1400）。",
+    "L3.RTT.ADVICE": "RTT 高且抖动小 → 物理距离/运营商路径长；RTT 抖动大 → 链路拥塞或无线信号不稳。可用路径探测定位从哪一跳开始变差。",
+    "L4.RETRANS.ADVICE": "重传=发出去的数据没收到确认，等于丢包。先看是否集中在少数对端，再看是否全网段都高。排查顺序：网线/光模块 → 交换机端口（CRC 错包、双工不匹配）→ 无线信号 → 运营商链路。",
+    "L4.RETRANS.ADVICE.UP": "服务端已看到后续包却缺一段，方向偏上行。先用路径探测同时测网关与对端端口：两侧同丢则问题在本地出口到承载网之间。",
+    "L4.RETRANS.ADVICE.DOWN": "缺段发生在服务端下行方向。先确认服务端出口带宽与限速策略，再查两者之间的中间设备。",
+    "L4.ZEROWIN.ADVICE": "零窗口是接收方缓冲区被塞满、通告发送方暂停。先判断通告方是本机还是对端：本机通告 → 查本机应用（渲染、磁盘、杀软）；对端通告 → 查服务端应用与磁盘 IO。不要当成网络故障处理。",
+    "L4.CONNECT.ADVICE": "SYN 无响应优先查端口是否监听、防火墙/安全组是否放行、路由是否回指；被 RST 说明网络是通的，是对方主动拒绝（端口没开或 ACL 拒绝）。",
+    "L7.DNS.ADVICE": "先确认 DNS 服务器地址是否写错、域名是否拼错；配置正常且集中在随机域名时，再考虑 DNS 劫持或恶意程序。",
+    "L7.HTTP.ADVICE": "5xx 是服务端自己的问题，网络背锅不成立。按状态码查应用日志：500 看异常栈、502/504 看反代到后端、503 看是否过载。",
+    "L7.TLS.ADVICE": "少量 TLS 告警通常是正常的关闭通知。若告警量大或集中在单站点，再查证书是否过期、域名是否匹配、协议/套件是否被中间设备拦截。",
+    "SEC.EXFIL.ADVICE": "确认是否为业务所需；非业务用途时在防火墙阻断该方向，并在主机上定位进程。",
+    "SEC.SCAN.ADVICE": "确认是否有资产测绘/漏扫任务在运行；不是的话按失陷主机排查。",
+    "SEC.PLAINTEXT.ADVICE": "改用加密协议（HTTPS/SFTP/SSH），并把这批口令按已泄露处理。",
+    "COLLECT.ADVICE": "换一块网卡重抓 30 秒，或把目标留空后重试；当前报文太少，任何结论都不可信。"
+  },
+  "next_step": {
+    "collect_again": "在界面上把「网卡」改成实际在用的那块，目标留空抓 30 秒。",
+    "probe_link": "先用「链路体检」测目标端口是否可达，确认是端口不通还是链路慢。",
+    "path_probe": "对同一目标做一次路径探测，确认丢包从哪一跳开始。",
+    "baseline": "本次无需处理，保留报告作为基线；下次出现卡顿时再抓一次对比指标变化。",
+    "ai_explain": "如需排障建议，可点「AI 解读」（数据已脱敏）。",
+    "check_switch": "查网线/光模块/交换机端口（CRC 错包、双工不匹配）。"
+  },
+  "layer_detail": {
+    "l2.arp": "ARP 无应答 {count} 个地址",
+    "l2.ok": "同网段地址解析正常",
+    "l3.no_sample": "本次无 RTT 采样（纯 UDP/短连接）",
+    "l3.rtt": "RTT 均值 {avg}ms，抖动 {jitter}ms",
+    "l4.no_tcp": "本次无 TCP 流量",
+    "l4.retrans": "重传率 {rate}%",
+    "l4.insufficient": "样本不足（TCP 会话 {streams} 个）",
+    "l7.no_sample": "本次无应用层样本"
+  },
+  "insufficient": {
+    "duration_too_short": "抓包时长 {actual}s 低于 {need}s，可能漏掉问题时段",
+    "too_few_streams": "TCP 会话只有 {actual} 个（低于 {need}），样本不足以判断",
+    "too_few_rtt": "RTT 采样只有 {actual} 个（低于 {need}）",
+    "no_app_sample": "没有任何 DNS/HTTP 样本，应用层无结论",
+    "packets_zero": "抓包文件为空"
+  }
+}

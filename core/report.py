@@ -44,6 +44,16 @@ def _opt(v, has: bool) -> str:
 
 
 def render_markdown(result: dict, vd: dict | None = None) -> str:
+    """把一次诊断结果渲染成 Markdown 报告。
+
+    Args:
+        result: ``analyze()``/``run_scan()`` 的结果字典。
+        vd: 判定结果；省略时现场 ``verdict.build(result)`` 算一遍（避免调用方重复计算）。
+
+    Returns:
+        str: 完整 Markdown 正文 —— 结论段、分层定位、问题清单（现象/处理/依据）、
+            会话表与技术明细。
+    """
     vd = vd or result.get("verdict") or verdict_mod.build(result)
     meta = result.get("meta", {})
     rows = result.get("rows", [])
@@ -257,7 +267,20 @@ def _rcode_text(code: str) -> str:
 
 
 def save(result: dict, out_dir: Path) -> dict:
-    """写出 .md 与 .json，返回路径。"""
+    """把报告写成 ``.md`` 与 ``.json`` 两份。
+
+    Args:
+        result: 诊断结果字典。
+        out_dir: 输出目录（通常是 ``reports/``）。
+
+    Returns:
+        dict: 键 ``md`` / ``json``（绝对路径字符串）。
+
+    Note:
+        JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
+        因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
+        文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     meta = result.get("meta") or {}
