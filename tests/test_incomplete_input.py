@@ -83,7 +83,9 @@ class IncompleteInputTest(unittest.TestCase):
         """可复现性：同一文件连跑两次，归一化后必须逐字节一致。"""
         def norm(res: dict) -> str:
             data = json.loads(json.dumps(res, sort_keys=True, ensure_ascii=False))
+            # 任何由 wall clock 产生的字段都必须归一化，否则 CI 会随机红
             data.get("meta", {}).pop("generated_at", None)
+            data.get("provenance", {}).pop("generated_at", None)
             return json.dumps(data, sort_keys=True, ensure_ascii=False)
 
         first = analyzer.analyze(SAMPLE)
