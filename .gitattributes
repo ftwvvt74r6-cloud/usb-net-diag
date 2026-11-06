@@ -9,3 +9,8 @@
 *.exe binary
 *.png binary
 *.jpg binary
+
+# markdown 由生成器产出，必须跨平台一致：否则 Windows 上跑一次生成器，
+# 就会看到「内容没变但 git status 显示已修改」的假噪音（CI 不受影响，
+# 因为 Linux 两端都是 LF，但本地很容易误提交）。
+*.md text eol=lf
