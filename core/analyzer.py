@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import io
 import ipaddress
 import math
@@ -30,6 +31,8 @@ FIELDS = [
     "frame.len",
     "ip.src",
     "ip.dst",
+    "ipv6.src",
+    "ipv6.dst",
     "ip.proto",
     "tcp.srcport",
     "tcp.dstport",
@@ -96,12 +99,20 @@ def _flag(v) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes")
 
 
+def _port(v) -> int:
+    """端口转 int：tshark 偶尔给空值或逗号聚合值，别让一行脏数据毁掉整次分析。"""
+    try:
+        return int(str(v).split(",")[0].strip())
+    except (TypeError, ValueError):
+        return 0
+
+
 def _is_public(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    return addr.version == 4 and addr.is_global
+    return addr.is_global
 
 
 def _pct(part: float, total: float) -> float:
@@ -221,6 +232,10 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
                 st["last_ts"] = ts
 
         src, dst = r.get("ip.src", ""), r.get("ip.dst", "")
+        if not src:
+            src = r.get("ipv6.src", "")
+        if not dst:
+            dst = r.get("ipv6.dst", "")
         proto = r.get("ip.proto", "")
         if proto:
             st["proto_mix"][proto] += 1
@@ -244,6 +259,10 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
                 s["first"] = ts
             if ts > s["last"]:
                 s["last"] = ts
+            is_syn, is_ack = _flag(r.get("tcp.flags.syn")), _flag(r.get("tcp.flags.ack"))
+            is_rst, is_fin = _flag(r.get("tcp.flags.reset")), _flag(r.get("tcp.flags.fin"))
+            tlen = int(_num(r.get("tcp.len")))
+
             if not s["client"]:
                 try:
                     if int(sport or 0) > int(dport or 0):
@@ -254,10 +273,13 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
                     s["client"], s["sport"], s["server"], s["dport"] = src, sport, dst, dport
                 s["app"] = _guess_app(s["dport"], s["sport"])
 
-            is_syn, is_ack = _flag(r.get("tcp.flags.syn")), _flag(r.get("tcp.flags.ack"))
-            is_rst, is_fin = _flag(r.get("tcp.flags.reset")), _flag(r.get("tcp.flags.fin"))
+            # 只看端口大小是不够的：如果抓到的是 SYN（而非 SYN-ACK），发起方一定是客户端。
+            # 这样中途开始抓包、或两端都是高位端口时，方向也不会判反。
+            if is_syn and not is_ack and s["packets"] <= 3 and src != s["client"]:
+                s["client"], s["sport"], s["server"], s["dport"] = src, sport, dst, dport
+                s["app"] = _guess_app(s["dport"], s["sport"])
+
             from_client = (src == s["client"])
-            tlen = int(_num(r.get("tcp.len")))
 
             if is_syn:
                 st["syn"] += 1
@@ -741,9 +763,9 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
     sec: list[dict] = []
     for ip, pkts in st["ext_dst"].most_common(50):
         ports = st["ext_ports"][ip]
-        hit = [p for p in ports if int(p) in SUSPICIOUS_PORTS]
+        hit = [p for p in ports if _port(p) in SUSPICIOUS_PORTS]
         if hit:
-            desc = "、".join(f"{p}({SUSPICIOUS_PORTS[int(p)]})" for p in sorted(hit, key=int))
+            desc = "、".join(f"{p}({SUSPICIOUS_PORTS[_port(p)]})" for p in sorted(hit, key=_port))
             sec.append(_row("安全观察", "TCP", "可疑外联",
                             f"外联 {ip} 使用高危端口 {desc}，共 {pkts} 个报文", "警告",
                             "帧 " + ",".join(f"#{f}" for f in st["ext_frames"][ip][:5]),
@@ -887,14 +909,14 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
             "retrans_streams": [(x["stream"], x["retrans"]) for x in streams if x["retrans"]][:5],
             "ext_detail": [
                 {"ip": ip, "packets": n,
-                 "ports": sorted(st["ext_ports"][ip], key=lambda p: int(p))[:12],
-                 "risk_ports": sorted([p for p in st["ext_ports"][ip] if int(p) in SUSPICIOUS_PORTS],
-                                      key=lambda p: int(p))}
+                 "ports": sorted(st["ext_ports"][ip], key=_port)[:12],
+                 "risk_ports": sorted([p for p in st["ext_ports"][ip] if _port(p) in SUSPICIOUS_PORTS],
+                                      key=_port)}
                 for ip, n in st["ext_dst"].most_common(10)
             ],
             "cred_events": _cred_events(st),
             "threat_intel": {},
-            "generated_at": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "tshark_path": str(find_tshark() or ""),
         },
         "metrics": m,

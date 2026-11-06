@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import select
 import socket
 import ssl
@@ -130,6 +131,8 @@ def _parse_target(target: str, port: int | None) -> tuple[str, int, str, bool, b
     t = (target or "").strip()
     if not t:
         raise ValueError("请填写要诊断的域名或 IP")
+    if len(t) > 300:
+        raise ValueError("目标过长，请只填域名、IP 或带端口的地址")
     explicit_tls = False
     path = "/"
     if "://" in t:
@@ -139,27 +142,54 @@ def _parse_target(target: str, port: int | None) -> tuple[str, int, str, bool, b
         path = u.path or "/"
         if u.query:
             path += "?" + u.query
+        if not host:
+            raise ValueError("URL 里没有主机名")
         if port is None:
-            port = u.port or (443 if explicit_tls else 80)
+            try:
+                port = u.port or (443 if explicit_tls else 80)
+            except ValueError as exc:
+                raise ValueError(f"URL 里的端口不合法：{exc}") from exc
         return host, int(port), path, explicit_tls, explicit_tls
+
+    # 支持 [::1]:8080 这种 IPv6 写法
+    if t.startswith("["):
+        end = t.find("]")
+        if end < 0:
+            raise ValueError("IPv6 地址缺少右方括号")
+        host = t[1:end]
+        rest = t[end + 1:]
+        path = rest[1:] if rest.startswith("/") else "/"
+        if rest.startswith(":"):
+            port_s = rest[1:]
+            if port_s.isdigit() and port is None:
+                port = int(port_s)
+        elif rest and not rest.startswith("/"):
+            raise ValueError("IPv6 地址后只能跟端口或路径")
+        if port is None:
+            port = 443
+        return host, int(port), path, port == 443, False
+
     host, _, p = t.partition("/")
     path = "/" + p if p else "/"
     if ":" in host and host.count(":") == 1:
         host, _, port_s = host.partition(":")
         if port_s.isdigit() and port is None:
             port = int(port_s)
+    host = host.strip()
+    if not host:
+        raise ValueError("请填写要诊断的域名或 IP")
     if port is None:
         port = 443
-    return host.strip(), int(port), path, port == 443, False
+    return host, int(port), path, port == 443, False
 
 
 def _resolve(host: str, port: int, rounds: int = 3) -> dict:
-    """DNS 解析计时。返回首次（冷）与多次（热）耗时。"""
+    """DNS 解析计时。返回首次（冷）与多次（热）耗时。IP 字面量直接跳过。"""
     try:
-        socket.inet_aton(host)
-        return {"skipped": True, "ms": 0.0, "ips": [host], "stats": _stat([]),
+        ipaddress.ip_address(host.strip("[]"))
+        return {"skipped": True, "ms": 0.0, "ips": [host.strip("[]")], "stats": _stat([]),
                 "note": "输入已是 IP，跳过解析"}
-    except OSError:
+    except ValueError:
         pass
     times: list[float] = []
     ips: list[str] = []
@@ -181,8 +211,22 @@ def _resolve(host: str, port: int, rounds: int = 3) -> dict:
             "ips": ips, "stats": stats, "error": err if not ips else ""}
 
 
+def _pick_ip(ips: list[str]) -> str:
+    """双栈环境下优先用 IPv4：企业网里 IPv6 常只有地址没有真实路由，
+    先试 IPv6 会白白多等一个超时。纯 IPv6 目标仍能正常走通。"""
+    v4 = [x for x in ips if ":" not in x]
+    return (v4 or ips or [""])[0]
+
+
+def _host_header(host: str) -> str:
+    """HTTP Host 头：IPv6 字面量要用方括号包起来。"""
+    return f"[{host}]" if ":" in host else host
+
+
 def _connect(ip: str, port: int, timeout: float) -> tuple[socket.socket | None, float, str]:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    """建立 TCP 连接；按地址字面量自动选 IPv4 / IPv6 地址族。"""
+    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    s = socket.socket(family, socket.SOCK_STREAM)
     s.settimeout(timeout)
     t0 = time.perf_counter()
     try:
@@ -324,7 +368,7 @@ def _http(ip: str, port: int, host: str, path: str, use_tls: bool,
     """发一个真实 GET，测首字节时间（TTFB）与总耗时。TTFB 才算服务端处理能力。"""
     if time.monotonic() > deadline:
         return {"ok": False, "error": "总耗时超出预算，跳过"}
-    req = (f"GET {path or '/'} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {UA}\r\n"
+    req = (f"GET {path or '/'} HTTP/1.1\r\nHost: {_host_header(host)}\r\nUser-Agent: {UA}\r\n"
            f"Accept: */*\r\nConnection: close\r\n\r\n").encode()
     raw, _, err0 = _connect(ip, port, timeout)
     if raw is None:
@@ -657,7 +701,7 @@ def run(target: str, port: int | None = None, count: int = 4, timeout: float = 3
             "total_ms": 0,
         }
 
-    ip = (dns.get("ips") or [""])[0]
+    ip = _pick_ip(dns.get("ips") or [])
     tcp = _tcp(ip, port, count, timeout, deadline)
 
     if tcp["ok"]:
@@ -897,6 +941,11 @@ def run(target: str, port: int | None = None, count: int = 4, timeout: float = 3
     pname = proto_info["name"]
     layers = proto_info["layer"]
 
+    # 先给一个通用结论，各分支只负责「更准确的那一句」，避免漏赋值
+    headline = f"各段耗时正常：总耗时 {total:.0f}ms"
+    advice = ("本次体检未发现异常。若用户仍反馈慢，请在其实际操作时抓包，"
+              "或换一个目标地址对比。")
+
     if worst == 0:
         if pid == "opaque":
             headline = (f"TCP 连通正常（建连 {tcp['stats']['avg']:.0f}ms）："
@@ -913,14 +962,17 @@ def run(target: str, port: int | None = None, count: int = 4, timeout: float = 3
                         f"{tls_res.get('ms', 0):.0f}ms")
             advice = ("本次体检未发现异常。若用户仍反馈慢，请在其实际操作时抓包，"
                       "或换一个目标地址对比。")
+        elif pid == "http" and http_res.get("ok"):
+            headline = (f"HTTP 服务正常：建连 {tcp['stats']['avg']:.0f}ms，"
+                        f"首字节 {http_res.get('ttfb_ms', 0):.0f}ms，"
+                        f"状态码 {http_res.get('status', '-')}")
+            advice = ("网络与应用层都正常。若用户仍反馈慢，请在其实际操作时抓包，"
+                      "或对比同网段其它目标的建连耗时，判断是否只是这一台服务端慢。")
         elif pid in BANNER_PROTOS and proto_info.get("banner_hex"):
             headline = (f"{pname} 响应正常：建连 {tcp['stats']['avg']:.0f}ms，"
                         f"banner {ident['id_ms']:.0f}ms")
             advice = ("端口可达、服务端已按要求返回 banner。若业务仍异常，"
                       "请抓包看完整交互（认证、读写、超时）。")
-        else:
-            advice = ("本次体检未发现异常。若用户仍反馈慢，请在其实际操作时抓包，"
-                      "或换一个目标地址对比。")
     else:
         bad = next((s for s in segments if s["status"] == "bad"), None)
         warn = next((s for s in segments if s["status"] == "warn"), None)

@@ -33,6 +33,9 @@ DEFAULT_CONFIG = {
     "max_duration": 180,
     "threat_intel_key": "",
     "auto_open_browser": True,
+    # 静默启动（NetDiag.vbs）时，界面超过这么多分钟没人访问就自动退出；
+    # 设为 0 表示常驻不退（需自己结束进程）
+    "idle_exit_min": 30,
 }
 
 
@@ -65,9 +68,14 @@ def log(msg: str) -> None:
 
 
 def bpf_for(target: str) -> str:
+    """把目标转成 BPF 过滤器。只接受 IP / CIDR / 域名，避免把任意表达式喂给抓包器。"""
     t = (target or "").strip()
     if not t:
         return ""
+    if len(t) > 200:
+        raise ValueError("目标过长")
+    if not all(c.isalnum() or c in ".:/-_" for c in t):
+        raise ValueError("目标只能是 IP、网段(CIDR) 或域名，不要带空格与特殊符号")
     # 支持 CIDR 段
     if "/" in t:
         return f"net {t}"
@@ -111,7 +119,10 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
 
     CAPTURES.mkdir(parents=True, exist_ok=True)
     pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
-    bpf = bpf_for(target)
+    try:
+        bpf = bpf_for(target)
+    except ValueError as exc:
+        return {"ok": False, "error": f"目标不合法：{exc}"}
     duration = max(3, min(int(duration or 30), 180))
 
     cmd = [str(ts), "-i", str(iface["index"]), "-w", str(pcap), "-a", f"duration:{duration}", "-q"]

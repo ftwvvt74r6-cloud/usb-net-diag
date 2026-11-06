@@ -17,7 +17,10 @@
 """
 from __future__ import annotations
 
+import queue
 import re
+import subprocess
+import threading
 import time
 
 import probe  # 复用协议特征表与首包识别
@@ -73,10 +76,19 @@ def engine_status() -> dict:
 
 # ---------------------------------------------------------------- 工具函数
 def _bpf(target: str) -> str:
-    """把用户输入变成抓包过滤器；支持直接写 BPF 表达式。"""
+    """把用户输入变成抓包过滤器；支持直接写 BPF 表达式。
+
+    参数最终以 argv 形式传给 tshark（不经 shell），不存在命令注入；
+    但仍要挡住控制字符和明显非法字符，否则只会得到一句看不懂的抓包错误。
+    """
     t = (target or "").strip()
     if not t:
         return ""
+    t = "".join(c for c in t if 32 <= ord(c) < 127)[:200]
+    if not t:
+        return ""
+    if any(c in t for c in "\"'`;\\"):
+        raise ValueError("目标里含有引号或反斜杠等非法字符")
     if " " in t or t.split()[0] in ("host", "net", "port", "tcp", "udp", "icmp"):
         return t
     if "/" in t:
@@ -250,7 +262,7 @@ def _capture_scapy(device: str, duration: int, bpf: str, max_packets: int,
 
 
 TSHARK_FIELDS = [
-    "frame.time_epoch", "frame.len", "ip.src", "ip.dst",
+    "frame.time_epoch", "frame.len", "ip.src", "ip.dst", "ipv6.src", "ipv6.dst",
     "tcp.srcport", "tcp.dstport", "udp.srcport", "udp.dstport",
     "tcp.flags.syn", "tcp.flags.ack", "tcp.flags.fin", "tcp.flags.push",
     "tcp.flags.reset", "tcp.payload", "udp.payload",
@@ -259,52 +271,118 @@ TSHARK_FIELDS = [
 
 def _capture_tshark(device: str, duration: int, bpf: str, max_packets: int,
                     logger=None, should_stop=None) -> list[dict]:
-    """兜底引擎：tshark 抽字段，解析成与 scapy 相同的记录结构。"""
+    """兜底引擎：tshark 抽字段，解析成与 scapy 相同的记录结构。
+
+    字段按表头名取值（`-E header=y`），不靠位置，避免以后加字段时错位。
+    """
     exe = tshark.find_tshark()
     if not exe:
         raise RuntimeError("既没有 scapy 也找不到 tshark，无法被动抓包")
     args = [str(exe), "-i", device or "1", "-a", f"duration:{duration}",
-            "-c", str(max_packets), "-T", "fields", "-E", "separator=\t",
-            "-E", "occurrence=f"]
+            "-c", str(max_packets), "-T", "fields", "-E", "header=y",
+            "-E", "separator=\t", "-E", "occurrence=f"]
+    if bpf:
+        args += ["-f", bpf]
     for f in TSHARK_FIELDS:
         args += ["-e", f]
-    if bpf:
-        args[4:4] = ["-f", bpf]
-    rc, out, err = tshark.run(args, timeout=duration + 30)
-    if rc != 0 and not out:
-        raise RuntimeError(f"{(err or '').strip()[:200]}")
+
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace",
+                            creationflags=tshark.CREATE_NO_WINDOW)
+
+    # 必须边读边处理：tshark 输出量可达数 MB，管道缓冲区（约 64KB）写满后
+    # 子进程会阻塞在 write 上，而父进程若在等进程退出就会死锁。
+    lines: queue.Queue = queue.Queue(maxsize=50000)
+    SENTINEL = None
+
+    def _reader():
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                lines.put(line.rstrip("\r\n"))
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            lines.put(SENTINEL)
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    header: list[str] | None = None
     recs: list[dict] = []
-    for line in (out or "").splitlines():
-        parts = line.split("\t")
-        if len(parts) < 8:
-            continue
-        (ts, size, sip, dip, tsp, tdp, usp, udp_dp,
-         syn, ack, fin, psh, rst, tload, uload) = (parts + [""] * 15)[:15]
+    deadline = time.time() + duration + 20
+    stopped = False
+    try:
+        while True:
+            try:
+                line = lines.get(timeout=0.25)
+            except queue.Empty:
+                if should_stop and should_stop():
+                    stopped = True
+                if stopped or time.time() > deadline or len(recs) >= max_packets:
+                    proc.kill()
+                    break
+                continue
+            if line is SENTINEL:
+                break
+            if should_stop and should_stop():
+                stopped = True
+                proc.kill()
+                break
+            parts = line.split("\t")
+            if header is None:
+                header = parts
+                continue
+            if len(parts) < len(header):
+                parts += [""] * (len(header) - len(parts))
+            r = dict(zip(header, parts))
+            try:
+                t = float(r.get("frame.time_epoch") or 0)
+            except ValueError:
+                continue
+            try:
+                size_i = int(r.get("frame.len") or 0)
+            except ValueError:
+                size_i = 0
+            sip = r.get("ip.src") or r.get("ipv6.src") or ""
+            dip = r.get("ip.dst") or r.get("ipv6.dst") or ""
+            tsp, tdp = r.get("tcp.srcport"), r.get("tcp.dstport")
+            usp, udp_dp = r.get("udp.srcport"), r.get("udp.dstport")
+            if tsp and tdp:
+                transport, sport, dport, raw = "TCP", tsp, tdp, r.get("tcp.payload", "")
+                flags = ((FLAG_SYN if _truth(r.get("tcp.flags.syn")) else 0)
+                         | (FLAG_ACK if _truth(r.get("tcp.flags.ack")) else 0)
+                         | (FLAG_FIN if _truth(r.get("tcp.flags.fin")) else 0)
+                         | (FLAG_RST if _truth(r.get("tcp.flags.reset")) else 0)
+                         | (FLAG_PSH if _truth(r.get("tcp.flags.push")) else 0))
+            elif usp and udp_dp:
+                transport, sport, dport, raw, flags = "UDP", usp, udp_dp, r.get("udp.payload", ""), 0
+            else:
+                continue
+            try:
+                payload = bytes.fromhex(raw.replace(":", ""))[:PAYLOAD_KEEP] if raw else b""
+            except ValueError:
+                payload = b""
+            recs.append({"t": t, "size": size_i, "transport": transport,
+                         "src_ip": sip, "dst_ip": dip,
+                         "sport": int(sport or 0), "dport": int(dport or 0),
+                         "flags": flags, "payload": payload})
+    finally:
         try:
-            t = float(ts)
-        except ValueError:
-            continue
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
         try:
-            size_i = int(size or 0)
-        except ValueError:
-            size_i = 0
-        if tsp and tdp:
-            transport, sport, dport, raw = "TCP", tsp, tdp, tload
-            flags = ((FLAG_SYN if _truth(syn) else 0) | (FLAG_ACK if _truth(ack) else 0)
-                     | (FLAG_FIN if _truth(fin) else 0) | (FLAG_RST if _truth(rst) else 0)
-                     | (FLAG_PSH if _truth(psh) else 0))
-        elif usp and udp_dp:
-            transport, sport, dport, raw, flags = "UDP", usp, udp_dp, uload, 0
-        else:
-            continue
+            err = (proc.stderr.read() or "") if proc.stderr else ""  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            err = ""
         try:
-            payload = bytes.fromhex(raw.replace(":", ""))[:PAYLOAD_KEEP] if raw else b""
-        except ValueError:
-            payload = b""
-        recs.append({"t": t, "size": size_i, "transport": transport,
-                     "src_ip": sip, "dst_ip": dip,
-                     "sport": int(sport or 0), "dport": int(dport or 0),
-                     "flags": flags, "payload": payload})
+            proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001
+            pass
+        if stopped and logger:
+            logger("收到停止指令，提前结束抓包")
+
+    if not recs and err.strip() and proc.returncode not in (0, None):
+        raise RuntimeError(err.strip()[:200])
     if logger:
         logger(f"tshark 抓包结束：{len(recs)} 个报文")
     return recs
@@ -388,8 +466,33 @@ def build_flows(recs: list[dict]) -> tuple[list[dict], dict]:
         "rst": sum(1 for x in flows if x["state"] == "RST 重置"),
         "syn_no_reply": sum(1 for x in flows if x["state"] == "SYN 无响应"),
         "by_proto": _count_by(flows),
+        "fanout": _fanout(flows),
     }
     return flows[:MAX_FLOWS], summary
+
+
+def _fanout(flows: list[dict], min_peers: int = 8) -> list[dict]:
+    """找出「同一本地端口同时连很多对端」的会话。
+
+    一线最常见的现象是「机器莫名卡/带宽被占满」，而抓包只看到大量短会话。
+    P2P、视频分发、云盘同步、CDN 探测都会这样，值得单独提示一句。
+    """
+    acc: dict[tuple, dict] = {}
+    for f in flows:
+        key = (f["src_ip"], f["src_port"], f["transport"])
+        it = acc.setdefault(key, {"src": f["src"], "transport": f["transport"],
+                                  "peers": set(), "ports": set(),
+                                  "bytes": 0, "packets": 0})
+        it["peers"].add(f["dst_ip"])
+        if f["dst_port"]:
+            it["ports"].add(f["dst_port"])
+        it["bytes"] += f["bytes"]
+        it["packets"] += f["packets"]
+    out = [{"src": v["src"], "transport": v["transport"], "peers": len(v["peers"]),
+            "ports": sorted(v["ports"])[:6], "bytes": v["bytes"], "packets": v["packets"]}
+           for v in acc.values() if len(v["peers"]) >= min_peers]
+    out.sort(key=lambda x: (-x["peers"], -x["bytes"]))
+    return out[:3]
 
 
 def _count_by(flows: list[dict]) -> list[dict]:
@@ -410,7 +513,10 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
     duration = max(3, min(int(duration or 20), 300))
     max_packets = max(200, min(int(max_packets or 20000), 200000))
     target = (target or "").strip()
-    bpf = _bpf(target)
+    try:
+        bpf = _bpf(target)
+    except ValueError as exc:
+        return {"ok": False, "error": f"目标/过滤器不合法：{exc}"}
     chosen, device = _resolve_iface(interface)
     if not device:
         return {"ok": False, "error": "没有可用网卡：请安装 Npcap 并以管理员身份运行"}
@@ -438,7 +544,7 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
                 logger(f"scapy 不可用（{type(exc).__name__}: {exc}），改用 tshark 兜底")
             used = "tshark"
             try:
-                recs = _capture_tshark(device, duration, bpf, max_packets, logger)
+                recs = _capture_tshark(device, duration, bpf, max_packets, logger, should_stop)
             except Exception as exc2:  # noqa: BLE001
                 return {"ok": False, "error": f"两种引擎都失败：{exc2}"}
         else:
@@ -472,6 +578,17 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
         headline = f"抓到 {summary['flows']} 条会话，协议全部识别成功"
         advice = ("识别依据写在协议下方，鼠标悬停可看全文。要看某条连接为什么慢，"
                   "把目标填成它的 IP，用左侧「链路体检」再测一次分段耗时。")
+
+    # 单端口对多对端：带宽被谁占了的常见答案
+    fan = summary.get("fanout") or []
+    if fan:
+        top = fan[0]
+        headline += f"；{top['src']} 同时在连 {top['peers']} 个对端"
+        advice = (f"{top['src']} 用 {top['transport']} 同时连接 {top['peers']} 个对端"
+                  f"（对方端口 {', '.join(str(p) for p in top['ports'][:4]) or '不固定'}），"
+                  f"累计 {top['bytes'] / 1024:.0f} KB。这种「一个端口扇出到很多 IP」的模式"
+                  f"常见于 P2P 下载、视频分发、网盘同步或 CDN 探测，通常是带宽被占用的原因。"
+                  "如非业务需要，可用 netstat -ano 找到对应进程再做限制。")
 
     return {
         "ok": True, "engine": used, "engine_version": status.get("scapy_version", ""),

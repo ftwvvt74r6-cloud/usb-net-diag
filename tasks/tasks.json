@@ -1,0 +1,482 @@
+{
+  "package": {
+    "name": "usb-net-diag-handoff",
+    "version": "1.0.0",
+    "schema_version": "1.0",
+    "generated_at": "2026-11-06",
+    "repo_version": "0.1.0",
+    "target_version": "0.2.0",
+    "contents": ["START-HERE.md", "AGENTS.md", "tasks/", "docs/", "scaffold/"],
+    "source_of_truth": "本地工作区（含 tools/ harness/ 真实 config/ logs/ reports/）。GitHub 仓库缺这些，不能作为评审依据。"
+  },
+
+  "how_to_use": [
+    "1. 先读 START-HERE.md 的第 0 节，跑通 scaffold 的 29 个用例。",
+    "2. 从 tasks 里按 phase 顺序取任务；一次只做一个；depends_on 未满足不许开工。",
+    "3. 每个任务做完，跑 acceptance.command，比对 acceptance.expect。",
+    "4. 全部做完后按 START-HERE.md 第 5 节做终验。"
+  ],
+
+  "hard_rules_ref": "AGENTS.md 第 3 节（12 条 DO NOT）",
+  "notes": [
+    "acceptance 里的 `python` 一律指 tools\\python\\python.exe；`-c` 需要先 sys.path.insert(0,'.')（便携 Python 的 ._pth 不含 cwd）。",
+    "所有命令都在仓库根目录执行，除非显式 cd。",
+    "reports/ logs/ captures/ 是运行产物，被 gitignore，测试写入它们是允许的。"
+  ],
+
+  "tasks": [
+    {
+      "id": "T00",
+      "title": "验证落地前提 + 复现「同一 pcap 结论不一致」",
+      "priority": "P0",
+      "phase": "PR0",
+      "kind": "investigate",
+      "depends_on": ["T17"],
+      "files": ["logs/diag_20261106.log", "core/bootstrap.py", "core/diagnose.py"],
+      "why": "如果目标机型装不上 Npcap、拿不到管理员权限，整个实时抓包卖点不成立，后面的优先级要重排；如果同一输入两次结论不同，CI 断言全部失效。",
+      "evidence": "logs/diag_20261106.log：16:06:36 与 16:07:35 对同一份 diag_20261106_160617.pcapng 分别给出「警告 2 项」和「警告 0 项」。",
+      "steps": [
+        "在目标机型跑 doctor.bat，确认 tshark / Npcap / 管理员三项都通过。",
+        "连续 3 次：tools\\python\\python.exe core\\diagnose.py --pcap captures\\faults_demo.pcap --json",
+        "比对三次的 critical_count / warning_count / retrans_rate 是否完全一致。",
+        "若不一致：先排除「抓包文件未写完」「同名文件被覆盖」，再检查 analyzer 是否依赖全局状态或文件系统时间。"
+      ],
+      "acceptance": {
+        "command": "for %i in (1 2 3) do @tools\\python\\python.exe core\\diagnose.py --pcap captures\\faults_demo.pcap --json",
+        "expect": "三次输出的 critical_count 与 warning_count 完全相同（README 声明为 严重 3 / 警告 5）"
+      },
+      "rollback": "无代码改动",
+      "risks": "若是 tshark 版本差异导致，需要把 tshark 版本写进 provenance 并在 CI 固定版本。"
+    },
+
+    {
+      "id": "T01",
+      "title": "落地数据契约（core/__init__.py + core/contracts.py）",
+      "priority": "P0",
+      "phase": "PR1",
+      "kind": "add-file",
+      "depends_on": ["T00"],
+      "copy_from": ["scaffold/core/__init__.py", "scaffold/core/contracts.py"],
+      "copy_to": ["core/__init__.py", "core/contracts.py"],
+      "files": ["core/contracts.py", "core/__init__.py"],
+      "why": "现有 rows[] 把「L4 传输层」「严重」这类中文当接口值，被 UI/Markdown/AI/MCP 五个出口消费。没有稳定机器码，CI 只能断言中文，改一句文案就红一片。",
+      "steps": [
+        "原样拷贝两个文件（`core` 变成真正的包；原有扁平 import 仍可用，因为 diagnose.py 会把 core 加进 sys.path）。",
+        "不要改 contracts.py 里的字段名/枚举值 —— 后面所有任务都依赖它们。",
+        "确认没有引入第三方依赖（只允许标准库）。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"import sys;sys.path.insert(0,'.');from core.contracts import SCHEMA_VERSION, Finding, Layer;print(SCHEMA_VERSION, Layer.L4.value)\"",
+        "expect": "2.0 L4"
+      },
+      "rollback": "删除 core/__init__.py 与 core/contracts.py（无其他文件依赖它们）。",
+      "risks": "core/__init__.py 会改变 `core` 的包语义；`python -m core.analyzer` 可能仍失败（analyzer 用的是扁平 import），本期不修。"
+    },
+
+    {
+      "id": "T02",
+      "title": "落地错误码 / 配置 / 平台适配 / 文案表",
+      "priority": "P0",
+      "phase": "PR1",
+      "kind": "add-file",
+      "depends_on": ["T01"],
+      "copy_from": ["scaffold/core/errors.py", "scaffold/core/config.py", "scaffold/core/platform/", "scaffold/core/copy/zh-CN.json"],
+      "copy_to": ["core/errors.py", "core/config.py", "core/platform/", "core/copy/zh-CN.json"],
+      "files": ["core/errors.py", "core/config.py", "core/platform/paths.py", "core/platform/winapi.py", "core/copy/zh-CN.json"],
+      "why": "目录路径散落在 6 个文件里用 parents[N] 拼；错误有三种形态混用；文案内联在规则里。三者都在阻碍「AI 改需求」这件事。",
+      "steps": [
+        "整目录拷贝 platform/（含 __init__.py）。",
+        "paths.py 用「标记文件向上找根」，不要改回 parents[N]。",
+        "winapi.is_admin() / npcap_installed() 已可用；adapters()/default_gateway()/dns_servers() 是 NotImplementedError，第 4 阶段再实现，先把现有 tshark.list_interfaces() 接进来当临时实现。",
+        "config.py 的 app-config 键名要与现有 config/app-config.json 对齐（server_port/default_duration/max_duration/threat_intel_key/auto_open_browser）。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"import sys;sys.path.insert(0,'.');from core.config import load_app,config_sha256;from core.platform import paths;print(paths.PATHS.root);print(load_app()['server_port'],len(config_sha256()))\"",
+        "expect": "第一行是仓库根绝对路径；第二行 `8787 16`"
+      },
+      "rollback": "删除对应新增文件/目录。",
+      "risks": "模块名 `config` 与现有 config/ 目录同名但不冲突（一个是包内模块，一个是目录）。"
+    },
+
+    {
+      "id": "T03",
+      "title": "analyzer 增量产出 findings_v2 + provenance（不改 rows）",
+      "priority": "P0",
+      "phase": "PR1",
+      "kind": "modify-file",
+      "depends_on": ["T01", "T02"],
+      "files": ["core/analyzer.py", "core/rules/legacy_map.py(新增)"],
+      "why": "让下游（AI/UI/CI）能消费结构化结论，同时不触碰现有文案，做到零风险切换。",
+      "steps": [
+        "新增 core/rules/legacy_map.py：把现有 (layer 中文, category 中文) 映射成 (Layer, Category, rule_id)，例如 ('L4 传输层','传输质量')->(Layer.L4, Category.TRANSPORT, 'L4.RETRANS.HIGH')。映射表要覆盖 build_findings 里出现的全部组合。",
+        "在 analyzer.analyze() 返回前追加 result['findings_v2'] = [Finding(...)] 与 result['provenance'] = Provenance(...)。",
+        "severity 中文转枚举：严重->CRITICAL / 警告->WARNING / 提示->INFO / —->OK。",
+        "evidence 字符串先整段塞进 Finding.metric['evidence_raw']（本阶段不追求结构化）。",
+        "⛔ 一行都不要改 rows[] 的内容与顺序。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"import sys;sys.path.insert(0,'.');from core.analyzer import analyze;r=analyze('captures/faults_demo.pcap');print(len(r['rows']),len(r['findings_v2']),r['findings_v2'][0]['rule_id'] if isinstance(r['findings_v2'][0],dict) else r['findings_v2'][0].rule_id)\"",
+        "expect": "rows 数量与改前一致；findings_v2 里出现 L4 系列 rule_id"
+      },
+      "rollback": "删除新增的两行赋值 + legacy_map.py。",
+      "risks": "映射漏项会让 findings_v2 变少；用断言 len(findings_v2) >= len(rows) - 2 兜底（安全观察项可能合并）。"
+    },
+
+    {
+      "id": "T04",
+      "title": "拆出 extract 层：Features 可落盘 features.json",
+      "priority": "P0",
+      "phase": "PR2",
+      "kind": "add-file+modify",
+      "depends_on": ["T03"],
+      "copy_from": ["scaffold/core/extract/"],
+      "copy_to": ["core/extract/"],
+      "files": ["core/extract/fields.py", "core/extract/aggregate.py", "core/analyzer.py"],
+      "why": "现在的 collect() 把「tshark 适配 + 字段解析 + 聚合」揉在一起，导致规则测试必须装 tshark。拆开后规则测试是纯 Python，可跑 ubuntu runner，且 features.json 可回放。",
+      "steps": [
+        "搬 fields.py / aggregate.py；把 analyzer.collect() 的解析循环改成调用 fields.iter_records()。",
+        "实现 aggregate.build_features()：按 docstring 的 1~7 步，重点是把 retrans/dup_ack/zero_win 按方向累计到 dir_totals。",
+        "单遍扫描：不许为了某个指标再扫一遍 pcap。",
+        "落盘：features 必须能 features.to_dict() → json。",
+        "回填 missing：凡是没样本的键都写进 Features.missing（不要用 0 冒充）。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"import sys;sys.path.insert(0,'.');from core.extract import build_features;f=build_features('captures/faults_demo.pcap');print(len(f.tcp.streams), round(f.tcp.retrans_rate,2));print(sorted(f.dir_totals))\"",
+        "expect": "第一行形如 `4 5.56`（与 reports/faults_demo.md 的「TCP 会话 4 个 / 重传率 5.56%」一致）；第二行 ['c2s','s2c']"
+      },
+      "rollback": "analyzer 保留旧 collect() 实现并存，切换开关放在 config（features_v2: true/false）。",
+      "risks": "方向判定依赖「谁是客户端」。现有规则用「端口大小」判，遇到 8080 对 443 这类会判错；需保留现有规则并在 Features 里记录判定依据。"
+    },
+
+    {
+      "id": "T05",
+      "title": "把 build_findings 拆成独立规则并接入注册表",
+      "priority": "P0",
+      "phase": "PR2",
+      "kind": "add-file+modify",
+      "depends_on": ["T04"],
+      "copy_from": ["scaffold/core/rules/", "scaffold/core/verdict/"],
+      "copy_to": ["core/rules/", "core/verdict/"],
+      "files": ["core/rules/base.py", "core/rules/l2.py", "core/rules/l3.py", "core/rules/l4.py", "core/rules/l7.py", "core/rules/security.py", "core/rules/thresholds.json", "core/verdict/verdict.py"],
+      "why": "规则是产品核心资产，必须可单独测试、可单独开关、可统计命中率。塞在一个 250 行的 build_findings 里做不到。",
+      "steps": [
+        "先搬 base.py + thresholds.json + verdict/（此时规则还是骨架）。",
+        "逐条把 build_findings 的判断搬成 Rule：一次一条，每搬一条加一个命中用例 + 一个不命中用例。",
+        "阈值全部从 thresholds.json 读，不许硬编码在 rules/*.py。",
+        "build_findings() 改成薄壳：run_rules(...) → 把 Finding 转回旧 rows[]（文案保持不变）。",
+        "保留 l4.py 里已修正的两条（RETRANS 方向判定 / ZEROWIN 归属），不要退回旧逻辑。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"import sys;sys.path.insert(0,'.');from core.rules import registry;print(len(registry()))\" ; python -m unittest discover -s tests -v",
+        "expect": "规则数 >= 8；全部用例绿"
+      },
+      "rollback": "build_findings 的旧实现保留在 core/rules/legacy.py，开关切换。",
+      "risks": "文案漂移。必须做快照：改前 cp reports/faults_demo.md baseline.md，改后 diff 忽略时间戳应为空。"
+    },
+
+    {
+      "id": "T06",
+      "title": "加「证据充分性」闸门：样本不足不许报正常",
+      "priority": "P0",
+      "phase": "PR2",
+      "kind": "modify-file",
+      "depends_on": ["T05"],
+      "files": ["core/verdict/verdict.py", "core/copy/zh-CN.json", "core/analyzer.py"],
+      "why": "日志里 1 KB 的抓包（host 过滤后几乎没有流量）被判为「严重 0 / 警告 0」→ 一线看到「各层正常」。这是最伤信任的行为。",
+      "evidence": "logs/diag_20261106.log 15:17:07「诊断完成：严重 0 项，警告 0 项」，对应抓包只有 1 KB。",
+      "steps": [
+        "assess_sufficiency 已实现，按 min_duration_s / min_tcp_streams / min_rtt_samples 判。",
+        "verdict.build 在 sufficiency.ok=False 且无命中时输出 level=NA、headline=VERDICT.INSUFFICIENT，并列出缺什么、建议怎么补采。",
+        "层状态：没样本的层输出 NA（无样本），不许输出 OK。",
+        "UI 与 Markdown 要把「证据不足」显示成独立区块，不能只改颜色。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -m unittest tests.test_rules -k sufficiency -v",
+        "expect": "短抓包用例断言 VERDICT.INSUFFICIENT；空包断言 VERDICT.EMPTY；健康抓包断言 VERDICT.OK"
+      },
+      "rollback": "把 verdict.build 的 sufficiency 分支去掉即可回到旧行为。",
+      "risks": "阈值定太严会让正常抓包也变「证据不足」。先在 faults_demo（16s/4 会话/10 RTT）上验证判 OK。"
+    },
+
+    {
+      "id": "T07",
+      "title": "修三条规则精度问题 + 清死代码",
+      "priority": "P1",
+      "phase": "PR2",
+      "kind": "modify-file",
+      "depends_on": ["T04"],
+      "files": ["core/analyzer.py", "core/verdict.py"],
+      "why": "三个会直接造成误判的实现细节。",
+      "steps": [
+        "conn_refused 现在 = 流里出现过 RST（analyzer.py:504）。改为：SYN 之后 0~1 个报文内出现 RST 才算「被拒绝」；正常关闭后的 RST 不算。",
+        "dns_timeouts 现在 = 查询数 − 响应数（analyzer.py:516）。改为按 (qname, txid) 配对，只算真正无响应的。",
+        "**P0：修 _flag() 不认多值**（analyzer.py:95-96）。tshark 对 tcp.analysis.duplicate_ack 输出的是 \"1,1\"，_flag 只认 \"1\" → dup-ACK 恒为 0 → 方向推断永久失效（code-index #28）。修法：先按逗号拆分再判任一为真。",
+        "RTT 不要直接拿 tcp.analysis.ack_rtt 当网络往返（analyzer.py:306-308）。ack_rtt 含延迟 ACK 与应用等待；纯网络 RTT 应取 SYN/SYN-ACK 间隔，其余单独记成「应用等待」（code-index #27）。",
+        "「正常」行的抑制条件漏了『提示』（analyzer.py:573/683/716），导致同一类别同时出现「4xx 提示」与「HTTP 响应正常」（code-index #29）。把 提示 也算进抑制条件。",
+        "删除 analyzer.py:85 的 SEV_ORDER 死代码。",
+        "删除 verdict.py:88 `category != '安全观察'` 的永不命中过滤（安全项其实靠 layer 排除），并在注释里写清排除机制。"
+      ],
+      "acceptance": {
+        "command": "cd scaffold && ..\\tools\\python\\python.exe tests\\fixtures\\gen_pcap.py --out %TEMP%\\fx && cd .. && tools\\python\\python.exe -m unittest tests.test_rules -v",
+        "expect": "新增用例：①正常 FIN 关闭后带 RST 的流，conn_refused 不增加 ②tcp_retransmission.pcap 的 dup_ack 计数为 2（不再是 0）③404_error.pcap 不再同时输出「4xx 提示」与「HTTP 响应正常」"
+      },
+      "rollback": "单文件改动，git revert 即可。",
+      "risks": "conn_refused 变严后，真实「端口没开」可能被漏判；用 dup 计数（连续两次 SYN 后 RST）再补一条规则。"
+    },
+
+    {
+      "id": "T08",
+      "title": "接出脱敏：AI 出口（含双断言）",
+      "priority": "P0",
+      "phase": "PR3",
+      "kind": "add-file+modify",
+      "depends_on": ["T01"],
+      "copy_from": ["scaffold/core/egress/"],
+      "copy_to": ["core/egress/"],
+      "files": ["core/egress/sanitize.py", "core/egress/ai.py", "core/ai.py"],
+      "why": "现在 build_messages 把私网 IP、公网 IP、DNS 服务器 IP、Host、URI、SNI、帧号全量发给云端模型。内网资产信息属于公司敏感数据。",
+      "steps": [
+        "搬 egress/；core/ai.py 的 build_messages 改为调用 egress.ai.build_payload（或至少在它前面插一层 sanitize）。",
+        "默认 profile = cloud_mask；配置项 egress_profile 支持 local / lan_mask / cloud_mask。",
+        "要求模型返回固定 JSON，validate_output 校验失败重试 1 次，仍失败则只出 L1 结论（不许因 AI 失败丢诊断）。",
+        "把 sanitize 的 ledger 落本地（可选 reports/<stem>.ledger.json），绝不随请求外发。",
+        "prompt_version 写进 provenance。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -m unittest tests.test_sanitize -v",
+        "expect": "两个断言都过：①verify(payload, ['192.168.1.100','password']) 为空 ②脱敏前后 findings 的 rule_id+severity 完全一致"
+      },
+      "rollback": "删掉调用，build_messages 回旧实现。",
+      "risks": "全掩码会毁掉报告可用性。必须保留端口、方向、帧序、域名后两级（骨架已实现，别改回去）。"
+    },
+
+    {
+      "id": "T09",
+      "title": "修 uri_secret 泄露路径（analyzer.py:766-770）",
+      "priority": "P0",
+      "phase": "PR3",
+      "kind": "modify-file",
+      "depends_on": ["T08"],
+      "files": ["core/analyzer.py"],
+      "why": "现在把带 password= 的 URI 前 50 字符塞进 finding，这条 finding 会同时进报告、AI prompt、MCP 返回。如果 URL 是 ?password=Abc123&user=zhang，50 字符足够带走口令。",
+      "steps": [
+        "finding 里不再拼 URI 原文：只写「Vet：路径 + 参数名」，值一律用 [REDACTED]。",
+        "basic_auth.value[:80] 现在只进内存（未外发），但也改为只存是否存在 + 长度，不存值。",
+        "报告 7.6 节「明文凭证事件」的『位置』字段同样只保留 host + 参数名。",
+        "加单测：构造含 ?password=X 的 HTTP 请求，断言 rows / Markdown / AI payload 都不含 'X'。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -m unittest tests.test_sanitize -k uri -v",
+        "expect": "报告与 payload 中都不出现口令原文"
+      },
+      "rollback": "单文件回退。",
+      "risks": "过度脱敏会让「哪条请求有问题」无法定位；保留 host + 参数名 + 帧号即可。"
+    },
+
+    {
+      "id": "T10",
+      "title": "MCP 出口同样脱敏",
+      "priority": "P1",
+      "phase": "PR3",
+      "kind": "modify-file",
+      "depends_on": ["T08"],
+      "files": ["mcp/wireshark-mcp/server.py"],
+      "why": "MCP 把完整 Markdown 报告直接交给 Agent（server.py:168），与 AI 出口是同一个泄露面，但规划里漏了。",
+      "steps": [
+        "在 _text() 里、序列化之前过一层 sanitize（profile 读 config，默认 cloud_mask）。",
+        "报告类工具（capture_live_packets / analyze_pcap / scan_network_threats / listen_flows）统一走它。",
+        "保留 tools/list 的 schema 不变（Agent 侧不用改）。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"print('{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/list\\\"}')\" | tools\\python\\python.exe mcp\\wireshark-mcp\\server.py",
+        "expect": "返回 7 个工具，且新增的脱敏不破坏 JSON 结构"
+      },
+      "rollback": "单文件回退。",
+      "risks": "脱敏后 Agent 可能要求原文；在返回里附一句「已脱敏，可用本地报告查看原文」。"
+    },
+
+    {
+      "id": "T11",
+      "title": "接入 JobStore：job_id / 增量日志 / 取消（路由不变）",
+      "priority": "P1",
+      "phase": "PR3",
+      "kind": "add-file+modify",
+      "depends_on": ["T02"],
+      "copy_from": ["scaffold/core/api/jobs.py"],
+      "copy_to": ["core/api/jobs.py"],
+      "files": ["core/api/jobs.py", "core/server.py"],
+      "why": "现在全局只有一个 JOB 字典（server.py:49），无 job_id、无法取消、/api/status 每次回传全量 result（1.2s 一轮，大 pcap 会卡）。",
+      "steps": [
+        "搬 core/api/jobs.py（已实现，含线程/取消/并发上限/环形日志）。",
+        "server.py 内部把 JOB / PJOB 换成 JobStore；**HTTP 路由与返回字段保持不变**，只**新增** job_id 字段。",
+        "/api/status 增加 since 参数，只回增量日志。",
+        "前端暂不改（下一步再改）。"
+      ],
+      "acceptance": {
+        "command": "（起服务后）curl -X POST http://127.0.0.1:8787/api/scan -d \"{\\\"mode\\\":\\\"offline\\\",\\\"pcap\\\":\\\"faults_demo.pcap\\\"}\"",
+        "expect": "返回里含 job_id；再点一次拿到 E_JOB_BUSY 语义；/api/status 带 job_id 且日志可增量"
+      },
+      "rollback": "server.py 单文件回退。",
+      "risks": "取消是合作式：capture/analyze 循环里必须真的检查 should_stop()，否则取消只是改状态。"
+    },
+
+    {
+      "id": "T12",
+      "title": "/api/v1 + envelope + 静态资源路由 + 前端拆分",
+      "priority": "P2",
+      "phase": "PR3",
+      "kind": "add-file+modify",
+      "depends_on": ["T11"],
+      "copy_from": ["scaffold/core/api/app.py"],
+      "copy_to": ["core/api/app.py"],
+      "files": ["core/api/app.py", "core/server.py", "ui/index.html"],
+      "why": "UI 只能单文件（58 KB）的真正原因是 server 只回 / 与 /index.html，没有静态路由。不解决这个，前端永远无法协作。",
+      "steps": [
+        "先加 GET /static/*（Cache-Control + 内容哈希），UI 仍单文件也能用。",
+        "再上 /api/v1/*，旧路由作为别名保留一个版本。",
+        "最后才拆 ui/index.html → ui/app.js + ui/views/*.js（原生 ES module，不引入打包器）。",
+        "错误统一 envelope：{schema_version, ok, data, error{code,message,hint}, trace_id}。"
+      ],
+      "acceptance": {
+        "command": "curl -s http://127.0.0.1:8787/api/v1/jobs",
+        "expect": "返回 envelope，data 是任务列表；GET / 仍能打开控制台；GET /static/app.js 返回 200"
+      },
+      "rollback": "旧路由保留，直接把前端切回 index.html 即可。",
+      "risks": "前端拆分是最大的一次改动，放最后做；拆分前先把 e2e 冒烟跑一遍并录屏。"
+    },
+
+    {
+      "id": "T13",
+      "title": "路径探测 + 影子探测（含「探针不污染诊断」）",
+      "priority": "P2",
+      "phase": "PR4",
+      "kind": "add-file",
+      "depends_on": ["T04", "T06"],
+      "copy_from": ["scaffold/core/pathprobe.py"],
+      "copy_to": ["core/pathprobe.py"],
+      "files": ["core/pathprobe.py", "core/capture/live.py", "core/extract/aggregate.py"],
+      "why": "打破「客户端视角」的局限，回答「丢包发生在本机出口、承载网还是服务端接入」。规划第 4、6 步合并做，因为技术难点相同。",
+      "steps": [
+        "用内置 scapy 2.8 做 TTL 递增探测（不要解析 tracert 文本，输出是本地化的、且没有丢包率）。",
+        "每跳 N 次采样 → loss_pct + rtt_min/avg。",
+        "必须先实现探针排除：抓包 -f 里并入 ProbeLedger.exclusion_bpf()，或在 aggregate 里按账本五元组+时间窗过滤。",
+        "判定要四态：OK / LOCAL_SIDE / TRANSPORT_NET / SERVER_EDGE / ICMP_FILTERED。最后一种是「ICMP 被策略过滤」，不是故障。",
+        "触发要防抖：同目标 >=2 次采样 + 间隔 >=10s + 冷却 >=60s。",
+        "记录 clock_offset_ms，账本进 result 以便复现。"
+      ],
+      "acceptance": {
+        "command": "（在同一次抓包里同时开影子探测）tools\\python\\python.exe core\\diagnose.py --target <某IP> --duration 30",
+        "expect": "结果里的 icmp_unreach / icmp_timeout / streams_total 与不开探测时一致；报告出现 PATH.* 结论"
+      },
+      "rollback": "config 加 switch=off，默认关。",
+      "risks": "企业网常禁用 ICMP → 大量 ICMP_FILTERED。必须把这个状态显示成「无法探测」而不是「故障」。"
+    },
+
+    {
+      "id": "T14",
+      "title": "历史基线库（sqlite3）",
+      "priority": "P2",
+      "phase": "PR4",
+      "kind": "add-file",
+      "depends_on": ["T05"],
+      "copy_from": ["scaffold/core/history.py"],
+      "copy_to": ["core/history.py"],
+      "files": ["core/history.py", "core/render/json_report.py"],
+      "why": "没有它，「高峰期拥塞」「比昨天更差吗」「这条规则误报率多少」全都无法回答，工具永远停在「一次性体检」。规划里完全缺这一层。",
+      "steps": [
+        "每个诊断完成后写一条 case（ts/target/profile/level/rules_hit/metrics_json/provenance_json）。",
+        "baseline(target) 取窗口内中位数（不要用平均值：网络指标长尾重）。",
+        "verdict 与 AI payload 里带上「本次 vs 基线」的对比（只在基线存在时）。",
+        "提供清理入口（UI 一键清除历史），并写进 README 的隐私说明。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe -c \"import sys;sys.path.insert(0,'.');from core import history;print(history.baseline('faults_demo')['samples'])\"",
+        "expect": "跑两次诊断后为 2；首次为 0"
+      },
+      "rollback": "删除 data/history.db 与调用点。",
+      "risks": "U 盘可能只读；写库失败必须降级为「无基线」而不是报错。"
+    },
+
+    {
+      "id": "T15",
+      "title": "工程化收口：AGENTS.md / 分支保护 / CI 三层 / pcap 样本",
+      "priority": "P1",
+      "phase": "PR4",
+      "kind": "add-ci",
+      "depends_on": ["T05"],
+      "copy_from": ["AGENTS.md"],
+      "copy_to": ["AGENTS.md"],
+      "files": [".github/workflows/smoke.yml", ".gitignore", "AGENTS.md", "tests/fixtures/gen_pcap.py(新增)", "CODEOWNERS(新增)"],
+      "why": "「禁止 AI 推 main」靠嘴说没用，必须靠分支保护；「回归防线」靠 CI，但现有 CI 只编译不改行为。",
+      "steps": [
+        "AGENTS.md 放仓库根；人工在 GitHub 打开分支保护（Require PR + Require status 'syntax-and-contract'）。",
+        "CI 拆两个 job：rules（ubuntu-latest，纯 Python，喂 features.json fixture）+ 现有 syntax-and-contract（windows）。",
+        "规则测试不要依赖 tshark。端到端才需要 choco install wireshark --params /NoNpcap。",
+        "pcap 样本用 tests/fixtures/gen_pcap.py 确定性生成（裸 pcap 写入，不依赖 scapy），不提交二进制。",
+        "若坚持提交 pcap：必须在 .gitignore 加 !tests/pcap_samples/*.pcap，否则 CI 里文件不存在、测试静默跳过。",
+        "加一条守门测试：core/rules/** 里出现中文字符就失败。"
+      ],
+      "acceptance": {
+        "command": "python -m unittest discover -s tests -v",
+        "expect": "本地与 CI 都绿；PR 未过 check 无法合并"
+      },
+      "rollback": "关闭新 job 即可，旧的 syntax-and-contract 不动。",
+      "risks": "ubuntu runner 上跑的测试不能 import scapy/tshark；import 层次要守住。"
+    },
+
+    {
+      "id": "T16",
+      "title": "接口定义文档 + 全量代码注释（小白可读，可测量）",
+      "priority": "P0",
+      "phase": "PR1",
+      "kind": "add-file+modify",
+      "depends_on": ["T01"],
+      "copy_from": ["scaffold/tools/gen_api_doc.py"],
+      "copy_to": ["scripts/gen_api_doc.py"],
+      "files": ["scripts/gen_api_doc.py", "docs/overview.md", "docs/api-reference.md", "docs/docstring-gaps.md", "docs/api-style.md", "core/**/*.py"],
+      "why": "用户原话：需要一份写清所有接口的文档 + 完整代码注释，让不懂网络的人也能读懂。现状实测：模块说明 11/11 都有，但**写了参数/返回值含义的只有 1/55（1.8%）** —— 小白读到 collect(pcap, log=None) 不知道 log 传什么、返回的 dict 里有什么键。",
+      "steps": [
+        "先把 scripts/gen_api_doc.py 放进去，跑一次拿到基线（当前 1.8%）：tools\\python\\python.exe scripts\\gen_api_doc.py",
+        "写 docs/overview.md：一页看懂（这工具干什么 / 一次诊断的数据流 / 5 个核心概念 / 三个必读文档入口）。≤ 120 行，不要贴代码。",
+        "按 docs/docstring-gaps.md 从上往下补 core/**/*.py 的 docstring，优先级：analyzer → verdict → server → report → ai。每补一个模块重跑生成器，看百分比。",
+        "严格按 docs/api-style.md 的三层标准：模块头回答四问（解决什么/谁调用/不做什么/输入输出）；函数写 Args/Returns/Raises/Example；结构化返回值必须列键名。",
+        "禁动手改 docs/api-reference.md（自动生成，手改下次就被覆盖）；要改内容就改源码 docstring。",
+        "达到 ≥95% 后，把 --check 0.95 加进 CI（ubuntu job 即可，纯标准库）。",
+        "core/rules/** 仍然禁止写中文；但这里的注释是给「读代码的人」看的，中文正文 + 英文标识符，与现有风格一致。"
+      ],
+      "acceptance": {
+        "command": "tools\\python\\python.exe scripts\\gen_api_doc.py --check 0.95",
+        "expect": "退出码 0；输出「合格率 ≥ 95.0%」；docs/docstring-gaps.md 的「待补清单」为空表"
+      },
+      "rollback": "纯文档 + docstring 改动，revert 单个 commit 即可，不影响运行逻辑。",
+      "risks": "补注释最容易变成「复述代码」。红线：不写 `i += 1  # i 加一`，只写「为什么」。另外别为了凑覆盖率给私有函数加废话注释——优先级是公开接口。"
+    },
+
+    {
+      "id": "T17",
+      "title": "接管 git 仓库（身份/代理/认证/首次导入）—— 必须最先做",
+      "priority": "P0",
+      "phase": "PR0",
+      "kind": "env-setup",
+      "depends_on": [],
+      "copy_from": ["docs/git-setup.md", "AGENTS.md"],
+      "copy_to": ["docs/git-setup.md", "AGENTS.md"],
+      "files": ["docs/git-setup.md", "AGENTS.md"],
+      "why": "公司那台电脑还没配过 git，而后面所有任务都以「改动经 PR 进 main」为前提；配不好就连 CI 都跑不起来。另外公司网络大概率有代理/证书拦截，这步不先验证，后面每次 push 都会卡。",
+      "steps": [
+        "严格按 docs/git-setup.md 的 §1→§9 顺序执行，不要跳步。",
+        "§4 网络/代理是最大卡点：先用 Test-NetConnection + git ls-remote 判定直连是否可行，再决定是否配 http.proxy，或改走 SSH over 443（ssh.github.com:443）。",
+        "clone 到本机（如 D:\\work\\usb-net-diag），**不要 clone 到 U 盘**（exFAT 无权限位/无硬链接，且会被拔）。",
+        "把 U 盘上该进库的文件拷进去（清单见 git-setup §7），**tools/ harness/ logs/ reports/ dist/ captures/*.pcap 一律不拷**。",
+        "git status --short 逐条对账后再 commit；commit 走新分支 + PR，不要直推 main。",
+        "网页上打开分支保护（Require PR + Require check 'syntax-and-contract'），并把 AGENTS.md 提交到仓库根。"
+      ],
+      "acceptance": {
+        "command": "git -C <仓库> rev-parse HEAD ; git -C <仓库> rev-parse origin/main ; git -C <仓库> status --short",
+        "expect": "两个 sha 相同；status 为空；git ls-files 的条数 >= 27；GitHub Actions 页面出现一次成功的 run"
+      },
+      "rollback": "无代码改动；实在搞不定就删掉本地 clone 重来（U 盘源码不动）。",
+      "risks": "①公司代理需要认证/证书拦截 → 先试 SSH over 443；②装不了 Git → 用 PortableGit 解压版（git-setup §2B）；③误把 tools/ 拷进库 → git status 会列出几千个文件，按 §7 清单删掉再继续。"
+    }
+  ]
+}

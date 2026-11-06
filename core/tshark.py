@@ -234,12 +234,27 @@ def is_admin() -> bool:
 
 
 def npcap_installed() -> bool:
-    """检测 Npcap 是否安装（服务或驱动目录）。"""
+    """检测 Npcap 是否安装（看驱动文件优先，最后才问服务状态）。
+
+    只查文件系统是最快的（毫秒级）；`sc query` 在受限环境里可能卡住，
+    因此放最后并把超时压到 5 秒，且不再依赖它的输出做唯一判据。
+    """
     if os.name != "nt":
         return True
-    if Path(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "Npcap").is_dir():
-        return True
-    if Path(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "wpcap.dll").exists():
-        return True
-    rc, out, _ = run(["sc", "query", "npcap"], timeout=20)
-    return rc == 0 and "RUNNING" in out.upper() or (rc == 0 and "STOPPED" in out.upper())
+    sysroot = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    for probe in (
+        sysroot / "System32" / "Npcap",              # Npcap 安装目录
+        sysroot / "System32" / "wpcap.dll",          # WinPcap 兼容 DLL
+        sysroot / "System32" / "drivers" / "npcap.sys",
+        sysroot / "System32" / "Packet.dll",
+    ):
+        try:
+            if probe.exists():
+                return True
+        except OSError:
+            continue
+    rc, out, _ = run(["sc", "query", "npcap"], timeout=5)
+    if rc != 0:
+        return False
+    text = (out or "").upper()
+    return "RUNNING" in text or "STOPPED" in text

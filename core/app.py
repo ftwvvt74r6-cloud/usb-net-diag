@@ -1,0 +1,168 @@
+"""静默启动器：像应用一样双击即用，全程不弹控制台窗口。
+
+由 NetDiag.vbs 用 pythonw.exe 拉起（pythonw 无控制台），流程：
+  1. 已有实例在跑 → 直接把浏览器指过去，退出（避免开第二份
+  2. 非管理员 → 用 UAC 提权重启自己（抓包需要 Npcap 的驱动权限）；
+     用户点「否」就降级为普通权限继续跑，离线分析/体检仍可用
+  3. 生成配置 → 起本地服务（后台线程）→ 打开浏览器
+  4. 界面点「退出」或长时间无人访问 → 自动收尾，不留后台进程
+
+手工调试可以 `python core/app.py --console` 前台跑，看得到日志。
+"""
+from __future__ import annotations
+
+import ctypes
+import json
+import os
+import sys
+import threading
+import time
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+CORE = Path(__file__).resolve().parent
+ROOT = CORE.parent
+sys.path.insert(0, str(CORE))
+
+LOG_FILE = ROOT / "logs" / "app.log"
+MB_ICONERROR = 0x10
+MB_ICONINFO = 0x40
+
+
+# ----------------------------------------------------------------- 基础工具
+def redirect_output() -> None:
+    """pythonw 下 sys.stdout/stderr 是 None，任何 print 都会炸，先兜住。"""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        return
+    if sys.stdout is None:
+        sys.stdout = fh
+    if sys.stderr is None:
+        sys.stderr = fh
+
+
+def msgbox(text: str, title: str = "网络诊断工具", flags: int = MB_ICONINFO) -> None:
+    """没有控制台时唯一的提示手段。"""
+    try:
+        ctypes.windll.user32.MessageBoxW(None, text, title, flags)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def is_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def relaunch_as_admin() -> bool:
+    """UAC 提权重启自己；用户点「否」返回 False。"""
+    try:
+        exe = sys.executable
+        # pythonw 提权后仍无控制台；__file__ 用绝对路径，工作目录设为 ROOT
+        params = f'"{Path(__file__).resolve()}" --elevated'
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, str(ROOT), 1)
+        return int(rc) > 32
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def find_running() -> str:
+    """探测本机是否已有实例，返回它的界面地址；没有则空串。"""
+    try:
+        import server  # noqa: PLC0415
+
+        base = int(server.diagnose.load_config().get("server_port", 8787))
+    except Exception:  # noqa: BLE001
+        base = 8787
+    for port in range(base, base + 10):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=0.7) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            if data.get("app") == "USBNetDiag" and data.get("ok"):
+                return data.get("url") or f"http://127.0.0.1:{port}/"
+        except Exception:  # noqa: BLE001
+            continue
+    return ""
+
+
+# --------------------------------------------------------------------- 主流程
+def main() -> int:
+    redirect_output()
+    as_console = "--console" in sys.argv
+    elevated = "--elevated" in sys.argv
+
+    # 1. 已有一个实例在跑：直接开浏览器，不重复起服务
+    url = find_running()
+    if url:
+        webbrowser.open(url)
+        return 0
+
+    # 2. 提权（只做一次）。UAC 被拒就以普通权限继续，功能降级但不崩
+    if not is_admin():
+        if not elevated and relaunch_as_admin():
+            return 0
+        if not as_console:
+            print("[i] 未获得管理员权限：实时抓包可能受限，离线分析与链路体检可用。")
+
+    import bootstrap  # noqa: PLC0415
+    import diagnose  # noqa: PLC0415
+    import server  # noqa: PLC0415
+    import tshark  # noqa: PLC0415
+
+    try:
+        bootstrap.gen_configs()
+        cfg = diagnose.load_config()
+    except Exception as exc:  # noqa: BLE001
+        msgbox(f"初始化失败：{type(exc).__name__}: {exc}\n\n"
+               f"请确认项目目录完整：\n{ROOT}", flags=MB_ICONERROR)
+        return 1
+
+    if not tshark.find_tshark():
+        msgbox("没找到 tshark，抓包与离线分析都不可用。\n\n"
+               "请把 Wireshark 便携版解压到：\n"
+               f"{ROOT}\\tools\\WiresharkPortable\\App\\Wireshark\\",
+               flags=MB_ICONERROR)
+        return 1
+
+    # 3. 起服务。idle_exit_min：浏览器关了没人访问就自动退出，
+    #    避免「窗口看不见、进程还在」的僵尸状态
+    idle_min = int(cfg.get("idle_exit_min", 30) or 0)
+    httpd, url = server.create_server(int(cfg.get("server_port", 8787)),
+                                      idle_exit_min=idle_min, quiet=True)
+    if httpd is None:
+        msgbox("端口 8787-8796 都被占用了，无法启动本地服务。\n"
+               "请关掉占用端口的程序后重试。", flags=MB_ICONERROR)
+        return 1
+
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 启动 {url} pid={os.getpid()} "
+          f"admin={is_admin()} idle_exit={idle_min}min")
+
+    def _open() -> None:
+        time.sleep(0.4)  # 等 serve_forever 起来，避免瞬间 502
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001
+            pass
+
+    threading.Thread(target=_open, daemon=True).start()
+
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+        server.cleanup_pid()
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 服务已退出")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

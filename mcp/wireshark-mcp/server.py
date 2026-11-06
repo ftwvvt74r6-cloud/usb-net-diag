@@ -129,6 +129,15 @@ def _text(payload) -> dict:
             "isError": False}
 
 
+def _num(v, default: int, lo: int, hi: int) -> int:
+    """模型给的参数可能是字符串/越界值：统一收敛到安全区间，避免一次调用卡死几十秒。"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(n, hi))
+
+
 def _err(msg: str) -> dict:
     return {"content": [{"type": "text", "text": f"错误：{msg}"}], "isError": True}
 
@@ -160,7 +169,8 @@ def call_tool(name: str, args: dict) -> dict:
 
     if name == "capture_live_packets":
         target = (args.get("target_ip") or "").strip()
-        res = diagnose.run_scan(target=target, duration=int(args.get("duration") or 30),
+        res = diagnose.run_scan(target=target,
+                                duration=_num(args.get("duration") or 30, 30, 5, 180),
                                 interface=args.get("interface"), logger=lambda m: None)
         if not res.get("ok"):
             hint = " 可改用 analyze_pcap 做离线分析。" if res.get("degraded") else ""
@@ -168,7 +178,8 @@ def call_tool(name: str, args: dict) -> dict:
         return _text(report.render_markdown(res))
 
     if name == "scan_network_threats":
-        res = diagnose.run_scan(target="", duration=int(args.get("duration") or 60),
+        res = diagnose.run_scan(target="",
+                                duration=_num(args.get("duration") or 60, 60, 5, 180),
                                 interface=args.get("interface"), logger=lambda m: None)
         if not res.get("ok"):
             hint = " 可改用 analyze_pcap 做离线分析。" if res.get("degraded") else ""
@@ -180,13 +191,13 @@ def call_tool(name: str, args: dict) -> dict:
         if not target:
             return _err("缺少 target 参数")
         port = args.get("port")
-        return _text(probe.run(target, port=int(port) if port else None,
-                               count=int(args.get("count") or 4),
+        return _text(probe.run(target, port=_num(port, 0, 1, 65535) or None,
+                               count=_num(args.get("count") or 4, 4, 1, 10),
                                proto=(args.get("proto") or None)))
 
     if name == "listen_flows":
         res = passive.run(interface=args.get("interface"),
-                          duration=int(args.get("duration") or 20),
+                          duration=_num(args.get("duration") or 20, 20, 3, 300),
                           target=(args.get("target") or "").strip(),
                           engine=(args.get("engine") or "auto"),
                           logger=lambda m: None)

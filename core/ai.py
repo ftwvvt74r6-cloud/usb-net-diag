@@ -20,6 +20,7 @@ import json
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -89,9 +90,16 @@ def _clean(patch: dict) -> dict:
             raise ValueError("接口地址不能为空")
         if not url.lower().startswith(("http://", "https://")):
             raise ValueError("接口地址必须以 http:// 或 https:// 开头")
+        if any(c in url for c in " \t\r\n\"'<>"):
+            raise ValueError("接口地址含有非法字符（空格或引号）")
+        parsed = urllib.parse.urlsplit(url)
+        if not parsed.hostname:
+            raise ValueError("接口地址缺少主机名，例如 https://api.deepseek.com/v1")
         out["base_url"] = url
     if "api_key" in patch:
-        out["api_key"] = str(patch.get("api_key") or "").strip()
+        # 只保留可见 ASCII，避免把换行/控制字符塞进 HTTP 头造成头部注入
+        key = "".join(c for c in str(patch.get("api_key") or "") if 32 <= ord(c) < 127)
+        out["api_key"] = key.strip()
     if "model" in patch:
         model = str(patch.get("model") or "").strip()
         if not model:
@@ -109,7 +117,10 @@ def _clean(patch: dict) -> dict:
         except (TypeError, ValueError):
             out["timeout"] = DEFAULTS["timeout"]
     if "verify_ssl" in patch:
-        out["verify_ssl"] = bool(patch.get("verify_ssl"))
+        v = patch.get("verify_ssl")
+        # 前端可能传字符串 "false" / "0"，bool("false") 会是 True，这里显式判一次
+        out["verify_ssl"] = (str(v).strip().lower() in ("1", "true", "yes", "on")
+                             if isinstance(v, str) else bool(v))
     return out
 
 

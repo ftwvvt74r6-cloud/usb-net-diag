@@ -1,0 +1,328 @@
+{
+    "package":  "usb-net-diag-handoff",
+    "version":  "1.2.0",
+    "schema_version":  "1.0",
+    "generated_at":  "2026-11-06T20:29:02+08:00",
+    "repo_version":  "0.1.0 (commit 0bd5dbf, 与远端 main 逐字一致)",
+    "target_version":  "0.2.0",
+    "root":  "usb-net-diag-handoff/",
+    "file_count":  59,
+    "total_bytes":  452329,
+    "changes_vs_1_1":  [
+                           "新增 scripts/gen_api_doc.py：从 AST 生成 docs/api-reference.md + docs/docstring-gaps.md，支持 --check 0.95 进 CI",
+                           "新增 docs/api-style.md：三层注释标准（模块头四问 / Args-Returns-Raises-Example / 只写为什么）+ 术语表 + 反例",
+                           "新增 docs/git-setup.md：公司电脑 git 接管手册（身份 / 代理 / 认证 / clone 到本机 / U 盘改动并入 / 分支保护 / 排错表）",
+                           "新增 docs/api-reference.md 与 docs/docstring-gaps.md：现状基线（55 个公开符号，合格 1 个，1.8%）",
+                           "新增任务 T17（git 接管，必须最先做）与 T16（接口文档+注释，门槛 --check 0.95）；T00 依赖 T17",
+                           "骨架新增 scaffold/tools/gen_api_doc.py 与 tests/test_api_doc.py（11 个用例），用例总数 41 → 54",
+                           "AGENTS.md 新增 3 条硬约束（不许手改自动生成文档 / 不许 push -f / 生成器不许放 tools/）与 4.1 文档标准"
+                       ],
+    "read_order":  [
+                       "START-HERE.md",
+                       "tasks/tasks.json",
+                       "docs/git-setup.md",
+                       "AGENTS.md",
+                       "docs/api-style.md",
+                       "docs/code-index.md",
+                       "scaffold/README.md",
+                       "docs/plan-review.md"
+                   ],
+    "verify_hint":  "PowerShell: (Get-FileHash \u003cfile\u003e -Algorithm SHA256).Hash.ToLower() 与本清单 sha256 比对",
+    "files":  [
+                  {
+                      "path":  "AGENTS.md",
+                      "bytes":  9859,
+                      "sha256":  "e6e2048284f25176914cc906863387cbf51e6c7ede19a6320c8d7ac15c7c3ffb"
+                  },
+                  {
+                      "path":  "docs/api-reference.md",
+                      "bytes":  14247,
+                      "sha256":  "f223c04c0db2275b018c2912a3580a6231bdfe52126426d47b8c7236c68d2f17"
+                  },
+                  {
+                      "path":  "docs/api-style.md",
+                      "bytes":  7366,
+                      "sha256":  "e1a559dad38dc5612f37a93f4e64ebfc44d51c8a267ee03c8cae51699686bfc1"
+                  },
+                  {
+                      "path":  "docs/code-index.md",
+                      "bytes":  9433,
+                      "sha256":  "7af4af67f2a193921740e78aa38c1aa8ba71fb106c7611c34db97dd05ec29fda"
+                  },
+                  {
+                      "path":  "docs/docstring-gaps.md",
+                      "bytes":  4397,
+                      "sha256":  "e443e86091f6e1e3a81d54299d4eef4e61405d1fdd53acc207607bfadde51b89"
+                  },
+                  {
+                      "path":  "docs/git-setup.md",
+                      "bytes":  15275,
+                      "sha256":  "fc3794ac941017fcb853fec2bbcda4dcaaabedee657ced4174a501b6739b7311"
+                  },
+                  {
+                      "path":  "docs/plan-review.md",
+                      "bytes":  38018,
+                      "sha256":  "2ecb0c27d2af01801bc7d9ae4e8175ea3c2683a962f5c6fd0836efd04c44ea99"
+                  },
+                  {
+                      "path":  "scaffold/core/__init__.py",
+                      "bytes":  576,
+                      "sha256":  "bf845205c747c21041f5b5f885dd28f3e077b7a50168b1b1bb22a70ce8d70202"
+                  },
+                  {
+                      "path":  "scaffold/core/api/__init__.py",
+                      "bytes":  279,
+                      "sha256":  "dc0b206a73d4541424a515428b1cb26cf5a48a512b5aff212f848ce5e0ebbe48"
+                  },
+                  {
+                      "path":  "scaffold/core/api/app.py",
+                      "bytes":  5715,
+                      "sha256":  "f7cd51e2ade4b94010f9ffd0a9dde7714d8abd9a7edd2a1c2151b9a7c147c23f"
+                  },
+                  {
+                      "path":  "scaffold/core/api/jobs.py",
+                      "bytes":  7360,
+                      "sha256":  "ab740f9721ca3bd247c6f7270e6ca2e135c6e35c3eb3bd05bc74b4ac9051ba08"
+                  },
+                  {
+                      "path":  "scaffold/core/capture/__init__.py",
+                      "bytes":  309,
+                      "sha256":  "c0de7afb2edb3146c79cc455002efff3a6be1095b7e6cfdcab845cf854cf7f20"
+                  },
+                  {
+                      "path":  "scaffold/core/capture/live.py",
+                      "bytes":  3235,
+                      "sha256":  "886dd3aa574d88c8afd9030e82a38d14b7d87b85406a47a389ee7d711922885b"
+                  },
+                  {
+                      "path":  "scaffold/core/capture/tshark.py",
+                      "bytes":  5224,
+                      "sha256":  "78547ecedbe8824554e4b84e0f02b93f020bd99e322984a8d990a6b1e7be6d13"
+                  },
+                  {
+                      "path":  "scaffold/core/config.py",
+                      "bytes":  4438,
+                      "sha256":  "db5e7b68bdbcc16cbc06bf74c1336ab4268097cba0f47a5c73fc01c151092744"
+                  },
+                  {
+                      "path":  "scaffold/core/contracts.py",
+                      "bytes":  17834,
+                      "sha256":  "eb2b26fbcc171010e01b17d44ecbc9888aebd767e2ab6997186d431b393d5455"
+                  },
+                  {
+                      "path":  "scaffold/core/copy/zh-CN.json",
+                      "bytes":  8840,
+                      "sha256":  "3ed89a35dc0765bc723b2a6ecece162bd6950161331553ae8c65efd7b6465184"
+                  },
+                  {
+                      "path":  "scaffold/core/egress/__init__.py",
+                      "bytes":  322,
+                      "sha256":  "ff36673618db0bd8985ecf0e685402cff6e238cf206d27ff895c3f865a20f83e"
+                  },
+                  {
+                      "path":  "scaffold/core/egress/ai.py",
+                      "bytes":  9875,
+                      "sha256":  "ed2e07d59ba1ed88af9e4be3eee4fff83a4d719296d3ffd53f4e82826ce4bb3f"
+                  },
+                  {
+                      "path":  "scaffold/core/egress/sanitize.py",
+                      "bytes":  10498,
+                      "sha256":  "aa033dff55d766656cad2282a5d985146b793e94b19b62664c24be8737ddaaba"
+                  },
+                  {
+                      "path":  "scaffold/core/errors.py",
+                      "bytes":  2872,
+                      "sha256":  "d3e36bf7e2db338a9021f2aaa4ac6aaa652517070cf1b12ce83e7f7944f8d9e7"
+                  },
+                  {
+                      "path":  "scaffold/core/extract/__init__.py",
+                      "bytes":  420,
+                      "sha256":  "11afa8578210eb51aec5d740349a7b22ee95180f75c5624b9312af17d372a6b4"
+                  },
+                  {
+                      "path":  "scaffold/core/extract/aggregate.py",
+                      "bytes":  6927,
+                      "sha256":  "447ec80aec9b1517206edaf9f6e54edc0aa6d6ed8583e314ab13f7cc22604fa4"
+                  },
+                  {
+                      "path":  "scaffold/core/extract/fields.py",
+                      "bytes":  8335,
+                      "sha256":  "32c2becae7c82a483b7e714677d3a749fb950596fb13d3b9858e9ee605291d77"
+                  },
+                  {
+                      "path":  "scaffold/core/history.py",
+                      "bytes":  6120,
+                      "sha256":  "d86eb1996dc8c1f2746fa05ee46cb9065c93708d39431a942bdc71f9f367feca"
+                  },
+                  {
+                      "path":  "scaffold/core/passive.py",
+                      "bytes":  1773,
+                      "sha256":  "8ab8f8dfa4fc2216f578280151017699b5c8005abf9a7e09fd6c4bc229b45154"
+                  },
+                  {
+                      "path":  "scaffold/core/pathprobe.py",
+                      "bytes":  10283,
+                      "sha256":  "840276f79b79d6d22a3619307c9757034b26c3889951a8f96a14f79fbfa27aa6"
+                  },
+                  {
+                      "path":  "scaffold/core/platform/__init__.py",
+                      "bytes":  176,
+                      "sha256":  "66efc8b32a7324183b7c7618533f1739d7e6d8c5dc39cb432437906651c1757a"
+                  },
+                  {
+                      "path":  "scaffold/core/platform/paths.py",
+                      "bytes":  3741,
+                      "sha256":  "bdfac97f432a6df9f7bd879f6e072ad54c0d898c32e299933b3aaad7240a41be"
+                  },
+                  {
+                      "path":  "scaffold/core/platform/winapi.py",
+                      "bytes":  4754,
+                      "sha256":  "1c355d6f733a31fc1cbc28590ab36a9bb8bb4c5403762e614a345a6f4e0938d0"
+                  },
+                  {
+                      "path":  "scaffold/core/probe.py",
+                      "bytes":  1973,
+                      "sha256":  "240abaf7c1c82a66041bfb72a77b6f71d0cc95781d8124bc70aa63ff3a08f47b"
+                  },
+                  {
+                      "path":  "scaffold/core/render/__init__.py",
+                      "bytes":  381,
+                      "sha256":  "8b9ebdaa2bbf1e4eddf7927f60749ba6d79071b4838d8df3cd3317974af6b5a3"
+                  },
+                  {
+                      "path":  "scaffold/core/render/json_report.py",
+                      "bytes":  3001,
+                      "sha256":  "34415ea962c04ae2d4bccc6802b38bef1de4104864b59588e1df729adaa71e33"
+                  },
+                  {
+                      "path":  "scaffold/core/render/markdown.py",
+                      "bytes":  6129,
+                      "sha256":  "f2a4ce7a067152b64e78bea0cb28c603360b9792da48bb3ba6739b77107425ab"
+                  },
+                  {
+                      "path":  "scaffold/core/render/text.py",
+                      "bytes":  4144,
+                      "sha256":  "f3bffb4354a6281f39b45b2e2d95968f10904c59c7fe680b6eec9d9f60f059ce"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/__init__.py",
+                      "bytes":  677,
+                      "sha256":  "560c9a2f26b254793384648a312408e475b886d281257228840dc5b511058b2a"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/base.py",
+                      "bytes":  6302,
+                      "sha256":  "e090277b637765392e158f9384536c8c382a7e104c87c96aa308b245fdf5799b"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/l2.py",
+                      "bytes":  1859,
+                      "sha256":  "9e14b5d1d70647c0fc208b5c985360e0ff9607397253a6aa797766bff69661fc"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/l3.py",
+                      "bytes":  3104,
+                      "sha256":  "5d4e7818b7b9977c914b69884c605a095339bbc8fb299e02969982b74ae1dc29"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/l4.py",
+                      "bytes":  9596,
+                      "sha256":  "acac3023b85e1a68911dfe3976ac54fd357b2f1a5ce3aa060e7066fd091c0437"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/l7.py",
+                      "bytes":  3600,
+                      "sha256":  "d33cc741345b23341fba6e5ccb678d208f75017ff185e234d637b7159109fc31"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/legacy_map.py",
+                      "bytes":  13643,
+                      "sha256":  "dd2d2c068f76a04cbd5b467474da4443a699ecdbc85decd3b03d2020892279d8"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/security.py",
+                      "bytes":  2248,
+                      "sha256":  "003e0fe18ed14f1a418d2c749a8c9d16c2d838bec1da7e58d6a0bacc5402f629"
+                  },
+                  {
+                      "path":  "scaffold/core/rules/thresholds.json",
+                      "bytes":  1040,
+                      "sha256":  "520a522bc428e4b6ae3ceed30925d67592c310e094216f1c56dba19aebc651ab"
+                  },
+                  {
+                      "path":  "scaffold/core/verdict/__init__.py",
+                      "bytes":  240,
+                      "sha256":  "46891188bc6d58eec7298617701d17973c283917d999d2b9a1f1c3c2d0dce1dc"
+                  },
+                  {
+                      "path":  "scaffold/core/verdict/verdict.py",
+                      "bytes":  9591,
+                      "sha256":  "5f591f8092f22adcaa6989156857a5b6fcd8572938fd0cfdc08c6755381eaf50"
+                  },
+                  {
+                      "path":  "scaffold/README.md",
+                      "bytes":  11732,
+                      "sha256":  "02541047ac2caf14bb10e082ebc1c10c0d98f3a7a2cb7c7de49a1b5054df690e"
+                  },
+                  {
+                      "path":  "scaffold/run_tests.py",
+                      "bytes":  1564,
+                      "sha256":  "038e5c480e6bf734eac7710b5273a8ea6a7d11976f0d70b898c261a374104dd3"
+                  },
+                  {
+                      "path":  "scaffold/tests/__init__.py",
+                      "bytes":  200,
+                      "sha256":  "522849329175acf6cbf74d0e24f7d246191596d6246a89be5fd586a0986a905b"
+                  },
+                  {
+                      "path":  "scaffold/tests/fixtures/__init__.py",
+                      "bytes":  244,
+                      "sha256":  "c0857d856d97a313757e51572a5f2d6552fda8acb3e1cef3bdbce1c57ea2be46"
+                  },
+                  {
+                      "path":  "scaffold/tests/fixtures/gen_pcap.py",
+                      "bytes":  29919,
+                      "sha256":  "611483d0491f8b8a6f48be811ddaf3cb736c7b99ae4c0256823dd2b6fe82b491"
+                  },
+                  {
+                      "path":  "scaffold/tests/test_api_doc.py",
+                      "bytes":  7416,
+                      "sha256":  "71a0d1104d6a8ff29afb91e88cac92f71187d4c86be213ed4d7304152779d023"
+                  },
+                  {
+                      "path":  "scaffold/tests/test_fixtures.py",
+                      "bytes":  14261,
+                      "sha256":  "23ed423fbf2464230e0d2d0f2e0c762054f21fbd8c4508f3364644a14a01ac1b"
+                  },
+                  {
+                      "path":  "scaffold/tests/test_skeleton.py",
+                      "bytes":  18661,
+                      "sha256":  "b0f73dfe98c7df87d55858aec84845638cb916adcabd536bb3305feb5d69ffd5"
+                  },
+                  {
+                      "path":  "scaffold/tools/gen_api_doc.py",
+                      "bytes":  16040,
+                      "sha256":  "401c6aed12e5754acaf8dbc2715595fe49041d848f79628b1c7164c8a4501f0a"
+                  },
+                  {
+                      "path":  "scripts/gen_api_doc.py",
+                      "bytes":  16040,
+                      "sha256":  "401c6aed12e5754acaf8dbc2715595fe49041d848f79628b1c7164c8a4501f0a"
+                  },
+                  {
+                      "path":  "START-HERE.md",
+                      "bytes":  12214,
+                      "sha256":  "81a642840883c40259e59aadce76209c6b7dc20e2385b60a97bcca519c4ebc82"
+                  },
+                  {
+                      "path":  "tasks/tasks.json",
+                      "bytes":  31801,
+                      "sha256":  "8c3f585be9b146a5481f61eef94e7ec47a56dd8c0ebedbe331ddee73b41288cc"
+                  },
+                  {
+                      "path":  "tasks/TASKS.md",
+                      "bytes":  6208,
+                      "sha256":  "1481099e62872d2dbb97ed3515ae34de301f7235ca0ac9c4d4369716902dd9fd"
+                  }
+              ]
+}

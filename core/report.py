@@ -260,7 +260,10 @@ def save(result: dict, out_dir: Path) -> dict:
     """写出 .md 与 .json，返回路径。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = Path(result["meta"]["pcap_name"]).stem if result.get("meta") else "report"
+    meta = result.get("meta") or {}
+    raw = Path(str(meta.get("pcap_name") or "report")).stem
+    # 文件名来自抓包文件名，可能是上传的任意名字：过滤掉路径分隔符等危险字符
+    stem = "".join(c for c in raw if c.isalnum() or c in "._-") or "report"
     md_path = out_dir / f"{stem}.md"
     json_path = out_dir / f"{stem}.json"
     md_path.write_text(render_markdown(result), encoding="utf-8")
