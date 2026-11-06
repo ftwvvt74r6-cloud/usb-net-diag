@@ -35,7 +35,7 @@ _（无公开符号）_
 | `chat` | function | 227 | ✅ |
 | `test_connection` | function | 314 | ✅ |
 | `build_messages` | function | 378 | ✅ |
-| `analyze_result` | function | 481 | ✅ |
+| `analyze_result` | function | 501 | ✅ |
 
 ### `AIError`  (class)
 
@@ -3070,13 +3070,13 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 151 | ✅ |
-| `build` | function | 386 | ✅ |
+| `compute_layers` | function | 156 | ✅ |
+| `build` | function | 432 | ✅ |
 
 ### `compute_layers`
 
 ```python
-def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]
+def compute_layers(rows: list[dict], meta: dict, metrics: dict, sufficient: bool=True) -> list[dict]
 ```
 
 ```text
@@ -3086,6 +3086,11 @@ Args:
     rows: 旧 ``rows[]``；安全观察行**不参与**主判定。
     meta: 采集元信息；``L4`` 在没有 TCP 报文时标为 ``na``（没样本，别报正常）。
     metrics: 指标表，供状态块填明细。
+    sufficient: 证据是否充分（即 ``verdict.sufficiency.ok``）。为 ``False`` 时，
+        **没有真实样本行的层**一律置为 ``na``：否则会出现「结论是证据不足、
+        分层表却显示 ✅ 正常」的自相矛盾。有样本行（含 ``"—"``=测了正常）的层
+        仍按样本判定，保持 ``ok``。例外是 L3 的兜底中性行：它没有 ICMP/RTT
+        样本时也会写「三层转发正常」，这种行不算样本。
 
 Returns:
     list[dict]: 每项 ``{"id", "name", "protocol", "status"（ok/warn/bad/na）,
