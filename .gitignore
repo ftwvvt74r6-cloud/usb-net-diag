@@ -1,8 +1,10 @@
 # ---------------- 便携运行环境（体积过大，不纳入版本库）----------------
 # tools/  ≈ 360 MB：便携 Python 3.11 + Wireshark Portable + Npcap 安装包
 # harness/ ≈ 540 MB：DeepSeek Harness 便携版（可选 Agent 底座）
-tools/
-harness/
+# 前导斜杠不可省：不带它时 `tools/` 会匹配任意层级的同名目录，
+# 把 scaffold/tools/（真正的源码）一起吞掉。锚定后只匹配仓库根。
+/tools/
+/harness/
 
 # ---------------- 用户配置（可能含 API Key，绝不入库）----------------
 # 首次运行会自动生成 mcp-wireshark.json / harness-config.json（盘符自适应）
@@ -14,9 +16,10 @@ config/harness-config.json
 
 # ---------------- 运行产物 ----------------
 # 注意：目录要写成 dir/* 而不是 dir/，否则无法用 ! 重新包含示例文件
-captures/*
-reports/*
-logs/*
+# 前导斜杠同理：锚定到仓库根，避免误伤子目录里的同名路径。
+/captures/*
+/reports/*
+/logs/*
 __pycache__/
 *.py[cod]
 *.pcap

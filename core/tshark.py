@@ -185,6 +185,12 @@ def iter_lines(args: list[str], timeout: int = 900, sink: dict | None = None):
             except Exception:
                 pass
             proc.wait()
+            # stderr 也必须显式关闭：只 read() 不 close() 会让 TextIOWrapper 活到 GC，
+            # 在 Windows 上表现为 ResourceWarning + 短暂占用管道句柄。
+            try:
+                proc.stderr.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
             if sink is not None:
                 sink["rc"] = proc.returncode
                 sink["stderr"] = err
