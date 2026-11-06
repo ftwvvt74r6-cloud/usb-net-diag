@@ -94,7 +94,8 @@ for %%f in ("%ROOT%\harness\*.exe") do (
 
 echo.
 echo  [*] 启动本地诊断服务，浏览器将自动打开...
-echo      （关闭本窗口即停止服务）
+echo      （关闭本窗口即停止服务；界面右上角「退出」也可以）
+echo  [i] 日常使用建议双击 NetDiag.vbs：无控制台窗口，自动提权并打开界面
 echo.
 "%PY%" "%ROOT%\core\server.py"
 

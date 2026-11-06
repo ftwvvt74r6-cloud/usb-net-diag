@@ -1,7 +1,7 @@
 {
   "summary": {
     "target": "全网",
-    "pcap_file": "F:\\USB-Net-Diag\\captures\\faults_demo.pcap",
+    "pcap_file": "E:\\utest\\NetDiag\\captures\\faults_demo.pcap",
     "critical_count": 3,
     "warning_count": 5,
     "retrans_rate": 5.56,
@@ -11,7 +11,7 @@
     "conn_fail": 1
   },
   "meta": {
-    "pcap_file": "F:\\USB-Net-Diag\\captures\\faults_demo.pcap",
+    "pcap_file": "E:\\utest\\NetDiag\\captures\\faults_demo.pcap",
     "pcap_name": "faults_demo.pcap",
     "packets": 54,
     "bytes": 7727,
@@ -379,8 +379,8 @@
     ],
     "cred_events": [],
     "threat_intel": {},
-    "generated_at": "2026-11-06 17:01:17",
-    "tshark_path": "F:\\USB-Net-Diag\\tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe",
+    "generated_at": "2026-11-06 18:01:58",
+    "tshark_path": "E:\\utest\\NetDiag\\tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe",
     "interface": "-",
     "bpf": "离线分析",
     "capture_duration": 0

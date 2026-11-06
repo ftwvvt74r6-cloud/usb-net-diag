@@ -1,30 +1,27 @@
 # USB-Net-Diag
 
-放进 U 盘的 Windows 网络诊断工具链。插到目标电脑，双击 `start.bat`，浏览器打开控制台。
+放进 U 盘的 Windows 网络诊断工具链。插到目标电脑，双击 `NetDiag.vbs`（或 `start.bat`），
+浏览器自动打开控制台，**全程不弹黑色控制台窗口**。
 
 **主线是网络故障排查**：慢、卡、丢包、连不上、时通时不通。工具把问题按
 **L2 链路 → L3 网络 → L4 传输 → L7 应用** 四层定位，直接告诉你：
 **哪一层坏了、哪个协议、哪个对端、下一步做什么**。
 安全检测（明文凭证、可疑外联）只是附带项，不抢主线。
 
-> **本仓库只包含源码**：`core/`、`ui/`、`mcp/`、`skills/`、配置模板与示例报告。
-> 便携运行环境 `tools/`（约 360 MB：Python 3.11 + Wireshark + Npcap）和
-> `harness/`（约 540 MB，可选 Agent 底座）体积过大未纳入版本库，
-> 需要按「运行环境准备」一节自行放置，或直接使用完整便携包。
->
-> 当前版本：**v0.1.0（测试版）**，详见 [CHANGELOG.md](CHANGELOG.md)。
-
-
 ```
 USB-Net-Diag/
-├── start.bat                     # 总入口：提权 → 环境自检 → Npcap 兜底 → 启动 UI
+├── NetDiag.vbs                   # 日常入口：静默启动（无黑窗）+ 自动提权 + 自动开浏览器
+├── NetDiag-stop.vbs              # 停止后台服务（界面点不了时的兜底）
+├── NetDiag.ico                   # 应用图标（给快捷方式用）
+├── start.bat                     # 带窗口的总入口：提权 → 自检 → Npcap 兜底 → 启动 UI
 ├── doctor.bat                    # 只做环境自检，不启动服务
 ├── config/
-│   ├── app-config.json           # 端口 / 时长 / 威胁情报 Key（可改）
+│   ├── app-config.json           # 端口 / 时长 / 空闲退出 / 威胁情报 Key（可改）
 │   ├── ai-config.json            # AI 模型地址与 Key（界面里改，也可手改）
 │   ├── harness-config.json       # 启动时按当前盘符自动生成
 │   └── mcp-wireshark.json        # MCP 客户端配置，按当前盘符自动生成
 ├── core/
+│   ├── app.py                    # 静默启动器（pythonw 拉起：单实例/提权/空闲退出）
 │   ├── bootstrap.py              # 盘符自适应 + 环境自检
 │   ├── tshark.py                 # tshark 定位/执行/网卡探测
 │   ├── analyzer.py               # 流式解析 + 分层指标/会话聚合
@@ -35,6 +32,7 @@ USB-Net-Diag/
 │   ├── ai.py                     # AI 模型配置 + OpenAI 兼容调用
 │   ├── diagnose.py               # CLI 主流程
 │   └── server.py                 # 本地 Web UI + HTTP API（127.0.0.1）
+├── tests/selftest.py             # 自检与回归测试（64 项，纯标准库）
 ├── mcp/wireshark-mcp/server.py   # MCP stdio 服务器（零第三方依赖）
 ├── skills/network-diagnose/SKILL.md
 ├── ui/index.html                 # 单文件控制台
@@ -48,50 +46,11 @@ USB-Net-Diag/
 └── logs/                         # 运行日志
 ```
 
-## 运行环境准备（使用裸仓库时）
-
-仓库不含便携环境，需要自己补齐 `tools/`。程序按固定相对路径找依赖：
-
-```
-tools/
-├── python/
-│   ├── python.exe                             # 便携 Python 3.11（Embedded 64-bit）
-│   └── Lib/site-packages/scapy/               # 可选：被动监听用，缺失则回落 tshark
-├── WiresharkPortable/
-│   └── App/Wireshark/tshark.exe               # 必需：抓包与离线分析都靠它
-└── npcap-1.79.exe                             # 可选：缺失时实时抓包不可用，离线分析不受影响
-```
-
-步骤：
-
-1. **Python**：取 [Windows embeddable package (64-bit) 3.11](https://www.python.org/downloads/windows/)，
-   解压到 `tools/python/`，并在该目录放一个 `python311._pth`：
-   ```
-   python311.zip
-   .
-   Lib\site-packages
-   ```
-2. **scapy（可选）**：
-   ```bat
-   tools\python\python.exe -m pip install --no-warn-script-location ^
-        --target tools\python\Lib\site-packages scapy==2.8.0
-   ```
-3. **Wireshark**：取 [Wireshark Portable](https://www.wireshark.org/download.html) 解压到
-   `tools/WiresharkPortable/`，确认 `tshark.exe` 落在 `App/Wireshark/` 下。
-4. **Npcap（可选）**：取 [Npcap](https://npcap.com/#download) 安装包放入 `tools/`，
-   命名保持 `npcap-*.exe`，`start.bat` 会自动识别并静默安装。
-5. **配置**：把 `config/app-config.example.json`、`config/ai-config.example.json`
-   复制成同名不带 `.example` 的文件即可（缺失时程序走内置默认值；
-   `mcp-wireshark.json` 与 `harness-config.json` 由 `bootstrap.py` 每次启动自动生成）。
-6. **自检**：运行 `doctor.bat`，等价于 `tools\python\python.exe core\bootstrap.py --check`。
-
-> 嫌麻烦就直接用完整便携包：把 `tools/`、`harness/` 拷进仓库目录，
-> 在这个仓库里 `git status` 依然干净（两者都已被 `.gitignore` 忽略）。
-
 ## 使用
 
-1. 双击 `start.bat`（UAC 弹窗点“是”；拒绝提权也能用离线分析）。
-2. 浏览器自动打开 `http://127.0.0.1:8787/`。
+1. 双击 `NetDiag.vbs`（UAC 弹窗点“是”；拒绝提权也能用离线分析与链路体检）。
+   想要看日志或 Npcap 安装过程时，改双击 `start.bat`。
+2. 浏览器自动打开 `http://127.0.0.1:8787/`（端口被占会自动顺延）。
 3. 选模式：
 
 | 模式 | 说明 | 产出 |
@@ -280,6 +239,22 @@ Key 以明文存在 `config/ai-config.json`，只在本机 U 盘内，不上传�
 威胁情报为可选增强：在 `config/app-config.json` 填 `threat_intel_key`（AbuseIPDB）即启用，
 留空则跳过，全程离线可用。
 
+## 像应用一样使用（无控制台窗口）
+
+`NetDiag.vbs` + `core/app.py` 把工具做成了「双击即用、后台静默」的形态：
+
+| 行为 | 实现 |
+|---|---|
+| 看不到黑色命令行窗口 | 用 `pythonw.exe`（GUI 子系统解释器）拉起，全程无 console |
+| 需要抓包权限 | 检测到非管理员时用 UAC 重新拉起自己；拒绝就降级运行，不报错退出 |
+| 重复双击 | 先探测 `127.0.0.1:8787-8796` 上的 `/api/ping`，已有实例就直接开浏览器，不启第二份 |
+| 关掉浏览器后 | 界面 30 分钟无人访问自动退出（`config/app-config.json` 的 `idle_exit_min`，0=常驻） |
+| 主动退出 | 界面右上角「退出」→ `POST /api/quit` → 释放端口、清理 `logs/netdiag.pid` |
+| 界面卡死/无法点击 | 双击 `NetDiag-stop.vbs`：先走 `/api/quit`，失败再按 PID 文件强杀 |
+| 出错没人看得见 | 关键错误用系统弹窗提示；运行日志写 `logs/app.log` |
+
+> 手工调试：`tools\python\python.exe core\app.py --console` 前台运行，日志直接打在屏幕上。
+
 ## 权限与降级
 
 实时抓包在 Windows 上依赖 **Npcap 驱动 + 管理员权限**，这是系统约束，无法绕过：
@@ -320,10 +295,12 @@ tools\python\python.exe -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"to
 | 报告里没有威胁情报 | 未配置 `threat_intel_key`，属正常 |
 | 报告显示 RTT 为「-」 | 本次抓包没有 ACK 采样（纯 UDP 或短连接），用链路体检补测 |
 | 体检显示「连不上」 | 先用 `telnet IP 端口` 或 `Test-NetConnection` 复核，再查防火墙/安全组 |
+| 双击 VBS 没反应 | 先看 `logs\app.log`；仍无线索就改用 `start.bat` 看报错 |
+| UAC 点了「否」 | 服务照常启动，只是实时抓包不可用；重开时点「是」即可 |
+| 退出后进程还在 | 双击 `NetDiag-stop.vbs`；或 `taskkill /PID <logs\netdiag.pid 里的号> /F` |
 
 ## 版本
 
-- **应用版本：v0.1.0（测试版）**，见 `VERSION`；变更记录见 [CHANGELOG.md](CHANGELOG.md)
 - 便携 Python 3.11.9（Embedded amd64）
 - Wireshark Portable 4.7.4（tshark 4.7.4，通过 MSI 管理安装解出）
 - Npcap 1.79 离线安装包

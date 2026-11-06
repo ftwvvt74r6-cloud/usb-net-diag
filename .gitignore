@@ -29,6 +29,12 @@ __pycache__/
 !reports/faults_demo.md
 !reports/faults_demo.json
 
+# ---------------- 开发/截图脚手架（本机调试用，不入库）----------------
+# tests/ui-shot：无头 Edge + CDP 截图脚本，依赖本机 msedge.exe
+# docs/screenshots：界面截图（体积大且可随时重生成）
+tests/ui-shot/
+docs/screenshots/
+
 # ---------------- 系统 / 编辑器 ----------------
 Thumbs.db
 desktop.ini

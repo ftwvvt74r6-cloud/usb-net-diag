@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "rules_version": "2026.11.1",
+    "note": "阈值随代码走，不进 app-config。改了这里必须同时升 _meta.rules_version，否则历史报告不可复现（详见 core/config.py 注释）。"
+  },
+  "l2": {
+    "arp": {
+      "min_requests": 2
+    }
+  },
+  "l3": {
+    "rtt": {
+      "warning_ms": 300,
+      "critical_ms": 600,
+      "jitter_warning_ms": 80,
+      "min_samples": 5
+    },
+    "icmp": {
+      "mtu_escalates_to_critical": true
+    }
+  },
+  "l4": {
+    "retrans": {
+      "info": 0.5,
+      "warning": 2.0,
+      "critical": 5.0
+    },
+    "zero_window": {
+      "warning_count": 3,
+      "window_full_warning": 10
+    },
+    "handshake": {
+      "warning_ms": 300,
+      "critical_ms": 800
+    },
+    "connect": {
+      "rst_warning_count": 3
+    }
+  },
+  "l7": {
+    "dns_fail": {
+      "warning": 20.0,
+      "critical": 50.0
+    },
+    "dns_latency": {
+      "warning_ms": 300,
+      "critical_ms": 800
+    },
+    "http_5xx_rate": {
+      "warning": 1.0,
+      "critical": 10.0
+    }
+  }
+}

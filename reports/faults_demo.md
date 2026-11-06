@@ -2,7 +2,7 @@
 
 - 诊断目标：`全网`　抓包文件：`faults_demo.pcap`
 - 抓包时长：16.0 秒　报文 54 个　TCP 会话 4 个
-- 生成时间：2026-11-06 17:01:17　采集网卡：-
+- 生成时间：2026-11-06 18:01:58　采集网卡：-
 
 > 阅读顺序：先看第一节的定位结论，再看第二节确认现象，第三节照着做即可。
 > 报告按 L2 链路 → L3 网络 → L4 传输 → L7 应用 的顺序判断，故障先从底层查起。
@@ -152,7 +152,7 @@
 | DNS 查询 / 响应 / NXDOMAIN | 7 / 7 / 2 |
 | HTTP 请求 / 5xx | 2 / 1 |
 | 外部目标 IP | 2 |
-| tshark | F:\USB-Net-Diag\tools\WiresharkPortable\App\Wireshark\tshark.exe |
+| tshark | E:\utest\NetDiag\tools\WiresharkPortable\App\Wireshark\tshark.exe |
 
 ### 7.2 协议分布
 
@@ -195,7 +195,7 @@
 ```json
 {
   "target": "全网",
-  "pcap_file": "F:\\USB-Net-Diag\\captures\\faults_demo.pcap",
+  "pcap_file": "E:\\utest\\NetDiag\\captures\\faults_demo.pcap",
   "critical_count": 3,
   "warning_count": 5,
   "retrans_rate": 5.56,

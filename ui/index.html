@@ -6,258 +6,394 @@
 <title>USB-Net-Diag · 网络诊断控制台</title>
 <style>
   :root{
-    --bg:#f4f6fa; --panel:#ffffff; --line:#e3e8ef; --text:#0f172a; --muted:#64748b;
-    --accent:#2563eb; --accent-soft:#eff6ff; --ok:#059669; --warn:#d97706; --crit:#dc2626;
-    --radius:14px; --shadow:0 1px 2px rgba(15,23,42,.06), 0 8px 24px -12px rgba(15,23,42,.18);
+    --bg:#f5f7fb; --panel:#ffffff; --line:#e6eaf1; --line-2:#d5dce7;
+    --text:#0f172a; --text-2:#334155; --muted:#6b7a90;
+    --accent:#2563eb; --accent-2:#1d4ed8; --accent-soft:#eff5ff;
+    --ok:#059669; --ok-bg:#ecfdf5; --ok-line:#a7f3d0;
+    --warn:#b45309; --warn-bg:#fffbeb; --warn-line:#fde68a;
+    --crit:#b91c1c; --crit-bg:#fef2f2; --crit-line:#fecaca;
+    --info:#0369a1; --info-bg:#f0f9ff;
+    --r:12px; --r-sm:9px;
+    --sh:0 1px 2px rgba(15,23,42,.05);
+    --sh-lg:0 12px 28px -18px rgba(15,23,42,.35);
+    --mono:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);
-       font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
-  header{background:linear-gradient(120deg,#0f172a,#1e3a8a 55%,#2563eb);color:#fff;padding:18px 28px;
-         display:flex;align-items:center;justify-content:space-between;gap:16px}
-  header .brand{display:flex;align-items:center;gap:12px}
-  header .dot{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.14);
-              display:grid;place-items:center;font-size:17px;border:1px solid rgba(255,255,255,.22)}
-  header h1{font-size:16px;margin:0;letter-spacing:.3px}
-  header p{margin:2px 0 0;font-size:12px;color:#c7d2fe}
-  header .badges{display:flex;gap:8px;flex-wrap:wrap;font-size:12px}
-  .badge{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);
-         padding:4px 10px;border-radius:999px;white-space:nowrap}
-  .badge.bad{background:rgba(220,38,38,.25);border-color:rgba(248,113,113,.6)}
-  .badge.good{background:rgba(5,150,105,.25);border-color:rgba(52,211,153,.55)}
-  main{display:grid;grid-template-columns:340px 1fr;gap:18px;padding:18px 24px 40px;max-width:1440px;margin:0 auto}
-  @media (max-width:1020px){main{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
-  .card h2{font-size:13px;margin:0;padding:14px 16px;border-bottom:1px solid var(--line);
-           color:var(--muted);font-weight:600;letter-spacing:.4px}
-  .card .body{padding:16px}
-  label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;font-weight:600}
-  input[type=text],input[type=number],input[type=password],select{width:100%;padding:9px 11px;border:1px solid var(--line);
-    border-radius:9px;font:inherit;color:inherit;background:#fbfcfe;outline:none;transition:.15s}
-  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12);background:#fff}
-  .field{margin-bottom:14px}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;background:#f1f5f9;padding:4px;border-radius:10px}
-  .modes button{border:0;background:transparent;padding:8px 2px;border-radius:7px;font:inherit;font-size:12px;
-    color:var(--muted);cursor:pointer;font-weight:600;white-space:nowrap}
-  .modes button.active{background:#fff;color:var(--accent);box-shadow:0 1px 3px rgba(15,23,42,.12)}
-  .btn{width:100%;padding:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;
-       font:inherit;font-weight:600;cursor:pointer;transition:.15s}
-  .btn:hover{filter:brightness(1.06)}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);overflow:hidden;
+       font:13.5px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4,h5{margin:0;font-weight:700}
+  a{color:var(--accent)}
+
+  /* ---------------- 顶部应用栏 ---------------- */
+  .appbar{height:56px;background:#fff;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 16px;
+    position:relative;z-index:20}
+  .brand{display:flex;align-items:center;gap:10px;min-width:0}
+  .brand .mark{width:32px;height:32px;border-radius:9px;flex:none;
+    background:linear-gradient(135deg,#1e3a8a,#2563eb 60%,#38bdf8);
+    display:grid;place-items:center;color:#fff;font-size:10px;font-weight:800;letter-spacing:.6px;
+    box-shadow:0 4px 10px -4px rgba(37,99,235,.65)}
+  .brand h1{font-size:14px;letter-spacing:.2px;white-space:nowrap}
+  .brand p{margin:1px 0 0;font-size:11px;color:var(--muted);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .appright{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .badge{background:#f4f6fa;border:1px solid var(--line);color:#475569;font-size:11px;
+    padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .badge.good{background:var(--ok-bg);border-color:var(--ok-line);color:#047857}
+  .badge.bad{background:var(--crit-bg);border-color:var(--crit-line);color:#b91c1c}
+  #badges{display:flex;gap:6px;flex-wrap:wrap}
+  .topbtn{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line-2);
+    color:var(--text-2);padding:5px 11px;border-radius:999px;font:inherit;font-size:12px;
+    font-weight:600;cursor:pointer;transition:.15s}
+  .topbtn:hover{background:#f8fafc;border-color:#c3ccdb}
+  .topbtn .k{font-weight:400;opacity:.85;max-width:170px;overflow:hidden;text-overflow:ellipsis}
+  .topbtn .st{width:7px;height:7px;border-radius:50%;background:#cbd5e1;flex:none}
+  .topbtn .st.on{background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.16)}
+  .topbtn.ghost:hover{background:#fef2f2;border-color:var(--crit-line);color:#b91c1c}
+
+  /* ---------------- 主框架 ---------------- */
+  .shell{display:grid;grid-template-columns:308px minmax(0,1fr);height:calc(100vh - 56px)}
+  @media (max-width:1080px){
+    body{overflow:auto}
+    .shell{grid-template-columns:1fr;height:auto}
+    .side{border-right:0;border-bottom:1px solid var(--line)}
+    .main{overflow:visible}
+  }
+  .side{background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;
+    min-height:0;overflow:auto;padding:12px}
+  .sidehead{font-size:10.5px;letter-spacing:.9px;color:#94a3b8;font-weight:800;
+    margin:2px 0 7px 4px}
+  .main{overflow:auto;padding:14px 18px 40px;min-width:0}
+
+  /* ---------------- 工作区导航 ---------------- */
+  .nav{display:flex;flex-direction:column;gap:3px;margin-bottom:14px}
+  .nav button{display:grid;grid-template-columns:24px 1fr;gap:9px;align-items:center;
+    text-align:left;padding:7px 9px;border-radius:10px;border:1px solid transparent;
+    background:transparent;cursor:pointer;font:inherit;color:var(--text);transition:.13s}
+  .nav button:hover{background:#f7f9fc}
+  .nav button .ic{width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;
+    display:grid;place-items:center;font-size:12px;flex:none}
+  .nav button .t{font-size:12.5px;font-weight:650;line-height:1.3;display:block}
+  .nav button .d{font-size:10.5px;color:var(--muted);line-height:1.3;display:block}
+  .nav button.active{background:var(--accent-soft);border-color:#dbeafe}
+  .nav button.active .t{color:var(--accent-2)}
+  .nav button.active .ic{background:#dbeafe;color:var(--accent-2)}
+
+  /* ---------------- 表单 ---------------- */
+  .pane{border-top:1px solid var(--line);padding-top:12px}
+  .field{margin-bottom:11px}
+  label{display:block;font-size:11px;color:#64748b;margin:0 0 5px;font-weight:650;
+    letter-spacing:.2px}
+  input[type=text],input[type=number],input[type=password],select{
+    width:100%;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;font:inherit;
+    font-size:12.5px;color:inherit;background:#fcfdff;outline:none;transition:.14s}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.11);
+    background:#fff}
+  input::placeholder{color:#a9b4c4}
+  /* auto-fit：一行里的某个 field 被隐藏时（如离线模式隐藏时长），
+     剩下的那个会自动占满整行，而不是被挤成半宽 */
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+  .hint{font-size:10.8px;color:var(--muted);margin-top:6px;line-height:1.55}
+  .btn{width:100%;padding:9px;border:0;border-radius:9px;background:var(--accent);color:#fff;
+    font:inherit;font-size:12.5px;font-weight:650;cursor:pointer;transition:.15s;
+    box-shadow:0 1px 2px rgba(37,99,235,.25)}
+  .btn:hover{background:var(--accent-2)}
   .btn:disabled{opacity:.55;cursor:not-allowed}
-  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--text);font-weight:500}
-  .btn.ghost:hover{background:#f8fafc}
-  .hint{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5}
-  .console{background:#0b1220;color:#cbd5e1;border-radius:10px;padding:12px;height:190px;overflow:auto;
-           font:12px/1.6 ui-monospace,Consolas,"Cascadia Mono",monospace;white-space:pre-wrap;word-break:break-all}
+  .btn.ghost{background:#fff;border:1px solid var(--line-2);color:var(--text-2);
+    font-weight:600;box-shadow:none}
+  .btn.ghost:hover{background:#f8fafc;border-color:#c3ccdb}
+  .btn.sm{width:auto;padding:6px 11px;font-size:12px}
+  .spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;
+    border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:6px;
+    animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .hidden{display:none!important}
+
+  /* ---------------- 日志抽屉 ---------------- */
+  .logwrap{margin-top:auto;padding-top:10px}
+  .logwrap summary{cursor:pointer;list-style:none;font-size:11px;color:var(--muted);
+    display:flex;align-items:center;gap:6px;padding:6px 4px;border-radius:7px;user-select:none}
+  .logwrap summary::-webkit-details-marker{display:none}
+  .logwrap summary::before{content:"›";font-size:14px;line-height:1;transition:.15s;
+    display:inline-block;transform:rotate(0)}
+  .logwrap[open] summary::before{transform:rotate(90deg)}
+  .logwrap summary:hover{background:#f7f9fc;color:var(--text-2)}
+  .logwrap summary b{color:#475569;font-weight:650}
+  .logwrap summary em{font-style:normal;color:#94a3b8;font-size:10.5px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+  .console{background:#0b1220;color:#cbd5e1;border-radius:9px;padding:9px 10px;height:150px;
+    overflow:auto;font:11.5px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all;margin-top:4px}
   .console .t{color:#64748b}
   .console .err{color:#fca5a5}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:10px;margin-bottom:14px}
-  .stat{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:#fbfcfe}
-  .stat b{display:block;font-size:19px;line-height:1.2}
-  .stat span{font-size:11.5px;color:var(--muted)}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
-  th{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;background:#fafbfd}
-  tr:hover td{background:#fbfcfe}
-  .sev{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
-  .sev.严重{background:#fee2e2;color:var(--crit)}
-  .sev.警告{background:#fef3c7;color:var(--warn)}
-  .sev.提示{background:#e0f2fe;color:#0369a1}
-  .sev.na{background:#f1f5f9;color:var(--muted)}
-  .mono{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted)}
-  .empty{padding:36px 16px;text-align:center;color:var(--muted)}
-  .empty b{display:block;color:var(--text);font-size:15px;margin-bottom:6px}
-  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-  .toolbar .btn{width:auto;padding:7px 12px;font-size:12.5px}
-  .spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;
-        display:inline-block;vertical-align:-2px;margin-right:6px;animation:sp .8s linear infinite}
-  @keyframes sp{to{transform:rotate(360deg)}}
-  .json{background:#0b1220;color:#a7f3d0;border-radius:10px;padding:11px;font:12px/1.55 ui-monospace,monospace;
-        overflow:auto;margin-top:10px}
-  .fname{font-family:ui-monospace,monospace;font-size:12px}
-  .drop{border:1.5px dashed #cbd5e1;border-radius:10px;padding:14px;text-align:center;color:var(--muted);
-        font-size:12px;cursor:pointer;transition:.15s}
-  .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
-  .hidden{display:none!important}
-  /* ---- AI 设置 ---- */
-  .topbtn{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);
-    border:1px solid rgba(255,255,255,.3);color:#fff;padding:6px 13px;border-radius:999px;
-    font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.15s}
-  .topbtn:hover{background:rgba(255,255,255,.26)}
-  .topbtn .k{font-weight:400;opacity:.8;max-width:190px;overflow:hidden;text-overflow:ellipsis}
-  .topbtn .st{width:7px;height:7px;border-radius:50%;background:#fca5a5;box-shadow:0 0 0 3px rgba(252,165,165,.25)}
-  .topbtn .st.on{background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.25)}
-  .mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:grid;place-items:center;
-    z-index:60;padding:18px;overflow:auto}
-  .modal{width:min(580px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:16px;
-    box-shadow:0 30px 70px -20px rgba(15,23,42,.55)}
-  .modal .mhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
-    padding:16px 18px;border-bottom:1px solid var(--line)}
-  .modal .mhead b{font-size:14.5px}
-  .modal .mhead em{display:block;font-style:normal;font-size:11.5px;color:var(--muted);margin-top:4px;font-weight:400}
-  .xbtn{flex:none;border:0;background:#f1f5f9;width:28px;height:28px;border-radius:8px;cursor:pointer;
-    color:var(--muted);font-size:14px;line-height:1}
-  .xbtn:hover{background:#e2e8f0;color:var(--text)}
-  .mbody{padding:16px 18px 4px}
-  .mfoot{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--line);background:#fbfcfe}
-  .mfoot .btn{width:auto;flex:1;padding:10px}
-  .keystate{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-top:7px}
-  .keystate .tag{background:#f1f5f9;border-radius:6px;padding:1px 7px;font-family:ui-monospace,monospace}
-  .msg{margin-top:12px;border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.6}
-  .msg.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
-  .msg.bad{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
-  .msg.wait{background:#f8fafc;border:1px solid var(--line);color:var(--muted)}
-  /* ---- 结论卡 ---- */
-  .vcard{border-radius:12px;padding:15px 18px;margin-bottom:14px;border:1px solid}
-  .vcard.严重{background:#fef2f2;border-color:#fecaca}
-  .vcard.警告{background:#fffbeb;border-color:#fde68a}
-  .vcard.正常{background:#ecfdf5;border-color:#a7f3d0}
-  .vcard .vtop{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
-  .vcard .vt{flex:none;font-size:11.5px;font-weight:800;padding:3px 11px;border-radius:999px;
-    background:#fff;letter-spacing:.4px;margin-top:1px}
-  .vcard.严重 .vt{color:#b91c1c}
-  .vcard.警告 .vt{color:#b45309}
-  .vcard.正常 .vt{color:#047857}
-  .vcard h3{margin:0;font-size:15.5px;line-height:1.45;font-weight:700}
-  .vcard .vplain{margin:10px 0 0;font-size:13.5px;line-height:1.75;color:#334155}
-  .vcard .vmeta{display:flex;gap:18px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--muted)}
-  .vcard .vmeta b{color:var(--text);font-weight:700}
-  .vp{padding:11px 0 0;border-top:1px dashed rgba(15,23,42,.13);margin-top:12px}
-  .vp .vh{font-size:13px;font-weight:700;margin-bottom:5px}
-  .vp .vl{font-size:13px;line-height:1.72;color:#334155}
-  .vp .vact{font-size:12.5px;line-height:1.7;color:#0f172a;background:rgba(255,255,255,.75);
+
+  /* ---------------- 主区头 ---------------- */
+  .resultbar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;
+    margin-bottom:11px;flex-wrap:wrap}
+  .resultbar h2{font-size:15px;letter-spacing:.2px}
+  .resultbar p{margin:2px 0 0;font-size:11.5px;color:var(--muted)}
+  .searchchip{font-size:11px;color:#475569;background:#fff;border:1px solid var(--line);
+    border-radius:999px;padding:4px 10px}
+
+  /* ---------------- 卡片 ---------------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--sh)}
+  .card>h2{font-size:12px;padding:11px 14px;border-bottom:1px solid var(--line);
+    color:#475569;letter-spacing:.3px}
+  .card .body{padding:14px}
+
+  /* ---------------- 空状态 ---------------- */
+  .empty{padding:40px 20px;text-align:center;color:var(--muted)}
+  .empty .ic{width:46px;height:46px;margin:0 auto 12px;border-radius:13px;
+    background:linear-gradient(135deg,#eff6ff,#dbeafe);display:grid;place-items:center;
+    font-size:20px;color:var(--accent)}
+  .empty b{display:block;color:var(--text);font-size:14.5px;margin-bottom:5px}
+  .empty p{margin:0 auto;max-width:460px;font-size:12.5px;line-height:1.7}
+  .quick{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;
+    margin-top:18px;text-align:left}
+  .quick button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:11px 12px;
+    cursor:pointer;font:inherit;text-align:left;transition:.15s}
+  .quick button:hover{border-color:#bfdbfe;background:#f8fbff;box-shadow:var(--sh-lg)}
+  .quick b{display:block;font-size:12.5px;color:var(--text);margin-bottom:2px}
+  .quick span{font-size:11px;color:var(--muted);line-height:1.5;display:block}
+
+  /* ---------------- 结论卡 ---------------- */
+  .vcard{border-radius:var(--r);padding:16px 18px;margin-bottom:14px;border:1px solid;
+    background:#fff;position:relative;overflow:hidden}
+  .vcard::before{content:"";position:absolute;inset:0 auto 0 0;width:4px}
+  .vcard.严重{background:linear-gradient(180deg,#fffafa,#fff);border-color:var(--crit-line)}
+  .vcard.严重::before{background:#dc2626}
+  .vcard.警告{background:linear-gradient(180deg,#fffdf6,#fff);border-color:var(--warn-line)}
+  .vcard.警告::before{background:#f59e0b}
+  .vcard.正常{background:linear-gradient(180deg,#f8fffc,#fff);border-color:var(--ok-line)}
+  .vcard.正常::before{background:#10b981}
+  .vcard .vtop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .vcard .vt{flex:none;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;
+    background:#fff;letter-spacing:.5px;border:1px solid}
+  .vcard.严重 .vt{color:#b91c1c;border-color:var(--crit-line)}
+  .vcard.警告 .vt{color:#b45309;border-color:var(--warn-line)}
+  .vcard.正常 .vt{color:#047857;border-color:var(--ok-line)}
+  .vcard .vlay{flex:none;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;
+    background:rgba(15,23,42,.055);color:#475569}
+  .vcard h3{margin:9px 0 0;font-size:16px;line-height:1.5;font-weight:700;letter-spacing:.1px}
+  .vcard .vplain{margin:8px 0 0;font-size:13px;line-height:1.78;color:var(--text-2);
+    white-space:pre-wrap}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .chip{background:rgba(255,255,255,.9);border:1px solid rgba(15,23,42,.07);border-radius:7px;
+    padding:3px 8px;font-size:11px;color:var(--muted)}
+  .chip b{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums;margin-left:3px}
+
+  /* ---------------- 分层条 ---------------- */
+  .layerbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 14px}
+  @media (max-width:900px){.layerbar{grid-template-columns:repeat(2,1fr)}}
+  .lay{border:1px solid var(--line);border-left:3px solid #cbd5e1;border-radius:10px;
+    padding:9px 10px;background:#fff}
+  .lay.ok{border-left-color:#10b981}
+  .lay.warn{border-left-color:#f59e0b;background:#fffdf7}
+  .lay.bad{border-left-color:#ef4444;background:#fffafa}
+  .lay.na{opacity:.55}
+  .lay .ln{font-size:10px;color:#94a3b8;font-weight:800;letter-spacing:.7px}
+  .lay .lt{font-size:12.5px;font-weight:700;margin:1px 0 2px}
+  .lay .ld{font-size:10.5px;color:var(--muted);line-height:1.5}
+
+  /* ---------------- 问题详解 ---------------- */
+  .sectitle{font-size:12px;font-weight:700;margin:16px 0 8px;color:#334155;
+    display:flex;align-items:center;gap:7px}
+  .sectitle::after{content:"";flex:1;height:1px;background:var(--line)}
+  .point{border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:9px;
+    background:#fff;box-shadow:var(--sh)}
+  .point .ph{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+  .point .pt{font-weight:700;font-size:13px}
+  .point .vl{font-size:12.5px;line-height:1.75;color:var(--text-2)}
+  .vact{font-size:12px;line-height:1.7;color:var(--text);background:#f8fafc;
     border-left:3px solid var(--accent);padding:6px 10px;border-radius:0 6px 6px 0;margin-top:7px}
-  .vp .vproof{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.6;word-break:break-all}
-  .steps{margin:6px 0 0;padding-left:20px;font-size:13px;line-height:1.85;color:#334155}
-  /* ---- 技术明细折叠 ---- */
-  .tech{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .tech summary{cursor:pointer;padding:10px 14px;font-size:12.5px;color:var(--muted);
-    background:#fafbfd;font-weight:600;user-select:none;list-style:none}
+  .vproof{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.6;word-break:break-all}
+  .steps{margin:4px 0 0;padding-left:19px;font-size:12.5px;line-height:1.85;color:var(--text-2)}
+  .sev{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;
+    font-weight:700;white-space:nowrap}
+  .sev.严重{background:var(--crit-bg);color:var(--crit)}
+  .sev.警告{background:var(--warn-bg);color:var(--warn)}
+  .sev.提示{background:var(--info-bg);color:var(--info)}
+  .sev.na{background:#f1f5f9;color:var(--muted)}
+  .tag{font-size:10px;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 6px;
+    font-weight:650;white-space:nowrap}
+
+  /* ---------------- 表格 ---------------- */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;
+    background:#fafbfd;font-weight:700;position:sticky;top:0;z-index:1}
+  tbody tr:nth-child(even) td{background:#fcfdff}
+  tr:hover td{background:#f7fbff}
+  .mono{font-family:var(--mono);font-size:11.5px;color:var(--muted);
+    font-variant-numeric:tabular-nums}
+  .rowbad{color:#b91c1c;font-weight:650}
+  .tscroll{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:10px;
+    margin-top:8px}
+  .ftab td{white-space:nowrap}
+  .ftab td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .ftab td.mono{font-family:var(--mono);font-size:11.5px}
+  .pill{display:inline-block;padding:1px 7px;border-radius:999px;background:#eef2ff;
+    color:#4338ca;font-size:10.5px;font-weight:700;white-space:nowrap}
+  .pill.unk{background:var(--warn-bg);color:var(--warn)}
+  .pill.st{background:#f1f5f9;color:#475569}
+  .pill.st.bad{background:var(--crit-bg);color:#b91c1c}
+  .pev{display:block;font-size:10px;color:#94a3b8;margin-top:2px;max-width:240px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fsum{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:9px 0 2px}
+  .fsum b{color:var(--text)}
+
+  /* ---------------- 统计块 ---------------- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;
+    margin-bottom:12px}
+  .stat{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fbfcfe}
+  .stat b{display:block;font-size:18px;line-height:1.2;font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;color:var(--muted)}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:7px}
+  .kv div{border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:11px;
+    background:#fbfcfe;color:var(--muted)}
+  .kv b{display:block;font-size:13px;margin-top:1px;color:var(--text);
+    font-variant-numeric:tabular-nums}
+
+  /* ---------------- 折叠块 ---------------- */
+  .tech{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;
+    background:#fff}
+  .tech summary{cursor:pointer;padding:9px 12px;font-size:12px;color:#475569;
+    background:#fafbfd;font-weight:650;user-select:none;list-style:none;
+    display:flex;align-items:center;gap:6px}
   .tech summary::-webkit-details-marker{display:none}
-  .tech summary::before{content:"▸";display:inline-block;margin-right:7px;transition:.15s}
+  .tech summary::before{content:"›";font-size:14px;line-height:1;transition:.15s}
   .tech[open] summary::before{transform:rotate(90deg)}
   .tech summary:hover{background:#f1f5f9;color:var(--text)}
-  .tech .tbody{padding:12px 14px;border-top:1px solid var(--line)}
-  .tech h5{margin:0 0 7px;font-size:12px;color:var(--text);font-weight:700}
-  .tech table{margin-bottom:15px;font-size:12px}
+  .tech .tbody{padding:11px 12px;border-top:1px solid var(--line)}
+  .tech h5{margin:0 0 6px;font-size:11.5px;color:var(--text);font-weight:700}
+  .tech table{margin-bottom:13px;font-size:11.5px}
   .tech table:last-child{margin-bottom:0}
-  .tech th,.tech td{padding:6px 10px}
+  .tech th,.tech td{padding:5px 9px}
 
-  /* ---- 故障定位 ---- */
-  .vcard .vlay{flex:none;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;
-    background:rgba(15,23,42,.06);color:#334155;margin-top:1px}
-  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-  .chip{background:rgba(255,255,255,.8);border:1px solid rgba(15,23,42,.08);border-radius:8px;
-    padding:4px 10px;font-size:11.5px;color:var(--muted)}
-  .chip b{color:var(--text);font-weight:700}
-  .layerbar{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:4px 0 14px}
-  @media (max-width:820px){.layerbar{grid-template-columns:repeat(2,1fr)}}
-  .lay{border:1px solid var(--line);border-left:3px solid #cbd5e1;border-radius:10px;
-    padding:9px 11px;background:#fbfcfe}
-  .lay.ok{border-left-color:#10b981}
-  .lay.warn{border-left-color:#f59e0b;background:#fffdf5}
-  .lay.bad{border-left-color:#ef4444;background:#fef6f6}
-  .lay.na{opacity:.5}
-  .lay .ln{font-size:10.5px;color:var(--muted);font-weight:800;letter-spacing:.6px}
-  .lay .lt{font-size:12.5px;font-weight:700;margin:1px 0 3px}
-  .lay .ld{font-size:10.5px;color:var(--muted);line-height:1.45}
-  .point{border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:#fff}
-  .point .ph{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:6px}
-  .point .pt{font-weight:700;font-size:13.5px}
-  .point .vl{font-size:12.8px;line-height:1.72;color:#334155}
-  .vact{font-size:12.5px;line-height:1.7;color:#0f172a;background:#f8fafc;
-    border-left:3px solid var(--accent);padding:6px 10px;border-radius:0 6px 6px 0;margin-top:8px}
-  .vproof{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.6;word-break:break-all}
-  .tag{font-size:10.5px;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 7px;
-    font-weight:600;white-space:nowrap}
-  .sectitle{font-size:13px;font-weight:700;margin:18px 0 8px;color:#0f172a}
-  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
-  .kv div{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:11.5px;background:#fbfcfe}
-  .kv b{display:block;font-size:14px;margin-top:1px}
-  .rowbad{color:#b91c1c;font-weight:600}
-  /* ---- 链路体检 ---- */
-  .seg{display:grid;grid-template-columns:88px 1fr 64px;gap:8px;align-items:center;
-    margin:7px 0;font-size:11.5px}
-  .seg .sn{color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .seg .sv{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);font-weight:600}
-  .bar{height:7px;background:#eef2f7;border-radius:4px;overflow:hidden}
-  .bar i{display:block;height:100%;min-width:3px;border-radius:4px;background:#2563eb}
+  /* ---------------- 提示条 ---------------- */
+  .msg{margin-top:10px;border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.65}
+  .msg.ok{background:var(--ok-bg);border:1px solid var(--ok-line);color:#065f46}
+  .msg.bad{background:var(--crit-bg);border:1px solid var(--crit-line);color:#991b1b}
+  .msg.wait{background:#f8fafc;border:1px solid var(--line);color:var(--muted)}
+  .toolbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+  .toolbar .btn{width:auto;padding:6px 11px;font-size:12px}
+  .json{background:#0b1220;color:#a7f3d0;border-radius:9px;padding:10px;font:11.5px/1.55 var(--mono);
+    overflow:auto;margin-top:9px;max-height:220px}
+  .fname{font-family:var(--mono);font-size:11.5px}
+  .drop{border:1.5px dashed #c8d3e2;border-radius:9px;padding:12px;text-align:center;
+    color:var(--muted);font-size:11.5px;cursor:pointer;transition:.15s;background:#fcfdff}
+  .drop:hover{border-color:#a9c2e8;background:#f8fbff}
+  .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+
+  /* ---------------- 链路体检 ---------------- */
+  #probe-out{max-width:900px}
+  .seg{display:grid;grid-template-columns:96px 1fr 62px;gap:8px;align-items:center;
+    margin:6px 0;font-size:11.5px}
+  .seg .sn{color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .seg .sv{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);font-weight:650}
+  .bar{height:6px;background:#eef2f7;border-radius:4px;overflow:hidden}
+  .bar i{display:block;height:100%;min-width:3px;border-radius:4px;background:var(--accent)}
   .bar i.warn{background:#f59e0b}
   .bar i.bad{background:#ef4444}
   .bar i.skip{background:#cbd5e1}
   .seg.skip{opacity:.55}
-  .pchip{margin-top:10px;padding:9px 11px;border-radius:10px;background:#f8fafc;border:1px solid var(--line);
-    display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:11.5px}
-  .pchip b{font-size:12.5px;color:#0f172a}
+  .pchip{margin-top:9px;padding:8px 10px;border-radius:9px;background:#f8fafc;
+    border:1px solid var(--line);display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;
+    font-size:11.5px}
+  .pchip b{font-size:12.5px;color:var(--text)}
   .pchip span{background:#e0e7ff;color:#3730a3;border-radius:999px;padding:1px 8px;font-weight:700}
-  .pchip em{flex:1 1 100%;font-style:normal;color:var(--muted);line-height:1.55;word-break:break-all}
-  .pchip.warn{background:#fffbeb;border-color:#fde68a}
+  .pchip em{flex:1 1 100%;font-style:normal;color:var(--muted);line-height:1.55;
+    word-break:break-all}
+  .pchip.warn{background:var(--warn-bg);border-color:var(--warn-line)}
   .pchip.warn span{background:#fef3c7;color:#b45309}
 
-  /* ---- 被动监听会话表 ---- */
-  .ftab{width:100%;border-collapse:collapse;font-size:12.5px}
-  .ftab th{position:sticky;top:0;z-index:1}
-  .ftab td{white-space:nowrap}
-  .ftab td.num{text-align:right;font-variant-numeric:tabular-nums}
-  .ftab td.mono{font-family:ui-monospace,Consolas,monospace;font-size:11.5px}
-  .tscroll{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px}
-  .pill{display:inline-block;padding:1px 8px;border-radius:999px;background:#e0e7ff;color:#3730a3;
-    font-size:11px;font-weight:700;white-space:nowrap}
-  .pill.unk{background:#fef3c7;color:#b45309}
-  .pill.st{background:#f1f5f9;color:#475569}
-  .pill.st.bad{background:#fee2e2;color:#b91c1c}
-  .pev{display:block;font-size:10.5px;color:var(--muted);margin-top:2px;max-width:250px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fsum{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin:10px 0 2px}
-  .fsum b{color:#0f172a}
+  /* ---------------- AI 设置弹窗 ---------------- */
+  .mask{position:fixed;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(2px);
+    display:grid;place-items:center;z-index:60;padding:18px;overflow:auto}
+  .modal{width:min(560px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:14px;
+    box-shadow:0 30px 70px -20px rgba(15,23,42,.5)}
+  .modal .mhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+    padding:15px 17px;border-bottom:1px solid var(--line)}
+  .modal .mhead b{font-size:14px}
+  .modal .mhead em{display:block;font-style:normal;font-size:11px;color:var(--muted);
+    margin-top:3px;font-weight:400}
+  .xbtn{flex:none;border:0;background:#f1f5f9;width:26px;height:26px;border-radius:7px;
+    cursor:pointer;color:var(--muted);font-size:13px;line-height:1}
+  .xbtn:hover{background:#e2e8f0;color:var(--text)}
+  .mbody{padding:14px 17px 4px}
+  .mfoot{display:flex;gap:7px;padding:12px 17px;border-top:1px solid var(--line);background:#fbfcfe}
+  .mfoot .btn{width:auto;flex:1 1 0;padding:9px}
+  .keystate{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);margin-top:6px}
+  .keystate .tag{background:#f1f5f9;border-radius:5px;padding:1px 6px;font-family:var(--mono)}
 
-  /* ---- AI 解读 ---- */
-  .aiout{border:1px solid #dbeafe;background:linear-gradient(180deg,#f7fbff,#fff);border-radius:12px;
-    padding:4px 16px 14px;margin-top:14px}
+  /* ---------------- AI 解读 ---------------- */
+  .aiout{border:1px solid #dbeafe;background:linear-gradient(180deg,#f7fbff,#fff);
+    border-radius:11px;padding:3px 15px 13px;margin-top:12px}
   .aiout .aihead{display:flex;align-items:center;justify-content:space-between;gap:10px;
-    padding:11px 0;border-bottom:1px dashed #dbeafe;margin-bottom:10px}
-  .aiout .aihead b{font-size:12.5px;color:var(--accent);letter-spacing:.3px}
-  .aiout .aihead span{font-size:11.5px;color:var(--muted)}
-  .aiout .md{font-size:13.5px;line-height:1.72;color:#1e293b}
-  .aiout .md h4{margin:12px 0 6px;font-size:13px;color:#0f172a}
-  .aiout .md p{margin:6px 0}
-  .aiout .md li{margin:3px 0 3px 2px}
-  .aiout .md code{background:#eef2f7;border-radius:4px;padding:1px 5px;font-family:ui-monospace,monospace;font-size:12px}
+    padding:10px 0;border-bottom:1px dashed #dbeafe;margin-bottom:9px}
+  .aiout .aihead b{font-size:12px;color:var(--accent);letter-spacing:.3px}
+  .aiout .aihead span{font-size:11px;color:var(--muted)}
+  .aiout .md{font-size:12.8px;line-height:1.75;color:#1e293b}
+  .aiout .md h4{margin:11px 0 5px;font-size:12.5px;color:var(--text)}
+  .aiout .md p{margin:5px 0}
+  .aiout .md li{margin:2px 0 2px 2px}
+  .aiout .md code{background:#eef2f7;border-radius:4px;padding:1px 5px;font-family:var(--mono);
+    font-size:11.5px}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#d3dae5;border-radius:6px;border:2px solid transparent;
+    background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#b9c4d4;background-clip:content-box}
+  ::-webkit-scrollbar-track{background:transparent}
+
 </style>
 </head>
 <body>
-<header>
+<header class="appbar">
   <div class="brand">
-    <div class="dot"><span style="font-size:10.5px;font-weight:800;letter-spacing:.7px">NET</span></div>
+    <div class="mark">NET</div>
     <div>
-      <h1>USB-Net-Diag · 网络诊断控制台</h1>
+      <h1>网络诊断控制台</h1>
       <p>便携抓包 · L2→L7 分层定位 · 一线运维照做即可</p>
     </div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+  <div class="appright">
+    <div id="badges"><span class="badge">检测环境中…</span></div>
     <button class="topbtn" id="ai-open" title="配置用于生成结论的大模型接口，可随时修改">
-      <span class="st" id="ai-dot"></span>AI 设置<span class="k" id="ai-badge">未配置</span>
+      <span class="st" id="ai-dot"></span>AI 解读<span class="k" id="ai-badge">未配置</span>
     </button>
-    <div class="badges" id="badges"><span class="badge">检测环境中…</span></div>
+    <button class="topbtn ghost" id="quit-app" title="停止本机后台服务（浏览器可随后关闭）">退出</button>
   </div>
 </header>
 
-<main>
-  <section style="display:flex;flex-direction:column;gap:18px;min-width:0">
-  <div class="card">
-    <h2>诊断参数</h2>
-    <div class="body">
-      <div class="field">
-        <label>诊断模式</label>
-        <div class="modes" id="modes">
-          <button data-mode="live" class="active">定向抓包</button>
-          <button data-mode="scan">全网扫描</button>
-          <button data-mode="passive">被动监听</button>
-          <button data-mode="offline">离线分析</button>
-        </div>
-      </div>
+<div class="shell">
+  <aside class="side">
+    <div class="sidehead">工作区</div>
+    <div class="nav" id="modes">
+      <button data-mode="live" class="active">
+        <span class="ic">◉</span>
+        <span><span class="t">定向抓包</span><span class="d">只盯目标 IP / 网段</span></span>
+      </button>
+      <button data-mode="scan">
+        <span class="ic">◎</span>
+        <span><span class="t">全网扫描</span><span class="d">抓本机全部流量</span></span>
+      </button>
+      <button data-mode="passive">
+        <span class="ic">≋</span>
+        <span><span class="t">被动监听</span><span class="d">不发包，看谁在连谁</span></span>
+      </button>
+      <button data-mode="offline">
+        <span class="ic">▤</span>
+        <span><span class="t">离线分析</span><span class="d">分析已有 pcap</span></span>
+      </button>
+      <button data-mode="probe">
+        <span class="ic">↗</span>
+        <span><span class="t">链路体检</span><span class="d">不发包，测慢在哪一段</span></span>
+      </button>
+    </div>
 
+    <div class="pane" id="pane-capture">
       <div class="field" id="field-target">
         <label id="target-label">目标 IP / 网段（留空 = 全网）</label>
         <input type="text" id="target" placeholder="例如 192.168.1.10 或 192.168.1.0/24" />
@@ -277,7 +413,7 @@
       <div class="field hidden" id="field-engine">
         <label>采集引擎</label>
         <select id="engine">
-          <option value="auto">自动（优先 Scapy，失败自动回落 tshark）</option>
+          <option value="auto">自动（优先 Scapy，失败回落 tshark）</option>
           <option value="scapy">Scapy（Python 逐包解析）</option>
           <option value="tshark">tshark（Wireshark 自带）</option>
         </select>
@@ -287,23 +423,20 @@
       <div class="field hidden" id="field-offline">
         <label>已有抓包文件</label>
         <select id="pcap-select"><option value="">— 选择 captures 目录中的文件 —</option></select>
-        <div class="drop" id="drop" style="margin-top:10px">拖拽 pcap / pcapng 到此，或点击选择上传</div>
+        <div class="drop" id="drop" style="margin-top:8px">拖拽 pcap / pcapng 到此，或点击上传</div>
         <input type="file" id="file" class="hidden" accept=".pcap,.pcapng,.cap" />
       </div>
 
       <button class="btn" id="run">开始诊断</button>
-      <button class="btn ghost hidden" id="pstop" style="margin-top:8px">停止监听</button>
-      <div class="hint" id="hint">实时抓包需要管理员权限与 Npcap 驱动；权限不足时将自动提示改用离线分析。</div>
+      <button class="btn ghost hidden" id="pstop" style="margin-top:7px">停止监听</button>
+      <div class="hint" id="hint">实时抓包需要管理员权限与 Npcap 驱动；权限不足时会提示改用离线分析。</div>
     </div>
-  </div>
 
-  <div class="card">
-    <h2>链路体检（主动探测·不用抓包）</h2>
-    <div class="body probe">
+    <div class="pane hidden" id="pane-probe">
       <div class="field">
         <label>目标域名 / IP</label>
         <input type="text" id="probe-target" spellcheck="false"
-               placeholder="example.com  或  10.0.0.5:8080  或  10.0.0.5" />
+               placeholder="example.com 或 10.0.0.5:8080" />
       </div>
       <div class="row">
         <div class="field">
@@ -327,31 +460,55 @@
           <option value="opaque">只测 TCP 连通性</option>
         </select>
       </div>
-      <button class="btn ghost" id="probe-run">开始体检</button>
-      <div class="hint">建连后先不发声，读服务端首包（Banner）判断协议，再只发这个协议该发的报文：
-        Web 走 DNS→TCP→TLS→首字节，SMB 走 TCP→SMB 协商，SSH 等看 TCP→Banner 响应，
-        认不出就只报 TCP 建连（Opaque TCP）。不需要管理员权限，也不产生抓包文件。</div>
-      <div id="probe-out"></div>
+      <button class="btn" id="probe-run">开始体检</button>
+      <div class="hint">建连后先不发声，读服务端首包判断协议，再只发该协议该发的报文。
+        不需要管理员权限，也不产生抓包文件。</div>
     </div>
-  </div>
-  </section>
 
-  <section style="display:flex;flex-direction:column;gap:18px;min-width:0">
-    <div class="card">
-      <h2>运行状态</h2>
-      <div class="body">
-        <div class="console" id="console"><span class="t">[就绪] 等待任务…</span></div>
+    <details class="logwrap" id="logwrap">
+      <summary><b>运行日志</b><em id="loglast">就绪</em></summary>
+      <div class="console" id="console"><span class="t">[就绪] 等待任务…</span></div>
+    </details>
+  </aside>
+
+  <main class="main">
+    <div class="resultbar">
+      <div>
+        <h2 id="result-title">诊断结果</h2>
+        <p id="result-sub">选一个工作区开始，结果会按 L2 → L7 分层给出结论和处置步骤</p>
+      </div>
+      <div class="searchchip" id="result-chip">就绪</div>
+    </div>
+
+    <div id="result">
+      <div class="empty">
+        <div class="ic">◈</div>
+        <b>还没有结果</b>
+        <p>抓一段流量、分析一个 pcap，或者直接测一条链路。结果会先给一句话结论，
+          再按 L2 链路 → L3 网络 → L4 传输 → L7 应用逐层说明，最后给可执行的处置步骤。</p>
+        <div class="quick">
+          <button data-quick="live"><b>抓一段实时流量</b><span>选网卡和目标，30 秒出结论</span></button>
+          <button data-quick="offline"><b>分析已有 pcap</b><span>不需要管理员权限</span></button>
+          <button data-quick="probe"><b>测一条链路</b><span>不发包，只看慢在哪一段</span></button>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <h2 id="result-title">诊断结果</h2>
-      <div class="body" id="result">
-        <div class="empty"><b>暂无结果</b>抓包或上传 pcap 后点「开始诊断」，会按 L2 链路 → L3 网络 → L4 传输 → L7 应用逐层定位故障。</div>
+    <div id="probe-panel" class="hidden">
+      <div class="card">
+        <div class="body" id="probe-out">
+          <div class="empty" style="padding:26px 12px">
+            <b>填好左侧目标，点「开始体检」</b>
+            <p>会先识别协议（TLS / HTTP / SMB / SSH / 其它），再把一次访问拆成
+              DNS → TCP → 协议识别 → 该协议自己的阶段，告诉你慢在哪一段。</p>
+          </div>
+        </div>
       </div>
     </div>
-  </section>
-</main>
+  </main>
+</div>
+
+
 
 <div class="mask hidden" id="ai-mask">
   <div class="modal" role="dialog" aria-modal="true" aria-label="AI 模型配置">
@@ -409,6 +566,7 @@ let timerP = null;
 let lastLogCount = 0;
 let LAST_RESULT = null;
 let AI_CFG = null;
+let APP_INFO = null;
 
 /* ---------- 模式切换 ---------- */
 function runLabel(){ return MODE === "passive" ? "开始监听" : "开始诊断"; }
@@ -416,8 +574,32 @@ function runLabel(){ return MODE === "passive" ? "开始监听" : "开始诊断"
 $("#modes").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-mode]");
   if (!b) return;
-  MODE = b.dataset.mode;
-  [...$("#modes").children].forEach((x) => x.classList.toggle("active", x === b));
+  setMode(b.dataset.mode);
+});
+
+function setMode(mode) {
+  MODE = mode;
+  [...$("#modes").children].forEach((x) =>
+    x.classList.toggle("active", x.dataset.mode === mode));
+
+  const isProbe = mode === "probe";
+  $("#pane-capture").classList.toggle("hidden", isProbe);
+  $("#pane-probe").classList.toggle("hidden", !isProbe);
+  $("#result").classList.toggle("hidden", isProbe);
+  $("#probe-panel").classList.toggle("hidden", !isProbe);
+
+  if (isProbe) {
+    $("#result-title").textContent = "链路体检";
+    $("#result-sub").textContent = "先识别协议，再分段计时，直接看出慢在哪一段";
+    $("#result-chip").textContent = "待体检";
+    setTimeout(() => $("#probe-target").focus(), 60);
+    return;
+  }
+
+  $("#result-title").textContent = "诊断结果";
+  $("#result-sub").textContent = "结果按 L2 → L7 分层给出结论和处置步骤";
+  $("#result-chip").textContent = "就绪";
+
   $("#field-target").classList.toggle("hidden", MODE === "offline");
   $("#field-duration").classList.toggle("hidden", MODE === "offline");
   $("#field-offline").classList.toggle("hidden", MODE !== "offline");
@@ -434,6 +616,12 @@ $("#modes").addEventListener("click", (e) => {
         ? "被动监听不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。"
         : "定向抓包只保留与目标 IP 相关的流量，过滤器自动构造为 host <IP>。";
   if (MODE === "offline") loadCaptures();
+}
+
+/* 空状态里的快捷入口 */
+document.addEventListener("click", (e) => {
+  const q = e.target.closest("[data-quick]");
+  if (q) setMode(q.dataset.quick);
 });
 
 /* ---------- 环境信息 ---------- */
@@ -528,6 +716,7 @@ $("#run").addEventListener("click", async () => {
   $("#console").innerHTML = "";
   $("#run").disabled = true;
   $("#run").innerHTML = '<span class="spin"></span>诊断中…';
+  runningResult("正在采集并分析报文", "抓包结束后会自动给出分层结论，通常几十秒内完成。");
   const r = await fetch("/api/scan", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -548,13 +737,23 @@ function stopRun() {
   $("#run").textContent = "开始诊断";
 }
 
+function runningResult(title, sub) {
+  $("#result-chip").textContent = "运行中";
+  $("#result").innerHTML = '<div class="empty"><div class="ic">◌</div><b>' + esc(title)
+    + '</b><p>' + esc(sub) + '</p></div>';
+}
+
 function appendLog(m, err) {
   const c = $("#console");
   const d = document.createElement("div");
   d.className = err ? "err" : "";
   d.textContent = m;
   c.appendChild(d);
+  while (c.children.length > 400) c.removeChild(c.firstChild);
   c.scrollTop = c.scrollHeight;
+  const last = $("#loglast");
+  if (last) last.textContent = String(m).replace(/^\[[^\]]*\]\s*/, "").slice(0, 42);
+  if (err) $("#logwrap").open = true;
 }
 
 async function poll() {
@@ -581,6 +780,8 @@ async function startPassive(){
   $("#run").innerHTML = '<span class="spin"></span>监听中…';
   $("#pstop").classList.remove("hidden");
   $("#hint").textContent = "正在监听网卡，期间不要关闭本窗口…";
+  $("#result-title").textContent = "被动监听结果";
+  runningResult("正在监听网卡", "只读不发包；结束后会把流量按会话聚合成表。");
   lastLogCount = 0;
   $("#console").innerHTML = "";
   const r = await fetch("/api/passive", {
@@ -659,6 +860,8 @@ function renderPassive(res){
     + '</tr>').join("");
 
   $("#result-title").textContent = "被动监听结果";
+  $("#result-sub").textContent = "会话按流量排序；协议靠「端口画像 + 首包特征」识别，识别依据写在协议下方";
+  $("#result-chip").textContent = (s.flows || 0) + " 条会话";
   $("#result").innerHTML =
     '<div class="msg ' + (s.unknown ? "wait" : "ok") + '"><b>' + esc(res.headline) + '</b><br>'
       + esc(res.advice) + '</div>'
@@ -699,6 +902,7 @@ function render(res) {
   const m = res.meta || {}, sum = res.summary || {}, vd = res.verdict || {};
   const mt = res.metrics || vd.metrics || {};
   const lv = vd.level || "正常";
+  $("#result-chip").textContent = lv + " · " + (vd.layer || "—");
 
   /* ---- 结论卡：先回答「哪一层坏了」 ---- */
   const chips = [
@@ -839,7 +1043,9 @@ function render(res) {
     ${techBlock}
     ${secBlock}
     <div id="ai-slot"></div>
-    <div class="json">${esc(JSON.stringify(sum))}</div>
+    <details class="tech"><summary>机器可读摘要（JSON，给工单 / 脚本用）</summary>
+      <div class="tbody"><div class="json" style="margin:0">${esc(JSON.stringify(sum))}</div></div>
+    </details>
     <div class="hint">抓包文件：<span class="fname">${esc(m.pcap_name || "")}</span> ·
       网卡：${esc(m.interface || "-")} · 过滤器：<span class="fname">${esc(m.bpf || "-")}</span> ·
       生成时间：${esc(m.generated_at || "")}</div>
@@ -889,6 +1095,7 @@ async function runProbe(){
   if(!target){ $("#probe-target").focus(); return; }
   const btn = $("#probe-run"), out = $("#probe-out");
   btn.disabled = true; btn.textContent = "体检中…";
+  $("#result-chip").textContent = "体检中…";
   out.innerHTML = '<div class="msg wait" style="margin-top:12px">正在识别协议并分段探测，最长约 25 秒…</div>';
   let r;
   try{
@@ -908,6 +1115,7 @@ async function runProbe(){
     out.innerHTML = '<div class="msg bad" style="margin-top:12px">' + esc(r.error || "体检失败") + '</div>';
     return;
   }
+  $("#result-chip").textContent = r.protocol || "已识别";
   const color = r.level === "严重" ? "bad" : r.level === "警告" ? "warn" : "ok";
   const detail = [];
   if(r.proto && r.proto.banner_hex) detail.push("首包 0x" + r.proto.banner_hex.replace(/ /g,""));
@@ -1151,7 +1359,48 @@ function mdLite(src) {
     .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
-boot().then(poll).then(loadAI);
+/* ---------------- 退出应用 ---------------- */
+async function quitApp() {
+  const running = timer !== null || timerP !== null;
+  if (running && !confirm("还有任务在跑，退出会中断它。确定退出吗？")) return;
+  const btn = $("#quit-app");
+  btn.disabled = true;
+  btn.textContent = "正在停止…";
+  try {
+    const r = await fetch("/api/quit", { method: "POST" }).then((x) => x.json());
+    document.body.innerHTML =
+      `<div style="height:100vh;display:grid;place-items:center;font:14px/1.7 var(--font);
+         color:#475569;text-align:center;padding:40px">
+         <div>
+           <div style="font-size:34px;margin-bottom:10px">✓</div>
+           <h2 style="margin:0 0 6px;color:#0f172a">本地服务已停止</h2>
+           <p style="margin:0">${esc(r.message || "可以直接关闭这个页面了")}</p>
+           <p style="margin:16px 0 0;font-size:12px;color:#94a3b8">
+             下次使用请双击工具目录下的 <b>NetDiag.vbs</b>（无控制台窗口自动打开）</p>
+         </div>
+       </div>`;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "退出";
+    alert("停止失败：" + e + "\n可双击 NetDiag-stop.vbs 强制结束。");
+  }
+}
+
+async function loadAppInfo() {
+  const r = await fetch("/api/app").then((x) => x.json()).catch(() => null);
+  if (r && r.ok) {
+    APP_INFO = r;
+    document.title = `${document.title} · 端口 ${r.port}`;
+    if (r.auto_quit) {
+      $("#quit-app").title =
+        `停止本机后台服务；${r.idle_exit_min} 分钟无人使用会自动退出`;
+    }
+  }
+}
+
+$("#quit-app").onclick = quitApp;
+
+boot().then(poll).then(loadAI).then(loadAppInfo);
 </script>
 </body>
 </html>
