@@ -39,7 +39,11 @@ from ..contracts import (
     Severity,
 )
 
-#: 旧 severity 中文 → 枚举。``—`` 表示「无异常/无样本」，不产出 Finding。
+#: 旧 severity 中文 → 枚举。
+#:
+#: ``"—"`` 是「测了，正常」，``"na"`` 是「没样本，测不了」—— 两者都不产出 Finding，
+#: 但**不能混成同一个值**：混了以后就没法回答「这次到底验没验过」，
+#: 而「没样本报成正常」正是评审 P0-4 要修的那类误报。
 SEVERITY_MAP: dict[str, Severity] = {
     "严重": Severity.CRITICAL,
     "警告": Severity.WARNING,
@@ -47,6 +51,7 @@ SEVERITY_MAP: dict[str, Severity] = {
     "—": Severity.OK,
     "-": Severity.OK,
     "": Severity.OK,
+    "na": Severity.NA,
 }
 
 #: 出现这些词的行表示「这一层正常/没样本」，不产出 Finding。
@@ -213,10 +218,20 @@ def is_normal(row: Mapping) -> bool:
         row: 旧结构的一行。
 
     Returns:
-        bool: 严重度为「—」或文案里出现「正常/未发现」等词时为 True。
+        bool: 严重度为 ``"—"``（测了，正常）时为 True；``"na"``（没样本）不再
+            走严重度分支，而是**按文案**判（「未检测到…」这类陈述同样不产出 Finding）。
+
+    Note:
+        为什么 ``"na"`` 不算 normal：它是第三种状态，回答的是「没测到」而不是「没问题」。
+        ``SEVERITY_MAP`` 里两者已经分开（``Severity.OK`` vs ``Severity.NA``），
+        这里也必须分开，否则下游想统计「有多少项真验过」时会把它算进去。
+
+        ⚠️ 副作用：``"na"`` 行现在靠 ``NORMAL_HINTS``（「未检测到」等词）兜住。
+        哪天文案改成「无样本」而不含这些词，这些行会立刻变成 ``find_unmatched``
+        的漏项 —— 改文案（PR F）时必须同步往 ``NORMAL_HINTS`` 里加词。
     """
     severity = str(row.get("severity", "—")).strip()
-    if SEVERITY_MAP.get(severity, Severity.OK) in (Severity.OK, Severity.NA):
+    if SEVERITY_MAP.get(severity, Severity.OK) is Severity.OK:
         return True
     text = str(row.get("finding", ""))
     return any(hint in text for hint in NORMAL_HINTS)

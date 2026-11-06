@@ -10,7 +10,15 @@
 """
 from __future__ import annotations
 
-SEV_ORDER = {"严重": 0, "警告": 1, "提示": 2, "—": 3}
+#: 严重度排序。``"na"`` 排最后不是「最轻」，而是「最没有信息量」：
+#: 一层里只要有任何真实样本（哪怕是「测了正常」的 ``"—"``），就以样本为准；
+#: 全都是 ``"na"`` 时才会落到 ``"na"``，表示「这一层这次没数据可判」。
+SEV_ORDER = {"严重": 0, "警告": 1, "提示": 2, "—": 3, "na": 4}
+
+#: 算作「问题」的严重度。``"—"``（正常）与 ``"na"``（没样本）都不是问题：
+#: 前者判过了没问题，后者根本没有数据可判。两者都不得进 bad / sec_bad，
+#: 也不得影响 ``flags.network_ok`` 与 ``summary`` 的计数。
+PROBLEM_SEVERITIES = ("严重", "警告")
 
 # 排查顺序：自下而上。同严重度时，越底层越优先（先查链路再查应用）
 LAYER_RANK = {"L2 本地链路": 0, "L3 网络层": 1, "L4 传输层": 2, "L7 应用层": 3, "安全观察": 9}
@@ -69,6 +77,15 @@ TITLES = {
 
 
 def _worst(rows: list[dict]) -> str:
+    """一层里最「重」的严重度；空列表返回 ``"—"``。
+
+    Args:
+        rows: 该层的行（已排除安全观察行）。
+
+    Returns:
+        str: ``"严重"/"警告"/"提示"/"—"/"na"``。``"na"`` 只在**整层都没有真实样本**时
+            返回（排序见 :data:`SEV_ORDER`）：只要有一条测过的行，就以那条为准。
+    """
     if not rows:
         return "—"
     return min((r.get("severity", "—") for r in rows), key=lambda s: SEV_ORDER.get(s, 9))
@@ -97,7 +114,11 @@ def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]:
         mine = [r for r in rows if r.get("layer", "").startswith(d["id"])]
         net = [r for r in mine if r.get("category") != "安全观察"]
         status = _worst(net)
-        state = {"严重": "bad", "警告": "warn", "提示": "warn", "—": "ok"}.get(status, "ok")
+        # "na" 是第三态：不是「正常」，是「这次没样本，判不了」。
+        # 早先只有 ok/warn/bad 三态，没样本的行 severity 写成 "—"，
+        # 于是「未检测到 DNS 报文」在 UI 上是一块绿色 —— 用户会以为验过了。
+        state = {"严重": "bad", "警告": "warn", "提示": "warn",
+                 "—": "ok", "na": "na"}.get(status, "ok")
         if d["id"] == "L4" and not meta.get("tcp_packets"):
             state = "na"
         out.append({
@@ -224,8 +245,10 @@ def build(result: dict) -> dict:
 
     net_rows = [r for r in rows if r.get("layer") != "安全观察"]
     sec_bad = [r for r in rows if r.get("layer") == "安全观察"
-               and r.get("severity") in ("严重", "警告")]
-    bad = sorted([r for r in net_rows if r.get("severity") in ("严重", "警告")], key=_sort_key)
+               and r.get("severity") in PROBLEM_SEVERITIES]
+    # "na"（没样本）既不进 bad 也不进 sec_bad：没有数据不能算问题，
+    # 算进去会让「什么都没抓到」变成一条故障，把 level 拉成警告。
+    bad = sorted([r for r in net_rows if r.get("severity") in PROBLEM_SEVERITIES], key=_sort_key)
     hints = [r for r in net_rows if r.get("severity") == "提示"]
 
     points: list[dict] = []
