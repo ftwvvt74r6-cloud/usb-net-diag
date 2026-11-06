@@ -38,7 +38,7 @@ TOP_LEVEL_KEYS = {"summary", "meta", "metrics", "rows", "verdict"}
 #: ``verdict`` 必须提供的键（UI 与 Markdown 都按名取）。
 VERDICT_KEYS = {
     "level", "headline", "plain", "impact", "layer",
-    "layers", "points", "next_steps", "flags",
+    "layers", "points", "next_steps", "flags", "sufficiency",
 }
 
 #: ``rows[]`` 每行的**全部**键。

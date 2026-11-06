@@ -54,7 +54,7 @@ class GenPcapTests(unittest.TestCase):
             return gen_pcap.generate(out, manifest=manifest)
 
     def test_all_cases_present(self):
-        self.assertEqual(len(gen_pcap.CASES), 8)
+        self.assertEqual(len(gen_pcap.CASES), 9)
         names = [c.filename for c in gen_pcap.CASES]
         self.assertEqual(len(names), len(set(names)), "样本文件名不能重复")
         self.assertEqual({Path(n).stem for n in names}, set(gen_pcap.BY_NAME))
@@ -99,7 +99,7 @@ class GenPcapTests(unittest.TestCase):
             written = json.loads((Path(tmp) / "expected.json").read_text(encoding="utf-8"))
         self.assertEqual(written, doc)
         self.assertEqual(written["schema_version"], "1.0")
-        self.assertEqual(len(written["cases"]), 8)
+        self.assertEqual(len(written["cases"]), 9)
         for case in written["cases"]:
             with self.subTest(file=case["file"]):
                 self.assertTrue(case["file"].endswith(".pcap"))

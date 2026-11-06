@@ -1190,6 +1190,10 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
             "icmp_unreach": m["icmp_unreach"],
             "icmp_timeout": m["icmp_timeout"],
             "arp_no_reply": m["arp_no_reply"],
+            # ARP 请求总条数（不只是「无应答」的那些）。证据充分性闸门要用它判断
+            # 「这次抓包到底发过几次 ARP」——只有 1 次请求时判不了「无应答」，
+            # 而 arp_no_reply 恒为 0，看不出这个区别。
+            "arp_req": sum(st["arp_req"].values()),
             "throughput_mbps": m["throughput_mbps"],
             "streams_total": m["streams_total"],
             "external_ips": len(st["ext_dst"]),

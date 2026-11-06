@@ -44,6 +44,7 @@
     "icmp_unreach": 1,
     "icmp_timeout": 0,
     "arp_no_reply": 1,
+    "arp_req": 3,
     "throughput_mbps": 0.0,
     "streams_total": 4,
     "external_ips": 2,
@@ -379,7 +380,7 @@
     ],
     "cred_events": [],
     "threat_intel": {},
-    "generated_at": "2026-11-06 18:01:58",
+    "generated_at": "2026-11-07 01:13:21",
     "tshark_path": "E:\\utest\\NetDiag\\tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe",
     "interface": "-",
     "bpf": "离线分析",
@@ -653,6 +654,12 @@
     "flags": {
       "network_ok": false,
       "security_ok": true
+    },
+    "sufficiency": {
+      "ok": true,
+      "reasons": [],
+      "needed": [],
+      "reason_args": {}
     }
   }
 }
