@@ -15,8 +15,14 @@ from pathlib import Path
 
 SCAFFOLD = Path(__file__).resolve().parent.parent
 
-spec = importlib.util.spec_from_file_location(
-    "gen_api_doc", SCAFFOLD / "tools" / "gen_api_doc.py")
+_GEN = SCAFFOLD / "tools" / "gen_api_doc.py"
+if not _GEN.is_file():
+    raise AssertionError(
+        f"缺少生成器：{_GEN}\n"
+        "多半是 .gitignore 把 scaffold/tools/ 当成运行环境 tools/ 忽略了；\n"
+        "检查 .gitignore 里是否是 /tools/（带前导斜杠）。")
+
+spec = importlib.util.spec_from_file_location("gen_api_doc", _GEN)
 gad = importlib.util.module_from_spec(spec)
 # 必须先注册到 sys.modules：gen_api_doc 用了 `from __future__ import annotations`，
 # dataclass 处理字符串注解时要按 cls.__module__ 回查模块，缺了会抛
