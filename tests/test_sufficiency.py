@@ -22,7 +22,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -73,6 +75,18 @@ def _gen_module():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _gen_quiet(out_dir: Path, **kw) -> dict:
+    """生成样本但吞掉 gen_pcap 的中文 stdout。
+
+    为什么：generate() 会 ``print("3 包 …")``，Windows CI runner 的控制台编码是
+    cp1252，中文「包」编码不进去 → UnicodeEncodeError（本地 UTF-8 控制台看不见
+    这个坑，AGENTS.md §4.2 的「本地能跑 ≠ CI 能跑」）。redirect 到 StringIO
+    绕过控制台编码，生成行为不变。
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        return _gen_module().generate(out_dir, **kw)
 
 
 class SufficiencyPureTests(unittest.TestCase):
@@ -234,8 +248,7 @@ class EmptyCaptureManifestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.gen = _gen_module()
-        cls.gen.generate(Path(cls.tmp.name), only=["empty_capture"], manifest=True)
+        _gen_quiet(Path(cls.tmp.name), only=["empty_capture"], manifest=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -273,8 +286,7 @@ class SufficiencyAnalyzeTests(unittest.TestCase):
     def test_empty_capture_sample_is_insufficient(self):
         # 真实 pcap 侧的口径钉死：3 个包、五维度全不成立 → 证据不足。
         with tempfile.TemporaryDirectory() as td:
-            gen = _gen_module()
-            gen.generate(Path(td), only=["empty_capture"], manifest=False)
+            _gen_quiet(Path(td), only=["empty_capture"], manifest=False)
             res = analyze(str(Path(td) / "empty_capture.pcap"))
             v = verdict.build(res)
             self.assertEqual(v["level"], "证据不足")
