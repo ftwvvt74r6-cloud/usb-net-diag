@@ -3066,8 +3066,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 100 | ✅ |
-| `build` | function | 203 | ✅ |
+| `compute_layers` | function | 132 | ✅ |
+| `build` | function | 299 | ✅ |
 
 ### `compute_layers`
 
@@ -3101,14 +3101,18 @@ Args:
     result: 诊断结果字典（``meta`` / ``rows`` / ``metrics`` / ``summary``）。
 
 Returns:
-    dict: 键 ``level``（严重/警告/提示/正常）/ ``headline``（一句话结论）/
-        ``plain``（白话解释）/ ``layer``（问题所在层）/ ``layers``（四层状态）/
-        ``points``（问题明细）/ ``next_steps``（按优先级排序的处置建议）/
-        ``metrics`` / ``flags``。
+    dict: 键 ``level``（严重/警告/提示/正常/证据不足）/ ``headline``（一句话结论）/
+        ``plain``（白话解释）/ ``impact``（对业务意味着什么）/ ``layer``（问题所在层）/
+        ``layers``（四层状态）/ ``points``（问题明细）/
+        ``next_steps``（按优先级排序的处置建议）/ ``metrics`` / ``flags`` /
+        ``sufficiency``（:meth:`contracts.Sufficiency.to_dict` 的结果）。
 
 Note:
-    抓空包（``packets == 0``）时会先返回「无法定位」而不是「各层正常」，
-    这是避免「没抓到 = 没问题」这类误报的第一道闸门。
+    两道闸门拦「没抓到 = 没问题」：
+
+    1. 抓空包（``packets == 0``）先返回「无法定位」而不是「各层正常」。
+    2. 抓到了包但**没有任何可判定维度**时，``level`` 是「证据不足」而不是「正常」。
+       见 :func:`_sufficiency`：判的是「有没有样本可判」，不是「报文够不够多」。
 ```
 
 ## `mcp/wireshark-mcp/server.py`
