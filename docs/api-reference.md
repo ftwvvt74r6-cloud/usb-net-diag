@@ -203,9 +203,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 178 | ✅ |
-| `build_findings` | function | 595 | ✅ |
-| `analyze` | function | 989 | ✅ |
+| `collect` | function | 244 | ✅ |
+| `build_findings` | function | 680 | ✅ |
+| `analyze` | function | 1076 | ✅ |
 
 ### `collect`
 
@@ -1676,11 +1676,11 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `parse_flag` | function | 84 | ✅ |
-| `parse_num` | function | 102 | ✅ |
-| `parse_port` | function | 128 | ✅ |
-| `parse_int` | function | 146 | ✅ |
-| `parse_rows` | function | 172 | ✅ |
+| `parse_flag` | function | 85 | ✅ |
+| `parse_num` | function | 103 | ✅ |
+| `parse_port` | function | 129 | ✅ |
+| `parse_int` | function | 147 | ✅ |
+| `parse_rows` | function | 173 | ✅ |
 
 ### `parse_flag`
 
@@ -3048,7 +3048,7 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `compute_layers` | function | 83 | ✅ |
-| `build` | function | 178 | ✅ |
+| `build` | function | 182 | ✅ |
 
 ### `compute_layers`
 
