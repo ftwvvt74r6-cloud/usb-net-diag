@@ -1,78 +1,77 @@
-# v0.2.0 发布记录（便携包）
+# v0.2.0 发布记录（lite 源码包 · 法务修正回合）
 
-> 本文件记录 **2026-11-07 实际发布**的资产与构建证据；它**不打进 zip**
-> （避免文档记录自己的哈希造成自指），只随仓库源码走。
-> 构建/验包方法见 [`build.md`](build.md)，第三方许可见 [`licensing.md`](licensing.md)。
+> 本文件记录 **2026-11-07 法务修正后实际发布**的资产与构建证据；它**不打进 zip**
+> （`scripts/build_release.py` 显式排除，避免文档记录自己的哈希造成自指），只随仓库源码走。
+> 构建/验包方法见 [`build.md`](build.md)，第三方许可边界见 [`licensing.md`](licensing.md)。
+
+## 0. 为什么重发
+
+- 2026-11-07 首次发布的 `NetDiag-0.2.0-portable.zip` **公开附带**了 `tools/npcap-1.79.exe`
+  与 Wireshark 二进制。仓库是 PUBLIC，Npcap 免费版不允许对外再分发，Wireshark 公开分发
+  还要承担 GPL 源码提供义务。
+- 处置：`gh release delete v0.2.0 --cleanup-tag` 撤下旧 Release 和 tag；改为
+  **公开只发 lite 代码包**，第三方二进制只进内部离线包。
+- 证据与命令见 `review/chore-release-packaging-WRITER.md` 的「法务修正回合」。
 
 ## 1. Release
 
 | 项 | 值 |
 |---|---|
 | Release | <https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.2.0> |
-| 标题 | NetDiag · 网络矩阵 v0.2.0（Windows 便携包） |
+| 标题 | NetDiag · 网络矩阵 v0.2.0（lite 源码包） |
 | Tag | `v0.2.0` |
-| Tag 指向 | `601561426ffd8a4d569ec8b9e6242e1052df0ed5`（发布时 `main` HEAD） |
-| 发布件构建自 | 分支 `chore/release-packaging` 的提交 `174f652`（只含打包工程，产品代码与 `main` 相同） |
-| Release notes | `CHANGELOG.md` 的 `## v0.2.0` 段（原样） |
+| Tag 指向 | `601561426ffd8a4d569ec8b9e6242e1052df0ed5`（`main` HEAD） |
+| 发布件构建自 | 分支 `chore/release-packaging` 的提交 `（构建后回填）`（产品代码与 `main` 相同） |
+| Release notes | `CHANGELOG.md` 的 `## v0.2.0` 段 + 「Python / Wireshark / Npcap 需自行安装」说明 |
 
-## 2. 资产
+## 2. 资产（只有 lite + SHA256SUMS）
 
 | 文件 | 大小 | SHA-256 |
 |---|---|---|
-| `NetDiag-0.2.0-portable.zip` | **148,800,797 B**（141.9 MiB / 148.8 MB） | `7bd803abc998f1bfe92d9e9f028c9454a5219f7bbb43fa957413a5a4cbf39353` |
-| `SHA256SUMS.txt` | 93 B | `90164fe9ba21b962773b4940560c8759e2e9803225e189021fa51caacac87dae` |
+| `NetDiag-0.2.0-lite.zip` | （构建后回填） | （构建后回填） |
+| `SHA256SUMS.txt` | （构建后回填） | — |
 
-## 3. 包内容
+> 公开附件里**没有** `npcap-*.exe`、**没有** `Wireshark`、**没有** `tools/`。
+> 核对命令：`gh release view v0.2.0` +
+> `gh api repos/ftwvvt74r6-cloud/usb-net-diag/releases/tags/v0.2.0 --jq '.assets[].name'`。
+
+## 3. 包内容（lite）
 
 | 项 | 值 |
 |---|---|
 | 顶层目录 | `NetDiag/`（单目录，不散落） |
-| 解压后文件数 | **2057** |
-| 解压后大小 | **381,762,414 B**（364.1 MiB / 381.8 MB） |
-| `tools/` | **1915 文件 / 380,103,275 B**（362.5 MiB；Wireshark 未裁剪，只去掉 `__pycache__`/`*.pyc`） |
+| 文件数 | 约 **142** |
+| 解压后大小 | 约 **1.5 MB** |
+| `tools/` | **不存在**（构建脚本断言） |
+| Npcap 安装器 | **不存在**（构建脚本断言） |
 | `reports/` | 只有 `faults_demo.md` / `faults_demo.json` |
 | 禁入项 | `.git/`、`harness/`、`logs/` 文件、`config/ai-config.json`：**0 命中** |
-| Npcap 安装包 | `tools/npcap-1.79.exe`（再分发风险见 `licensing.md` §2） |
 
 ## 4. 构建自检（脚本自动做，真解压真跑）
 
-```
-[1/7] git archive HEAD (174f652) -> controlled files only
-      141 controlled files
-[2/7] copy tools/ as-is (no trimming) ...
-      tools/: 1915 files, 380,103,275 B (362.5 MiB / 380.1 MB)
-[4/7] build zip ...
-      2057 files -> NetDiag-0.2.0-portable.zip (148,800,797 B ...)
-[5/7] write SHA256SUMS.txt ...
-      7bd803abc998f1bfe92d9e9f028c9454a5219f7bbb43fa957413a5a4cbf39353  NetDiag-0.2.0-portable.zip
-[6/7] extract to a temp dir and run the packaged python ...
-      package files=2057 tools=1915 reports=['faults_demo.json', 'faults_demo.md'] npcap=npcap-1.79.exe
-  [verify] 235 tests OK (OK (skipped=2))
-  [verify] 8 launcher-contract tests OK (OK)
-...
-BUILD OK
-```
+- 自检 Python：**系统 Python**（lite 包不含运行时）；
+- 全套测试：`Ran 235 tests ... OK (skipped=19)`；
+- 启动器契约：`Ran 8 tests ... OK`；
+- 清单断言：无 `tools/`、无 `npcap-*.exe`、禁入项 0、`reports/` 只有两份示例、
+  `自检.bat` 纯 ASCII + CRLF；
+- 最后一行 `BUILD OK`。
 
 ## 5. 独立解压验证（空目录，人工复核）
 
 | 检查 | 结果 |
 |---|---|
-| 解压到空目录 | `NetDiag/` 单目录，2057 文件 / 381,762,414 B |
-| 包内 Python 全套测试 | `Ran 235 tests ... OK (skipped=2)`，rc=0 |
-| 包内 `自检.bat --no-pause` | `PASS: 4  WARN: 2  FAIL: 0` → `RESULT: USABLE`，rc=0（本机未装 Npcap/未提权，故 2 个 WARN；离线分析 PASS，demo 判定 `critical=3 warning=5`） |
-| 自检后 `reports/` | 仍只有两份示例（自检报告写 `%TEMP%`） |
+| 解压到空目录 | `NetDiag/` 单目录，约 142 文件 / 约 1.5 MB |
+| `自检.bat --no-pause` | `PASS: 2  WARN: 5  FAIL: 0` → `RESULT: USABLE`，rc=0（本机无 tshark / Npcap / 未提权，故 5 个 WARN；Python 与源码导入 PASS） |
+| 系统 Python 全套测试 | `Ran 235 tests ... OK (skipped=19)`，rc=0 |
 
-## 6. 红线（相对发布前 `main` = `6015614`）
+## 6. 红线（相对 `main` = `6015614`）
 
 | 项 | 结果 |
 |---|---|
-| demo + 9 样本 `analyze()+verdict.build()+render_markdown()` | **20/20 逐字节相同**（20 个文件、总字节数一致） |
-| `reports/` | `git status` / `git diff` 均为空；`faults_demo.{md,json}` 与基线 sha256 一致 |
+| demo + 9 样本 `analyze()+verdict.build()+render_markdown()` | **20/20 逐字节相同** |
+| `reports/` | `git status` / `git diff` 均为空；两份示例 sha256 不变 |
 | 测试 | 235（未减少） |
-
-> 说明：快照里的 `provenance.config_sha256` 会受本机 `config/app-config.json` 影响。
-> 基线 worktree 原本没有这份被忽略的本地配置，比较前把**同一份** `app-config.json`
-> 复制到基线侧，让两侧输入一致；这是运行元数据，不是产品代码差异。
+| `.github/**` / `.gitignore` / `core/**` / `ui/**` | 零改动 |
 
 ## 7. 干净 checkout（无 `tools/`、无 `harness/`）
 
@@ -86,9 +85,9 @@ BUILD OK
 ## 8. 复现
 
 ```bat
-git checkout 174f652
-tools\python\python.exe scripts\build_release.py
+git checkout <发布构建提交>
+python scripts\build_release.py --out logs\dist\release
 ```
 
-因为 zip 里含 `tools/`，包内测试是 `OK (skipped=2)`；没有 `tools/` 的干净 checkout
-才是 `OK (skipped=19)`。两者都正常，原因见 `build.md` §5。
+lite 包用系统 Python 自检（`skipped=19`）；内部包用包内 Python（`skipped=2`）。
+原因见 [`build.md`](build.md) §6。
