@@ -1570,7 +1570,7 @@ Returns:
 | `bpf_for` | function | 85 | ✅ |
 | `capture_live` | function | 113 | ✅ |
 | `run_scan` | function | 231 | ✅ |
-| `main` | function | 293 | ✅ |
+| `main` | function | 298 | ✅ |
 
 ### `load_config`
 
@@ -1653,7 +1653,7 @@ Note:
 ### `run_scan`
 
 ```python
-def run_scan(target: str='', duration: int=30, interface: str | None=None, pcap: str | None=None, logger=log) -> dict
+def run_scan(target: str='', duration: int=30, interface: str | None=None, pcap: str | None=None, logger=log, report_dir: str | Path | None=None) -> dict
 ```
 
 ```text
@@ -1666,6 +1666,9 @@ Args:
     pcap: 离线分析的抓包路径。只给文件名时会到 ``captures/`` 下找
         （兼容 U 盘盘符变化）。
     logger: 日志回调。
+    report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
+        给定时只写该目录（目录不存在会自动创建），文件名清洗仍由
+        :func:`report.save` 负责。
 
 Returns:
     dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
@@ -1683,7 +1686,8 @@ def main(argv: list[str] | None=None) -> int
 
 Args:
     argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
-        ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）。
+        ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
+        ``--report-out``（把完整报告导出到指定目录，默认 ``reports/``）。
 
 Returns:
     int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
