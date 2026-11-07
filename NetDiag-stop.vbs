@@ -1,5 +1,5 @@
 ' ============================================================
-'  USB-Net-Diag 停止器
+'  NetDiag（网络矩阵）停止器
 '  界面右上角「退出」用不了时（比如浏览器已关），双击本文件即可
 ' ============================================================
 Option Explicit
@@ -44,7 +44,7 @@ If Not ok Then
 End If
 
 If ok Then
-    MsgBox "本地诊断服务已停止。", vbInformation, "网络诊断工具"
+    MsgBox "本地诊断服务已停止。", vbInformation, "NetDiag · 网络矩阵"
 Else
-    MsgBox "没有检测到正在运行的服务（可能已经退出）。", vbInformation, "网络诊断工具"
+    MsgBox "没有检测到正在运行的服务（可能已经退出）。", vbInformation, "NetDiag · 网络矩阵"
 End If

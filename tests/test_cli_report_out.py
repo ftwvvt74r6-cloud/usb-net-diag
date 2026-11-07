@@ -198,7 +198,7 @@ class ReportOutLiveTest(_TempLogDirMixin, unittest.TestCase):
             self.assertTrue(js.is_file(), f"没有生成 JSON：{js}")
 
             text = md.read_text(encoding="utf-8")
-            self.assertIn("网络故障诊断报告", text)
+            self.assertIn("NetDiag · 网络矩阵 · 网络故障诊断报告", text)
             self.assertIn("## 一、故障定位", text)
 
             doc = json.loads(js.read_text(encoding="utf-8"))

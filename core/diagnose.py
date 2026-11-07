@@ -1,4 +1,4 @@
-"""USB-Net-Diag 采集与诊断主流程（CLI 入口）。
+"""NetDiag（网络矩阵）采集与诊断主流程（CLI 入口）。
 
 用法：
   python diagnose.py --target 192.168.1.10 --duration 30
@@ -431,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
     """
-    ap = argparse.ArgumentParser(description="USB-Net-Diag 网络诊断")
+    ap = argparse.ArgumentParser(description="NetDiag 网络诊断")
     ap.add_argument("--target", default="", help="目标 IP 或 CIDR 网段，留空表示全网扫描")
     ap.add_argument("--duration", type=int, default=load_config()["default_duration"])
     ap.add_argument("--interface", default=None, help="网卡序号或名称关键字")

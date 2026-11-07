@@ -293,7 +293,7 @@ def chat(messages: list[dict], overrides: dict | None = None,
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Authorization": f"Bearer {key}",
-            "User-Agent": "USB-Net-Diag/1.0",
+            "User-Agent": "NetDiag/1.0",
         },
     )
     ctx = None

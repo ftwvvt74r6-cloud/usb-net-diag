@@ -50,7 +50,7 @@ logs/
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "windows": "Windows-11-10.0.22631-SP0",
   "windows_version": "10.0.22631",
   "admin": true,

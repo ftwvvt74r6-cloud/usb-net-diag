@@ -1,5 +1,5 @@
 ' ============================================================
-'  USB-Net-Diag 静默启动器
+'  NetDiag（网络矩阵）静默启动器
 '  双击本文件即可：无控制台窗口 → 必要时代理提权 → 自动开浏览器
 '  原理：用 pythonw.exe（无控制台的 Python）跑 core\app.py
 ' ============================================================
@@ -18,12 +18,12 @@ script = root & "\core\app.py"
 If Not fso.FileExists(pyw) Then
     MsgBox "未找到便携 Python：" & vbCrLf & pyw & vbCrLf & vbCrLf & _
            "请确认 tools\python\ 目录完整，或重新解压整个工具包。", _
-           vbCritical, "网络诊断工具"
+           vbCritical, "NetDiag · 网络矩阵"
     WScript.Quit 1
 End If
 
 If Not fso.FileExists(script) Then
-    MsgBox "未找到启动脚本：" & vbCrLf & script, vbCritical, "网络诊断工具"
+    MsgBox "未找到启动脚本：" & vbCrLf & script, vbCritical, "NetDiag · 网络矩阵"
     WScript.Quit 1
 End If
 
@@ -34,7 +34,7 @@ shell.CurrentDirectory = root
 shell.Run cmd, 0, False
 If Err.Number <> 0 Then
     MsgBox "启动失败：" & Err.Description & vbCrLf & vbCrLf & _
-           "可尝试直接运行 start.bat 查看详细报错。", vbCritical, "网络诊断工具"
+           "可尝试直接运行 start.bat 查看详细报错。", vbCritical, "NetDiag · 网络矩阵"
     WScript.Quit 1
 End If
 On Error GoTo 0

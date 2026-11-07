@@ -1,4 +1,6 @@
-# USB-Net-Diag
+# NetDiag · 网络矩阵
+
+**NetDiag（网络矩阵）** —— 四层定位的便携网络诊断工具。
 
 放进 U 盘的 Windows 网络诊断工具链。插到目标电脑，双击 `NetDiag.vbs`（或 `start.bat`），
 浏览器自动打开控制台，**全程不弹黑色控制台窗口**。
@@ -9,7 +11,7 @@
 安全检测（明文凭证、可疑外联）只是附带项，不抢主线。
 
 ```
-USB-Net-Diag/
+NetDiag/
 ├── NetDiag.vbs                   # 日常入口：静默启动（无黑窗）+ 自动提权 + 自动开浏览器
 ├── NetDiag-stop.vbs              # 停止后台服务（界面点不了时的兜底）
 ├── NetDiag.ico                   # 应用图标（给快捷方式用）

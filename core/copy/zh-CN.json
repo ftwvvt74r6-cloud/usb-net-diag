@@ -357,7 +357,7 @@
     "telnet_detail": "{count} 个明文报文"
   },
   "report": {
-    "doc_title": "# 网络故障诊断报告",
+    "doc_title": "# NetDiag · 网络矩阵 · 网络故障诊断报告",
     "target_line": "- 诊断目标：`{target}`　抓包文件：`{pcap}`",
     "duration_line": "- 抓包时长：{duration} 秒　报文 {packets} 个　TCP 会话 {streams} 个",
     "generated_line": "- 生成时间：{generated}　采集网卡：{iface}",

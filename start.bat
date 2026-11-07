@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
-title USB-Net-Diag - 网络诊断工具
+title NetDiag · 网络矩阵 - 网络诊断工具
 color 0B
 
 set "ROOT=%~dp0"
@@ -10,7 +10,7 @@ set "PY=%ROOT%\tools\python\python.exe"
 
 echo.
 echo  ============================================================
-echo    USB-Net-Diag   便携网络诊断工具
+echo    NetDiag · 网络矩阵   便携网络诊断工具
 echo    运行目录: %ROOT%
 echo  ============================================================
 echo.
