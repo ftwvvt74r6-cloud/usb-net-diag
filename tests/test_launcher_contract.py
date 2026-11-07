@@ -4,16 +4,22 @@
 一旦 start.bat 引用的文件被改名或搬走，双击启动就会失败，而这类问题
 单纯看代码 review 很容易漏。
 
-本测试只依赖标准库，不 import 任何项目模块（避免需要 scapy / tshark）。
+本测试只依赖标准库；唯一导入的项目模块 ``core.version`` 也是纯标准库实现，
+不 import 需要 scapy / tshark 的模块。
 """
 
 from __future__ import annotations
 
 import re
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from core.version import read_version  # noqa: E402
+
 START_BAT = ROOT / "start.bat"
 
 # 便携运行环境不进仓库，跳过不校验
@@ -74,7 +80,7 @@ class LauncherContract(unittest.TestCase):
                 compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
     def test_version_file(self):
-        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        version = read_version()
         self.assertRegex(version, r"^\d+\.\d+\.\d+$", f"VERSION 格式不对：{version!r}")
 
     def test_demo_sample_present(self):

@@ -71,7 +71,7 @@ scaffold/
 不需要 `tools/`、不需要 tshark、不需要联网，也**不写任何仓库文件**（临时目录用完即删）。
 
 ```powershell
-cd G:\USB-Net-Diag\scaffold
+cd <你的工作目录>\NetDiag\scaffold
 ..\tools\python\python.exe run_tests.py     # 项目便携 Python 3.11.9（实测 OK）
 # 或
 python run_tests.py                         # 系统 Python 3.11+（实测 OK）
@@ -117,7 +117,7 @@ OK
 所以样本一律**脚本生成**：
 
 ```powershell
-cd G:\USB-Net-Diag\scaffold
+cd <你的工作目录>\NetDiag\scaffold
 ..\tools\python\python.exe tests\fixtures\gen_pcap.py --list
 ..\tools\python\python.exe tests\fixtures\gen_pcap.py --out pcap_samples
 REM 可选：用真 tshark 检查 tcp.analysis.* 这些派生字段是否真的出现

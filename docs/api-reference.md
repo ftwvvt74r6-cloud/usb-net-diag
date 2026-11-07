@@ -3766,8 +3766,9 @@ Args:
         ``core/`` 的上一级。测试可传临时目录。
 
 Returns:
-    str: 形如 ``0.2.0`` 的版本号。文件缺失、读失败、内容为空或只有
-    UTF-8 BOM 时回退 ``0.0.0``，任何情况都不抛异常。
+    str: 形如 ``0.2.0`` 的版本号。文件缺失或不可读（``OSError``）、
+    内容为空或只有 UTF-8 BOM 时回退 ``0.0.0``；非 UTF-8 内容触发的
+    ``UnicodeDecodeError`` 不在此兜底范围内，会照常抛出。
 ```
 
 ## `mcp/wireshark-mcp/server.py`
