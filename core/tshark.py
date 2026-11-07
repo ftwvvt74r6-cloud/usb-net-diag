@@ -259,21 +259,72 @@ def list_interfaces(tshark: Path | None = None) -> list[dict]:
     return items
 
 
+# 只用来给候选**排优先级**，绝不从列表里删：VPN 虚拟网卡可能恰好是唯一通路，
+# 删掉它们会让用户彻底抓不到包。命中这些词的网卡排到物理网卡后面。
 SKIP_HINTS = (
-    "loopback", "npf_loopback", "adapter for loopback", "回环",
+    "loopback", "npf_loopback", "npcap loopback", "adapter for loopback", "回环",
     "本地连接*", "local area connection*", "蓝牙", "bluetooth",
-    "vmware", "virtualbox", "vmnet", "hyper-v", "vethernet",
-    "teredo", "isatap", "tunnel", "tap-", "虚拟",
+    "vmware", "virtualbox", "vbox", "vmnet", "hyper-v", "vethernet",
+    "meta", "tun", "tap", "docker", "wsl",
+    "teredo", "isatap", "tunnel", "虚拟",
+    # tshark 的 extcap 伪接口（远程抓包 / 随机包生成器），不是网卡，排到最后。
+    "ciscodump", "etwdump", "randpkt", "sshdump", "udpdump", "wifidump",
+    "remote capture",
 )
 
 PREFER_HINTS = ("以太网", "ethernet", "wlan", "wi-fi", "wireless", "无线")
 
+# 虚拟网卡内部再分一层：VPN/TUN 可能正是用户唯一的上网通路，排在蓝牙、回环、
+# tshark extcap 伪接口前面；但仍整体排在物理网卡后面。
+LATE_PREFER_HINTS = ("meta", "tun", "tap", "wireguard", "vpn", "clash", "wintun")
+
+
+def _candidate_rank(item: dict) -> tuple[int, int, int]:
+    """给一块网卡算排序键：物理网卡在前，虚拟/外设网卡在后。
+
+    ``index`` 只做同类兜底，保证 ``tshark -D`` 的原顺序在排序后仍然稳定。
+    """
+    name = str(item.get("name") or "").lower()
+    index = int(item.get("index") or 0)
+    if any(hint in name for hint in SKIP_HINTS):
+        # 已被判为虚拟/外设的网卡不再按「Wi-Fi」等好名字插队；但 VPN/TUN 要
+        # 排在其他虚拟网卡前面——它很可能就是默认路由，而蓝牙/回环几乎不会。
+        late = 0 if any(hint in name for hint in LATE_PREFER_HINTS) else 1
+        return (1, late, index)
+    preferred = next((n for n, hint in enumerate(PREFER_HINTS) if hint in name),
+                     len(PREFER_HINTS))
+    return (0, preferred, index)
+
+
+def order_interfaces(interfaces: list[dict]) -> list[dict]:
+    """按候选优先级排序（物理优先、虚拟靠后），**不删除**任何网卡。
+
+    用户机器上常同时有 WLAN、断开的以太网、Clash/Meta TUN、VMware、蓝牙、
+    Wi-Fi Direct 等一堆网卡；名字看不出哪块通外网，但「物理网卡优先」能先把
+    最可能通外网的那块排前面，再交给 :func:`probe_interface` 用真实流量验证。
+
+    Args:
+        interfaces: ``list_interfaces()`` 的返回值。
+
+    Returns:
+        list[dict]: 新列表，顺序为「以太网/WLAN 等物理网卡 → 其它未命中
+            :data:`SKIP_HINTS` 的网卡 → Meta/TUN 等 VPN 虚拟网卡 → VMware/蓝牙/
+            回环/extcap 伪接口」。同类内按 :data:`PREFER_HINTS` 与 ``index``
+            稳定排序；输入为空返回 ``[]``。
+    """
+    return sorted(interfaces, key=_candidate_rank)
+
 
 def pick_interface(interfaces: list[dict]) -> dict | None:
-    """挑一块「像样」的默认网卡。
+    """挑一块「像样」的默认网卡（按名字猜，不验证是否有流量）。
 
     按业务优先级：先按 :data:`PREFER_HINTS` 找物理网卡（以太网/Wi-Fi），
-    再用 :data:`SKIP_HINTS` 排掉回环、蓝牙、虚拟网卡（VMware/Hyper-V 等）。
+    再用 :data:`SKIP_HINTS` 把回环、蓝牙、虚拟网卡（VMware/Meta/Hyper-V 等）
+    降到后面。**只排序不删除**：虚拟网卡全被跳过时会退回完整列表，
+    避免「唯一可用的就是 VPN 网卡」时返回 ``None``。
+
+    注意：本函数只看名字，断开的以太网也会被选中；要真正选到有流量的网卡，
+    调用方应先用 :func:`probe_interface` 按 :func:`order_interfaces` 的顺序探测。
 
     Args:
         interfaces: ``list_interfaces()`` 的返回值。
@@ -284,7 +335,8 @@ def pick_interface(interfaces: list[dict]) -> dict | None:
     if not interfaces:
         return None
     good = [i for i in interfaces if not any(s in i["name"].lower() for s in SKIP_HINTS)]
-    pool = good or interfaces
+    # 没有物理网卡时按候选顺序兜底：VPN/TUN 排在蓝牙/回环前面，仍绝不返回 None。
+    pool = good or order_interfaces(interfaces)
     for hint in PREFER_HINTS:
         for i in pool:
             if hint in i["name"].lower():

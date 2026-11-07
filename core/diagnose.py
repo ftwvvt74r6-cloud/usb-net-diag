@@ -114,6 +114,85 @@ def bpf_for(target: str) -> str:
     return f"host {t}"
 
 
+def _capture_candidates(chosen: dict, ordered: list[dict], limit: int = 3) -> list[dict]:
+    """给出「首选网卡 + 后续候选」的尝试顺序（按网卡序号去重）。
+
+    Args:
+        chosen: 首选网卡（探测命中的那块，或 ``pick_interface`` 的兜底结果）。
+        ordered: :func:`tshark.order_interfaces` 的候选顺序（物理优先、虚拟靠后）。
+        limit: 最多尝试几块，默认 3（首次 + 最多两次换卡重试）。
+
+    Returns:
+        list[dict]: 首项必为 ``chosen``，其余按 ``ordered`` 顺序补齐；
+            按 ``index`` 去重后截断到 ``limit``。
+    """
+    plan = [chosen]
+    seen = {chosen.get("index")}
+    for item in ordered:
+        if len(plan) >= limit:
+            break
+        index = item.get("index")
+        if index in seen:
+            continue
+        plan.append(item)
+        seen.add(index)
+    return plan
+
+
+def _pcap_has_packets(ts: Path, pcap: Path) -> bool:
+    """判断刚抓完的 pcap 里到底有没有报文（0 包和 0 字节都算空）。
+
+    抓包进程正常退出、文件也有几 KB，不代表抓到了流量：tshark 对 0 包也会写
+    pcapng 文件头（约 444 B）。所以不能只看文件大小，要真的读一帧出来。
+
+    Args:
+        ts: tshark 可执行文件路径。
+        pcap: 待检查的抓包文件。
+
+    Returns:
+        bool: 文件不存在、0 字节或读不出第一帧时返回 ``False``；只读第一帧
+            （``-c 1``），大文件也不会被整份读进内存。
+    """
+    try:
+        if pcap.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+    rc, out, _ = tshark.run(
+        [str(ts), "-r", str(pcap), "-c", "1", "-T", "fields", "-e", "frame.number"],
+        timeout=60,
+    )
+    return rc == 0 and bool((out or "").strip())
+
+
+def _capture_empty_error(plan: list[dict], duration: int, bpf: str) -> str:
+    """构造「候选网卡全都没抓到包」的错误文案（可直接照着操作）。
+
+    Args:
+        plan: 本轮实际尝试过的网卡列表。
+        duration: 每块网卡抓了多少秒。
+        bpf: 本次使用的 BPF 过滤器；空串表示全网。
+
+    Returns:
+        str: 中文错误说明，含 ``--interfaces`` / ``--interface`` 自助命令，
+            以及「网卡未连接」和「流量走了 VPN 虚拟网卡」两类常见原因。
+    """
+    names = "、".join(f"{tshark.short_name(i['name'])}[{i['index']}]" for i in plan)
+    if len(plan) == 1:
+        lead = f"网卡 {names} 在 {duration} 秒内没有捕获到任何报文"
+    else:
+        lead = (f"连续 {len(plan)} 块候选网卡（{names}）在 {duration} 秒内都没有"
+                "捕获到任何报文")
+    reasons = ("常见原因：1) 选中的网卡未连接或没有业务流量（例如已断开的以太网口）；"
+               "2) 流量走了 VPN / 代理的虚拟网卡（如 mihomo(Clash Meta) 的 Meta/TUN 网卡），"
+               "物理网卡上可能看不到业务报文。")
+    hint = ("请运行 `python core\\diagnose.py --interfaces` 查看网卡列表，"
+            "再用 `--interface <序号>` 指定真正有流量的网卡后重试。")
+    if bpf:
+        hint += f" 当前还设置了过滤器 `{bpf}`，可先去掉 `--target` 抓全网确认网卡是否选对。"
+    return f"{lead}。{reasons}{hint}"
+
+
 def capture_live(target: str = "", duration: int = 30, interface: str | None = None,
                  logger=log) -> dict:
     """实时抓包并落盘到 ``captures/``。
@@ -121,18 +200,24 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     Args:
         target: 抓包目标（转成 BPF）；空表示全网。
         duration: 抓包秒数。
-        interface: 网卡序号或名称关键字；空则自动挑选（见 ``tshark.pick_interface``）。
+        interface: 网卡序号或名称关键字；空则按 :func:`tshark.order_interfaces`
+            的候选顺序逐块探测（每块 2 秒、最多 5 块），取第一块真有流量的；
+            全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时先抓该网卡，
+            若它 0 包仍会按候选顺序换卡重试。
         logger: 日志回调。
 
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
             "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
             "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-            环境问题，前端据此提示改用离线分析。
+            环境问题，前端据此提示改用离线分析。抓满 0 包/0 字节时不直接失败，
+            会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+            ``--interfaces`` / ``--interface`` 指引与常见原因。
 
     Note:
         返回前会等文件大小稳定（最多 3 秒）。tshark 进程退出 ≠ 数据已落盘，
         在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
+        0 包的空抓包文件会被删除，避免在 ``captures/`` 留下无法分析的垃圾。
     """
     ts = tshark.find_tshark()
     if not ts:
@@ -154,6 +239,7 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         return {"ok": False, "degraded": True,
                 "error": "未枚举到可用网卡，请确认 Npcap 已安装且 tshark -D 可正常输出。"}
 
+    ordered = tshark.order_interfaces(interfaces)
     iface = None
     if interface:
         if interface.isdigit():
@@ -161,47 +247,80 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         else:
             iface = next((i for i in interfaces if interface.lower() in i["name"].lower()), None)
     if not iface:
-        picked = tshark.pick_interface(interfaces)
-        ordered = ([picked] if picked else []) + [i for i in interfaces if i is not picked]
-        logger("探测网卡流量（每块 2 秒），自动选择有流量的网卡 ...")
-        iface = tshark.probe_interface(ts, ordered) or picked
+        # 先按候选顺序真实抓 2 秒；名字只能猜（以太网可能没插网线），流量不会说谎。
+        logger("探测网卡流量（每块 2 秒，最多 5 块），自动选择有流量的网卡 ...")
+        iface = tshark.probe_interface(ts, ordered) or tshark.pick_interface(interfaces)
+    if iface is None:
+        return {"ok": False, "degraded": True, "error": "未枚举到可用网卡。"}
 
-    CAPTURES.mkdir(parents=True, exist_ok=True)
-    pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
     try:
         bpf = bpf_for(target)
     except ValueError as exc:
         return {"ok": False, "error": f"目标不合法：{exc}"}
     duration = max(3, min(int(duration or 30), 180))
+    CAPTURES.mkdir(parents=True, exist_ok=True)
 
-    cmd = [str(ts), "-i", str(iface["index"]), "-w", str(pcap), "-a", f"duration:{duration}", "-q"]
-    if bpf:
-        cmd += ["-f", bpf]
+    plan = _capture_candidates(iface, ordered, limit=3)
+    failures: list[str] = []
+    for attempt, cand in enumerate(plan, 1):
+        pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
+        cmd = [str(ts), "-i", str(cand["index"]), "-w", str(pcap),
+               "-a", f"duration:{duration}", "-q"]
+        if bpf:
+            cmd += ["-f", bpf]
 
-    logger(f"开始抓包：网卡[{iface['index']}] {tshark.short_name(iface['name'])}，时长 {duration}s，过滤器 `{bpf or '无（全网）'}`")
-    rc, out, err = tshark.run(cmd, timeout=duration + 120)
+        prefix = f"（第 {attempt}/{len(plan)} 块）" if len(plan) > 1 else ""
+        logger(f"开始抓包{prefix}：网卡[{cand['index']}] "
+               f"{tshark.short_name(cand['name'])}，时长 {duration}s，"
+               f"过滤器 `{bpf or '无（全网）'}`")
+        rc, out, err = tshark.run(cmd, timeout=duration + 120)
+        msg = (err or "") + (out or "")
 
-    msg = (err or "") + (out or "")
-    if not pcap.exists() or pcap.stat().st_size == 0:
-        low = msg.lower()
-        if "permission" in low or "access is denied" in low or "not permitted" in low or "admin" in low:
-            return {"ok": False, "degraded": True,
-                    "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
-                             "或使用离线分析已有 pcap 文件。"}
-        return {"ok": False, "degraded": True, "error": f"抓包失败(rc={rc}): {msg.strip()[:400]}"}
+        try:
+            size = pcap.stat().st_size
+        except OSError:
+            size = 0
+        if size == 0:
+            low = msg.lower()
+            if ("permission" in low or "access is denied" in low
+                    or "not permitted" in low or "admin" in low):
+                return {"ok": False, "degraded": True,
+                        "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
+                                 "或使用离线分析已有 pcap 文件。"}
+            failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 字节(rc={rc})")
+            logger(f"[提示] 网卡[{cand['index']}] 没有生成有效抓包（rc={rc}），"
+                   "自动换下一块候选网卡重试 ...")
+            continue
 
-    logger(f"抓包完成：{pcap.name}（{pcap.stat().st_size / 1024:.0f} KB）")
+        # tshark 退出 ≠ 数据已经全部落盘（杀软扫描 / 大文件缓存回写会滞后）。
+        # 若此时立刻分析，tshark 会以 rc=14「cut short」读到一个残缺文件，
+        # 结论随抓包尾部是否已落地而变——这就是「同一文件两次结论不同」的来源。
+        stable = _wait_file_stable(pcap)
+        # 0 包也会写 ~444 B 的 pcapng 头：文件非空不代表抓到了流量，必须真读一帧。
+        if not _pcap_has_packets(ts, pcap):
+            failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 包")
+            logger(f"[提示] 网卡[{cand['index']}] {tshark.short_name(cand['name'])} "
+                   f"在 {duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
+            try:
+                pcap.unlink()
+            except OSError:
+                pass
+            continue
 
-    # tshark 退出 ≠ 数据已经全部落盘（杀软扫描 / 大文件缓存回写会滞后）。
-    # 若此时立刻分析，tshark 会以 rc=14「cut short」读到一个残缺文件，
-    # 结论随抓包尾部是否已落地而变——这就是「同一文件两次结论不同」的来源。
-    if _wait_file_stable(pcap):
-        logger("抓包文件已落盘稳定，开始分析")
-    else:
-        logger("[提示] 抓包文件 3 秒内仍在变化，分析可能读到不完整内容")
+        logger(f"抓包完成：{pcap.name}（{size / 1024:.0f} KB）")
+        if stable:
+            logger("抓包文件已落盘稳定，开始分析")
+        else:
+            logger("[提示] 抓包文件 3 秒内仍在变化，分析可能读到不完整内容")
 
-    return {"ok": True, "pcap": str(pcap), "interface": tshark.short_name(iface["name"]),
-            "interface_index": iface["index"], "bpf": bpf or "无（全网）", "duration": duration}
+        return {"ok": True, "pcap": str(pcap), "interface": tshark.short_name(cand["name"]),
+                "interface_index": cand["index"], "bpf": bpf or "无（全网）",
+                "duration": duration}
+
+    error = _capture_empty_error(plan, duration, bpf)
+    if failures:
+        error += f"（各网卡结果：{'；'.join(failures)}）"
+    return {"ok": False, "degraded": True, "error": error}
 
 
 def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
