@@ -143,6 +143,42 @@ class HttpBodyDrainTests(unittest.TestCase):
         finally:
             server.PJOB.update(old)
 
+    def test_chunked_body_without_content_length_cannot_smuggle(self):
+        """``Transfer-Encoding: chunked`` 且无 ``Content-Length``：连接必须关闭，内嵌请求不许执行。
+
+        第 2 轮复审抓到的顺序缺陷：``_discard_body`` 里 ``left <= 0`` 的早返回原本在
+        ``Transfer-Encoding`` 判断之前，chunked 请求既不会被 drain 也不会被 close，
+        残留字节被当成下一条请求执行（实测外层 403 后内嵌 ``stop`` 仍执行）。
+        修复顺序后：只回 1 个响应、连接被关闭、内嵌请求不执行。
+        """
+        old = dict(server.PJOB)
+        server.PJOB.update({"state": "idle", "stop": False, "error": "", "result": None})
+        try:
+            inner = (b"POST /api/passive/stop HTTP/1.1\r\n"
+                     b"Host: 127.0.0.1\r\n"
+                     b"Content-Length: 0\r\n\r\n")
+            outer = (b"POST /api/upload?name=evil.exe HTTP/1.1\r\n"
+                     b"Host: 127.0.0.1\r\n"
+                     b"Origin: http://evil.example\r\n"
+                     b"Transfer-Encoding: chunked\r\n"
+                     b"Content-Type: application/octet-stream\r\n\r\n")
+            with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
+                sock.sendall(outer + inner)
+                status, payload = _read_one_response(sock)
+                self.assertEqual(status, 403, payload[:120])
+                sock.settimeout(2.0)
+                try:
+                    leftover = sock.recv(4096)
+                except socket.timeout:      # 没关连接，但也没再吐响应 —— 仍算失败
+                    leftover = b"<timeout>"
+                self.assertEqual(leftover, b"",
+                                 "chunked 请求后连接未关闭，残留 body 可能被当成下一条请求")
+                time.sleep(0.3)
+                self.assertFalse(server.PJOB.get("stop"),
+                                 "内嵌的 POST /api/passive/stop 被执行了（请求走私）")
+        finally:
+            server.PJOB.update(old)
+
     def test_valid_upload_still_works(self):
         """正常上传路径不受影响：合法扩展名 + 小文件仍能落盘并返回成功。"""
         with tempfile.TemporaryDirectory(prefix="netdiag_up_") as tmp:

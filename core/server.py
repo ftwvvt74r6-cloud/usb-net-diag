@@ -552,13 +552,18 @@ class Handler(BaseHTTPRequestHandler):
         Returns:
             None: 已读完或读失败都直接返回，不抛异常。
         """
+        # 分块传输没有可靠的 Content-Length，无法安全 drain。**必须**在 ``left <= 0``
+        # 早返回之前判断 ``Transfer-Encoding``：否则 chunked 请求（无 Content-Length）
+        # 会既不 drain 也不 close，残留 body 被当成下一条请求执行（审查实测可走私
+        # ``POST /api/passive/stop`` 并绕过 ``_guard`` 的 Origin 校验）。
+        if (self.headers.get("Transfer-Encoding") or "").strip():
+            self._body_left = 0
+            self.close_connection = True
+            return
         left = getattr(self, "_body_left", 0)
         if left <= 0:
             return
         self._body_left = 0
-        if (self.headers.get("Transfer-Encoding") or "").strip():
-            self.close_connection = True
-            return
         self._drain(left)
 
     def _drain(self, length: int) -> None:
