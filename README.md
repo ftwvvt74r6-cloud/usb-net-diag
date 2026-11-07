@@ -1,10 +1,11 @@
 # NetDiag · 网络矩阵
 
-**NetDiag（网络矩阵）** —— 四层定位的便携网络诊断工具：零依赖、免安装，
-可放进 U 盘或任意目录运行。
+**NetDiag（网络矩阵）** —— 四层定位的便携网络诊断工具。**内部离线包**免安装，
+解压到 U 盘或任意目录即可运行；**源码运行 / 公开 lite 包**需要本机 Python 3.11+，
+离线分析另装 Wireshark（tshark），实时抓包另装 Npcap。
 
-插到目标电脑，双击 `NetDiag.vbs`（或 `start.bat`），浏览器自动打开控制台，
-**全程不弹黑色控制台窗口**。
+**内部离线包**插到目标电脑，双击 `NetDiag.vbs`（或 `start.bat`），浏览器自动打开控制台，
+**全程不弹黑色控制台窗口**；源码 / lite 包用 `python core\server.py` 启动。
 
 **主线是网络故障排查**：慢、卡、丢包、连不上、时通时不通。工具把问题按
 **L2 链路 → L3 网络 → L4 传输 → L7 应用** 四层定位，直接告诉你：
@@ -40,19 +41,46 @@ NetDiag/
 ├── skills/network-diagnose/SKILL.md
 ├── ui/index.html                 # 单文件控制台
 ├── harness/                      # DeepSeek Harness 便携版 0.2.0-rc.2（Agent 底座，可选）
-├── tools/
+├── tools/                        # 仅本机 / 内部离线包有：不进 git、不进公开 Release
 │   ├── python/                   # 便携 Python 3.11（Embedded，内含 Scapy 2.8.0）
 │   ├── WiresharkPortable/        # 便携 Wireshark 4.7.4（含 tshark）
-│   └── npcap-1.79.exe            # Npcap 离线安装包
+│   └── npcap-1.79.exe            # Npcap 离线安装包（仅 --with-npcap 内部包）
 ├── captures/                     # 抓包落盘
 ├── reports/                      # 报告落盘（.md / .json）
 └── logs/                         # 运行日志
 ```
 
+## 快速开始（先选对拿包方式）
+
+**仓库和公开 Release 都不带 `tools/`**（没有 Wireshark / Npcap / Python 运行时）。
+按你的场景选一种：
+
+| 方式 | 拿到什么 | 需要自己装 | 怎么启动 |
+|---|---|---|---|
+| **源码运行** | `git clone` 本仓库（不含 `tools/`） | Python 3.11+；离线分析装 Wireshark（tshark）；实时抓包装 Npcap | `python core\server.py`（或 `python core\diagnose.py --pcap captures\faults_demo.pcap`） |
+| **公开 lite 包** | `NetDiag-<VERSION>-lite.zip`：源码 + 文档 + 测试 + `自检.bat` + `README.txt` | 同上 | 解压后先跑 `自检.bat`，再 `python core\server.py` |
+| **内部离线包** | 维护者用 `--with-tools` / `--with-npcap` 构建：含便携 Python + Wireshark（后者另含 Npcap 安装器） | `--with-tools` 仍需自装 Npcap；`--with-npcap` 已带（**仅组织内部**） | 双击 `NetDiag.vbs`（推荐）或 `start.bat` |
+
+三步走：
+
+1. **Python 3.11+**（源码 / lite 必装）：<https://www.python.org/downloads/windows/>
+   （安装时勾选 *Add python.exe to PATH*）。
+2. **离线分析 → tshark**：安装 Wireshark <https://www.wireshark.org/download.html>，
+   或把 `TSHARK_PATH` 指向 `tshark.exe`；内部离线包已内置。
+3. **实时抓包 → Npcap**：从 <https://npcap.com/#download> 下载安装 + 管理员权限；
+   `--with-npcap` 内部包才带安装器。
+
+> 许可边界（写死）：公开 Release **只发 lite 代码包**，不随附 Wireshark / Npcap；
+> `--with-npcap` 生成的包**只能组织内部同事之间用**，不得上传公开仓库 / 网盘。
+> 详见 [`docs/licensing.md`](docs/licensing.md) 与 [`docs/build.md`](docs/build.md)。
+>
+> 下文命令行示例里的 `tools\python\python.exe`：内部离线包照抄；源码 / lite 改成 `python` 即可。
+
 ## 使用
 
-1. 双击 `NetDiag.vbs`（UAC 弹窗点“是”；拒绝提权也能用离线分析与链路体检）。
-   想要看日志或 Npcap 安装过程时，改双击 `start.bat`。
+1. 内部离线包：双击 `NetDiag.vbs`（UAC 弹窗点“是”；拒绝提权也能用离线分析与链路体检）。
+   源码 / lite 包：在包根目录运行 `python core\server.py`。
+   想看日志或 Npcap 安装过程时，内部包可改双击 `start.bat`。
 2. 浏览器自动打开 `http://127.0.0.1:8787/`（端口被占会自动顺延）。
 3. 选模式：
 
@@ -263,7 +291,8 @@ Key 以明文存在 `config/ai-config.json`，只在本机工具目录内，不�
 实时抓包在 Windows 上依赖 **Npcap 驱动 + 管理员权限**，这是系统约束，无法绕过：
 
 - `start.bat` 会先尝试 UAC 提权，未提权则继续以普通权限启动；
-- Npcap 缺失时自动静默安装 `tools\npcap-*.exe`（`/S /winpcap_mode=no /loopback_support=yes`）；
+- 内部包带 `tools\npcap-*.exe` 时自动静默安装（`/S /winpcap_mode=no /loopback_support=yes`）；
+  lite / 源码运行不含安装器，会提示去 <https://npcap.com/#download> 自装；
 - 抓包因权限/驱动失败时，工具直接返回降级提示，不中断流程；
 - 降级路径：把目标机器上的 pcap 拖进「离线分析」，分析能力完全一致。
 
@@ -291,7 +320,7 @@ tools\python\python.exe -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"to
 
 | 现象 | 处理 |
 |---|---|
-| 提示「未找到 tshark」 | 确认 `tools\WiresharkPortable\App\Wireshark\tshark.exe` 存在 |
+| 提示「未找到 tshark」 | 装 Wireshark（<https://www.wireshark.org/download.html>），或把 `TSHARK_PATH` 指到 `tshark.exe`；内部离线包在 `tools\WiresharkPortable\App\Wireshark\tshark.exe` |
 | 抓包 0 报文 | 工具会自动探测网卡；仍为 0 时在界面下拉框手动指定网卡 |
 | 抓包报权限不足 | 右键 `start.bat` → 以管理员身份运行；或改用离线分析 |
 | 端口 8787 被占用 | 自动顺延到 8788-8797；也可改 `config/app-config.json` 的 `server_port` |
@@ -304,8 +333,8 @@ tools\python\python.exe -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"to
 
 ## 版本
 
-- 便携 Python 3.11.9（Embedded amd64）
-- Wireshark Portable 4.7.4（tshark 4.7.4，通过 MSI 管理安装解出）
-- Npcap 1.79 离线安装包
+- 便携 Python 3.11.9（Embedded amd64，仅内部离线包）
+- Wireshark Portable 4.7.4（tshark 4.7.4，仅内部离线包；lite / 源码自装）
+- Npcap 1.79 离线安装包（仅 `--with-npcap` 内部包；公开件不带）
 - DeepSeek Harness Portable 0.2.0-rc.2（`harness/`，内置 Node 运行时）
 - 仅使用 Python 标准库，无 pip 依赖，离线可跑
