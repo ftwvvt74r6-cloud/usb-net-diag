@@ -374,19 +374,26 @@ class EvidenceDecouplingTests(unittest.TestCase):
         st, _ = _empty_st(), _empty_m()
         st["streams"] = {"0": _tcp_stream()}
         st["tcp_packets"] = 9
-        streams = analyzer._stream_rows(st)
-        m = analyzer._metrics(st, streams)
-        self.assertEqual(m["conn_fail"], 1)
 
         table = _copy_table()
         table["finding"] = dict(table["finding"],
                                 **{"connect.no_response": "改了 Finding 文案（无哨兵）"})
+        # 关键：会话标记也必须一起改。只改 finding 文案的话，``streams[].flags`` 里仍是
+        # 真表的「建连无响应」，于是「按 flags 文案筛证据」的旧实现照样能匹配上 —— 用例假绿。
+        table["stream_flag"] = dict(table["stream_flag"],
+                                    **{"no_response": "改了会话标记（无哨兵）"})
         with _patched_copy(table):
+            # streams 必须在 patch 内生成，flags 才会用被改过的文案
+            streams = analyzer._stream_rows(st)
+            m = analyzer._metrics(st, streams)
+            self.assertEqual(m["conn_fail"], 1,
+                             "conn_fail 必须来自结构化判定，不受文案改动影响")
             rows = build_findings(st, m, streams)
         row = next(r for r in rows
                    if r["category"] == "连接建立" and r["severity"] == "严重")
         self.assertEqual(row["finding"], "改了 Finding 文案（无哨兵）")
-        self.assertIn("10.0.0.5:8080", row["evidence"])
+        self.assertIn("10.0.0.5:8080", row["evidence"],
+                      "证据不许依赖 finding/flag 的中文文案（旧哨兵实现会退化成“帧 -”）")
         self.assertIn("SYN 3 包", row["evidence"])
 
 
@@ -431,7 +438,9 @@ class LayerProtocolValidationTests(unittest.TestCase):
 
     def test_malformed_layer_protocol_falls_back_to_keys(self):
         table = _copy_table()
-        table["layer_protocol"] = {"l2": []}       # 畸形：值不是字符串
+        # 只弄畸形 l2，保留 l3/l4/l7 为合法字符串 —— 否则删掉白名单后其余层也会退化成 key，
+        # 断言照样成立，用例就抓不住"漏加白名单"这个回归（审查第 3 轮指出）。
+        table["layer_protocol"] = dict(table["layer_protocol"], l2=[])   # 畸形：值不是字符串
         with _patched_copy(table):
             vd = verdict.build({"meta": {"packets": 5}, "rows": [],
                                 "metrics": {}, "summary": {}})
