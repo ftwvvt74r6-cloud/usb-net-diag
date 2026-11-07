@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**25** 个（有模块说明 25 个）
-- 公开符号：**175** 个（有 docstring 175 个，合格 175 个）
+- 公开符号：**176** 个（有 docstring 176 个，合格 176 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -207,9 +207,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 293 | ✅ |
-| `build_findings` | function | 734 | ✅ |
-| `analyze` | function | 1196 | ✅ |
+| `collect` | function | 301 | ✅ |
+| `build_findings` | function | 751 | ✅ |
+| `analyze` | function | 1213 | ✅ |
 
 ### `collect`
 
@@ -1459,14 +1459,29 @@ Returns:
 
 ## `core/copytext.py`
 
-**职责**：文案表访问器：``core/copy/zh-CN.json`` 的唯一读取入口。
+**职责**：文案表访问器：``core/copy/zh-CN.json`` 的唯一读取入口（带进程内缓存）。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_table` | function | 25 | ✅ |
-| `section` | function | 43 | ✅ |
-| `get` | function | 61 | ✅ |
-| `text` | function | 77 | ✅ |
+| `reload` | function | 61 | ✅ |
+| `load_table` | function | 72 | ✅ |
+| `section` | function | 88 | ✅ |
+| `get` | function | 106 | ✅ |
+| `text` | function | 122 | ✅ |
+
+### `reload`
+
+```python
+def reload() -> None
+```
+
+```text
+清空文案表缓存。
+
+正常运行时不需要调用（文件变化会按 mtime/size 自动失效）。
+只有「测试 monkeypatch 了 ``core.config.load_copy``」这种**文件没变、来源变了**
+的场景必须显式调用，否则会读到缓存里的真实表。
+```
 
 ### `load_table`
 
@@ -1475,7 +1490,7 @@ def load_table() -> dict
 ```
 
 ```text
-读取最新文案表。
+读取文案表（按文件 mtime/size 缓存，重复调用 O(1)）。
 
 Returns:
     dict: 解析后的 copy 表；文件缺失 / 损坏 / 顶层不是对象时返回空表。
@@ -1521,7 +1536,7 @@ Returns:
 ### `text`
 
 ```python
-def text(path: str, key: str, default: str='', **args) -> str
+def text(path: str, key: str, default: str='', table: dict | None=None, **args) -> str
 ```
 
 ```text
@@ -1531,6 +1546,8 @@ Args:
     path: section 点号路径（如 ``report`` / ``verdict.titles``）。
     key: section 内的键。
     default: 缺 key 时的回退值；为空时回退成 key 本身。
+    table: 可选的已加载表。热循环（如 ``_stream_rows`` 的会话标记）传它可以把
+        「读表」摊销到一次；不传时走 :func:`load_table`（有缓存，O(1)）。
     **args: 占位符实参。
 
 Returns:

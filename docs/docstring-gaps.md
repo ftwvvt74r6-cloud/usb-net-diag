@@ -3,7 +3,7 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**100.0%**（175/175）
+- 合格率：**100.0%**（176/176）
 - 模块说明：25/25
 
 ## 按文件汇总
@@ -17,7 +17,7 @@
 | `core/bootstrap.py` | 4 | 4 | 4 | 100% |
 | `core/config.py` | 6 | 6 | 6 | 100% |
 | `core/contracts.py` | 55 | 55 | 55 | 100% |
-| `core/copytext.py` | 4 | 4 | 4 | 100% |
+| `core/copytext.py` | 5 | 5 | 5 | 100% |
 | `core/diagnose.py` | 6 | 6 | 6 | 100% |
 | `core/errors.py` | 3 | 3 | 3 | 100% |
 | `core/extract/__init__.py` | 0 | 0 | 0 | 100% |
