@@ -396,6 +396,26 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
     lines = [
         "以下是本次抓包诊断结果，请按四段结构分析。",
         "",
+    ]
+    # 规则引擎的结论置顶：下面「分层状态」只有 ok/warn/bad/na 四个机器码，
+    # 模型看到 L2：ok 会直接写「网络正常」，而 verdict 的结论可能是「证据不足」。
+    # 「没抓到」不等于「没问题」，所以 level / headline / sufficiency 必须先给它。
+    if vd.get("level") or vd.get("headline"):
+        lines += [
+            "【规则引擎结论】（必须与它保持一致，不得给出相反结论）",
+            f"判定等级：{vd.get('level', '-')}",
+            f"一句话结论：{vd.get('headline', '-')}",
+        ]
+        suff = vd.get("sufficiency")
+        if isinstance(suff, dict) and "ok" in suff:
+            lines.append(
+                "证据充分性：充分" if suff.get("ok") else
+                "证据充分性：不足 —— 本次抓包没有可判定的维度，"
+                "「没抓到」不等于「没问题」；禁止输出「网络正常」，"
+                "应说明证据不足并给出补采建议。"
+            )
+        lines.append("")
+    lines += [
         "【采集概况】",
         f"抓包文件：{meta.get('pcap_name', '-')}｜网卡：{meta.get('interface', '-')}"
         f"｜过滤器：{meta.get('bpf', '-')}",

@@ -35,7 +35,7 @@ _（无公开符号）_
 | `chat` | function | 227 | ✅ |
 | `test_connection` | function | 314 | ✅ |
 | `build_messages` | function | 378 | ✅ |
-| `analyze_result` | function | 481 | ✅ |
+| `analyze_result` | function | 501 | ✅ |
 
 ### `AIError`  (class)
 
@@ -2315,8 +2315,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 46 | ✅ |
-| `save` | function | 269 | ✅ |
+| `render_markdown` | function | 47 | ✅ |
+| `save` | function | 273 | ✅ |
 
 ### `render_markdown`
 
@@ -2356,6 +2356,10 @@ Note:
     JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
     因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
     文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
+
+    落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，
+    换机器重跑会让 ``git diff reports/`` 一直脏（``analyze()`` 的原值不动，
+    只在落盘时替换）。
 ```
 
 ## `core/rules/__init__.py`
@@ -3066,13 +3070,13 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 100 | ✅ |
-| `build` | function | 203 | ✅ |
+| `compute_layers` | function | 156 | ✅ |
+| `build` | function | 432 | ✅ |
 
 ### `compute_layers`
 
 ```python
-def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]
+def compute_layers(rows: list[dict], meta: dict, metrics: dict, sufficient: bool=True) -> list[dict]
 ```
 
 ```text
@@ -3082,6 +3086,11 @@ Args:
     rows: 旧 ``rows[]``；安全观察行**不参与**主判定。
     meta: 采集元信息；``L4`` 在没有 TCP 报文时标为 ``na``（没样本，别报正常）。
     metrics: 指标表，供状态块填明细。
+    sufficient: 证据是否充分（即 ``verdict.sufficiency.ok``）。为 ``False`` 时，
+        **没有真实样本行的层**一律置为 ``na``：否则会出现「结论是证据不足、
+        分层表却显示 ✅ 正常」的自相矛盾。有样本行（含 ``"—"``=测了正常）的层
+        仍按样本判定，保持 ``ok``。例外是 L3 的兜底中性行：它没有 ICMP/RTT
+        样本时也会写「三层转发正常」，这种行不算样本。
 
 Returns:
     list[dict]: 每项 ``{"id", "name", "protocol", "status"（ok/warn/bad/na）,
@@ -3101,14 +3110,19 @@ Args:
     result: 诊断结果字典（``meta`` / ``rows`` / ``metrics`` / ``summary``）。
 
 Returns:
-    dict: 键 ``level``（严重/警告/提示/正常）/ ``headline``（一句话结论）/
-        ``plain``（白话解释）/ ``layer``（问题所在层）/ ``layers``（四层状态）/
-        ``points``（问题明细）/ ``next_steps``（按优先级排序的处置建议）/
-        ``metrics`` / ``flags``。
+    dict: 键 ``level``（严重/警告/提示/正常/证据不足）/ ``headline``（一句话结论）/
+        ``plain``（白话解释）/ ``impact``（对业务意味着什么）/ ``layer``（问题所在层）/
+        ``layers``（四层状态）/ ``points``（问题明细）/
+        ``next_steps``（按优先级排序的处置建议）/ ``metrics`` / ``flags`` /
+        ``sufficiency``（:meth:`contracts.Sufficiency.to_dict` 的结果）。
 
 Note:
-    抓空包（``packets == 0``）时会先返回「无法定位」而不是「各层正常」，
-    这是避免「没抓到 = 没问题」这类误报的第一道闸门。
+    两道闸门拦「没抓到 = 没问题」：
+
+    1. 抓空包（``packets == 0``）先返回「无法定位」而不是「各层正常」。
+    2. 抓到了包但**没有任何可判定维度**时，``level`` 是「证据不足」而不是「正常」。
+       见 :func:`_sufficiency`：判的是「每个维度有没有能支撑规则的样本」，
+       不是全局的报文总数。
 ```
 
 ## `mcp/wireshark-mcp/server.py`

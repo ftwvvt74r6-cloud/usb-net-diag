@@ -10,6 +10,17 @@
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+try:                                    # 扁平导入：core/ 在 sys.path 上（report.py / diagnose.py）
+    from contracts import Sufficiency
+except ImportError:                     # 包导入：仓库根在 sys.path 上（tests / core.rules）
+    from core.contracts import Sufficiency
+
+#: 仓库根：copy 文案表按「仓库根在 sys.path 上」的包导入方式读取（与 analyzer 同款）。
+_ROOT = Path(__file__).resolve().parents[1]
+
 #: 严重度排序。``"na"`` 排最后不是「最轻」，而是「最没有信息量」：
 #: 一层里只要有任何真实样本（哪怕是「测了正常」的 ``"—"``），就以样本为准；
 #: 全都是 ``"na"`` 时才会落到 ``"na"``，表示「这一层这次没数据可判」。
@@ -19,6 +30,51 @@ SEV_ORDER = {"严重": 0, "警告": 1, "提示": 2, "—": 3, "na": 4}
 #: 前者判过了没问题，后者根本没有数据可判。两者都不得进 bad / sec_bad，
 #: 也不得影响 ``flags.network_ok`` 与 ``summary`` 的计数。
 PROBLEM_SEVERITIES = ("严重", "警告")
+
+#: 算作「该层有真实样本」的严重度：``"—"`` 表示测了正常（见 analyzer.NEUTRAL_SEVERITY），
+#: 其余三种表示真判出了东西。只有 ``"na"``（没样本，见 analyzer.NO_SAMPLE_SEVERITY）
+#: 不算样本 —— 证据不足时正是这些层必须显示成 ``na``，而不是 ``ok``。
+SAMPLE_SEVERITIES = ("严重", "警告", "提示", "—")
+
+# ---------- 证据充分性：判「有没有可判定的维度」，不判「报文总数」 ----------
+#
+# 为什么没有「报文总数 < N」或「抓包时长 < N 秒」这类总闸：
+# captures 里的 arp_no_reply 只有 5 个包，却抓到了「同一目标 3 次请求无应答」的真故障；
+# icmp_unreachable 也只有 5 个包，判出了严重。用总包数卡，会把已经成立的结论埋掉。
+#
+# 所以阈值全部落在**单个维度**上：每个维度各自回答「这类样本够不够对应规则跑出结论」。
+# 例如 TCP 维度要求 ≥ 5 个 TCP 报文（或至少 1 条完整会话）—— 少于这个数连重传率、
+# 握手都拼不出来；ARP 维度要求**同一目标** ≥ 2 次请求，因为 ARP 规则本身就要
+# 「同一目标 ≥ 2 次请求且无应答」才判得出「无应答」。这些是单维度的最小条件，
+# 不是全局的报文数阈值。
+MIN_TCP_PACKETS = 5      # TCP 的结论依赖重传率/握手，太少连会话都拼不完整
+MIN_TCP_STREAMS = 1      # 有完整会话也算有 TCP 样本（兜住「报文少但会话成立」）
+MIN_DNS_QUERIES = 1
+MIN_HTTP_REQUESTS = 1
+MIN_ICMP_ERRORS = 1      # ICMP 只判错误报文（不可达/超时），echo 本身不是结论
+MIN_ARP_REQUESTS = 2     # ARP 规则本身要「同一目标 ≥ 2 次请求」才判得出无应答
+
+#: 证据不足时给的两条可执行建议（在线抓包场景）；是 copy 表缺失时的回退常量。
+INSUFFICIENT_STEPS = (
+    "把抓包时长加长（建议 30 秒以上），并换成实际在用的网卡再抓一次。",
+    "确认目标流量真的经过本机：换个位置抓（如交换机镜像口），或先在体检页直接测一次目标端口。",
+)
+
+#: 离线（上传 pcap 分析）场景的第一条建议：没有网卡可换，重抓要借助外部工具。
+INSUFFICIENT_STEPS_OFFLINE = (
+    "把抓包时长加长（建议 30 秒以上），用 Wireshark 等工具重新抓一次再上传分析。",
+    INSUFFICIENT_STEPS[1],
+)
+
+#: 证据不足时的 ``needed`` key（查 ``copy/zh-CN.json`` 的 ``next_step``）。
+#: 这是**在线**场景的 pair；离线时第一条换成 ``collect_longer_offline``。
+INSUFFICIENT_NEEDED = ("collect_longer", "confirm_traffic_path")
+
+#: 证据不足时的 ``reasons`` key（查 ``copy/zh-CN.json`` 的 ``insufficient``）。
+INSUFFICIENT_REASON = "no_decidable_dimension"
+
+#: 落盘报告里 tshark 路径的占位：绝对路径是机器相关键，换机器重跑会产生脏 diff。
+TSHARK_PATH_PLACEHOLDER = "<TSHARK_PATH>"
 
 # 排查顺序：自下而上。同严重度时，越底层越优先（先查链路再查应用）
 LAYER_RANK = {"L2 本地链路": 0, "L3 网络层": 1, "L4 传输层": 2, "L7 应用层": 3, "安全观察": 9}
@@ -97,13 +153,19 @@ def _sort_key(r: dict) -> tuple:
             CAT_RANK.get(r.get("category"), 9))
 
 
-def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]:
+def compute_layers(rows: list[dict], meta: dict, metrics: dict,
+                   sufficient: bool = True) -> list[dict]:
     """为每一层算一个状态块（UI 用横条展示「哪一层红了」）。
 
     Args:
         rows: 旧 ``rows[]``；安全观察行**不参与**主判定。
         meta: 采集元信息；``L4`` 在没有 TCP 报文时标为 ``na``（没样本，别报正常）。
         metrics: 指标表，供状态块填明细。
+        sufficient: 证据是否充分（即 ``verdict.sufficiency.ok``）。为 ``False`` 时，
+            **没有真实样本行的层**一律置为 ``na``：否则会出现「结论是证据不足、
+            分层表却显示 ✅ 正常」的自相矛盾。有样本行（含 ``"—"``=测了正常）的层
+            仍按样本判定，保持 ``ok``。例外是 L3 的兜底中性行：它没有 ICMP/RTT
+            样本时也会写「三层转发正常」，这种行不算样本。
 
     Returns:
         list[dict]: 每项 ``{"id", "name", "protocol", "status"（ok/warn/bad/na）,
@@ -121,6 +183,21 @@ def compute_layers(rows: list[dict], meta: dict, metrics: dict) -> list[dict]:
                  "—": "ok", "na": "na"}.get(status, "ok")
         if d["id"] == "L4" and not meta.get("tcp_packets"):
             state = "na"
+        else:
+            # 该层有没有真实样本行：``"—"``（测了正常）与三种发现都算，只有 ``"na"`` 不算。
+            has_sample = any(r.get("severity") in SAMPLE_SEVERITIES for r in net)
+            # L3 的「未收到 ICMP 不可达/超时，三层转发正常」是 analyzer **无条件**产出的
+            # 兜底行：一个 ICMP / RTT 样本都没有时它照样写「正常」。这种行不能算样本，
+            # 否则空抓包（empty_capture：ARP×1 + ICMP echo×1 + UDP×1）的 L3 仍会 ✅。
+            if d["id"] == "L3":
+                has_sample = has_sample and bool(
+                    _int(meta.get("icmp_unreach")) + _int(meta.get("icmp_timeout"))
+                    or _int(metrics.get("rtt_samples")))
+            # 证据不足时「—」不再自动等于 ok：没样本的层必须显示第三态。
+            # 判定层已经说「无法判断」，分层表就不能再给绿色勾 —— 这是 T06
+            # 要根除的「没抓到=没问题」。
+            if not sufficient and not has_sample:
+                state = "na"
         out.append({
             "id": d["id"], "name": d["name"], "protocol": d["protocol"],
             "status": state, "severity": status,
@@ -200,6 +277,158 @@ def _headline(main: dict, meta: dict, m: dict) -> str:
     return f[:48] if f else "未发现明显故障"
 
 
+def _int(v) -> int:
+    """把 meta 里的计数值安全转成 ``int``（缺键 / ``None`` / 脏值一律当 0）。"""
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _load_copy() -> dict:
+    """读 ``core/copy/zh-CN.json`` 文案表。
+
+    Returns:
+        dict: 文案表。以下任一情况都返回空表、**不抛异常**，由调用方回退内联常量：
+            文件缺失 / 包导入失败 / **结构不合法**（顶层不是对象，或本模块消费的
+            ``next_step`` / ``insufficient`` 不是「字符串键 → 字符串值」的映射）。
+
+    Note:
+        copy 表是本 PR 新增的消费点：以前 copy 无人消费，畸形表不会有人崩；
+        现在 ``{"next_step": []}`` 会让 ``verdict.build`` 抛 ``AttributeError``，
+        ``{"insufficient": {"no_decidable_dimension": {...}}}`` 会抛
+        ``'dict' object has no attribute 'format'``。所以「读不到」与
+        「读到了但形状不对」走同一条回退路径，绝不让报告渲染崩在文案表上。
+    """
+    try:
+        if str(_ROOT) not in sys.path:
+            sys.path.insert(0, str(_ROOT))
+        from core.config import load_copy
+        table = load_copy() or {}
+    except Exception:                              # noqa: BLE001
+        return {}
+    if not isinstance(table, dict):
+        return {}
+    # 只校验本模块消费的两块：其它 section 畸形与我们无关，不该拖累这两块。
+    for section in ("next_step", "insufficient"):
+        values = table.get(section, {})
+        if not isinstance(values, dict):
+            return {}
+        if not all(isinstance(k, str) and isinstance(v, str)
+                   for k, v in values.items()):
+            return {}
+    return table
+
+
+def _is_offline(meta: dict) -> bool:
+    """离线分析标记：``run_scan`` 走 ``--pcap`` 路径时把 bpf 写成「离线分析」。"""
+    return meta.get("bpf") == "离线分析"
+
+
+def _insufficient_steps(meta: dict) -> list[str]:
+    """证据不足时的两条处置建议；copy 表优先，缺失回退内联常量。
+
+    Args:
+        meta: 采集元信息；``bpf == "离线分析"`` 时第一条建议换成离线版本。
+
+    Returns:
+        list[str]: 两条建议文案（可直接展示的成句中文）。
+    """
+    ns = _load_copy().get("next_step", {})
+    offline = _is_offline(meta)
+    first_key = "collect_longer_offline" if offline else "collect_longer"
+    first = ns.get(first_key) or (INSUFFICIENT_STEPS_OFFLINE[0] if offline else INSUFFICIENT_STEPS[0])
+    second = ns.get("confirm_traffic_path") or INSUFFICIENT_STEPS[1]
+    return [first, second]
+
+
+def _insufficient_reason_args(meta: dict, packets: int) -> dict:
+    """``no_decidable_dimension`` 模板的占位符实参（key 与 copy 表一一对应）。"""
+    return {
+        "packets": _int(packets),
+        "tcp_packets": _int(meta.get("tcp_packets")),
+        "dns_total": _int(meta.get("dns_total")),
+        "http_req": _int(meta.get("http_req")),
+        "icmp_err": _int(meta.get("icmp_unreach")) + _int(meta.get("icmp_timeout")),
+        "arp_req": _int(meta.get("arp_req")),
+        "arp_req_max": _int(meta.get("arp_req_max")),
+    }
+
+
+def _insufficient_proof(meta: dict, packets: int) -> str:
+    """证据不足点的 proof 文案：copy 模板优先，缺失/缺占位符时回退内联。
+
+    两份文案共用同一组占位符，改一边必须同步另一边；copy 表可用时以它为准
+    （tests 用自定义表断言输出跟着 copy 表变，不是断言两份「逐字相等」）。
+    """
+    args = _insufficient_reason_args(meta, packets)
+    tpl = _load_copy().get("insufficient", {}).get(INSUFFICIENT_REASON)
+    if tpl:
+        try:
+            return tpl.format(**args)
+        except (KeyError, IndexError, ValueError):
+            pass
+    return ("没有一个可判定的维度：报文 {packets} 个 —— TCP {tcp_packets} 个、"
+            "DNS {dns_total} 次、HTTP {http_req} 个、ICMP 错误 {icmp_err} 条、"
+            "ARP {arp_req} 次（同一目标最多 {arp_req_max} 次）").format(**args)
+
+
+def _sufficiency(meta: dict, net_rows: list[dict]) -> Sufficiency:
+    """判断这次抓包「有没有可判定的维度」。
+
+    判定顺序（先有证据，再看维度）：
+
+    1. 存在任何故障行（严重/警告）→ ``ok=True``。已经判出故障就说明证据链成立，
+       此时再去数报文多少是多余的，甚至有害（5 个包的 ARP 样本就是真故障）。
+    2. 否则任一维度有样本 → ``ok=True``。
+    3. 全都没有 → ``ok=False``，``reasons`` / ``needed`` 给出 key 与可执行建议。
+
+    Args:
+        meta: 采集元信息。只读**真实存在**的键：``tcp_packets`` / ``streams_total`` /
+            ``dns_total`` / ``http_req`` / ``icmp_unreach`` / ``icmp_timeout`` /
+            ``arp_req`` / ``arp_req_max``。
+        net_rows: 已排除安全观察行的 ``rows[]``。
+
+    Returns:
+        Sufficiency: ``ok=False`` 时 ``reasons`` 含 :data:`INSUFFICIENT_REASON`，
+            ``reason_args`` 带上本次的报文数与各维度计数，便于报告直出原因。
+
+    Note:
+        这是**采集有效性**闸门：判的是「每个维度有没有能支撑对应规则的样本」。
+        阈值是**单维度的最小条件**，不是全局的报文总数阈值 —— 参见模块头的
+        「证据充分性」注释段。
+
+        维度口径贴的是「对应规则能不能判」，不是「有没有这类包」：
+        ICMP 只算错误报文（echo request 不构成结论）；ARP 要求**同一目标** ≥ 2 次
+        请求（``arp_req_max``），两个不同目标各 1 次时规则一条也判不出来，
+        所以总请求数（``arp_req``）达标也不算维度成立。
+    """
+    if any(r.get("severity") in PROBLEM_SEVERITIES for r in net_rows):
+        return Sufficiency(ok=True)
+
+    dims = {
+        "tcp": (_int(meta.get("tcp_packets")) >= MIN_TCP_PACKETS
+                or _int(meta.get("streams_total")) >= MIN_TCP_STREAMS),
+        "dns": _int(meta.get("dns_total")) >= MIN_DNS_QUERIES,
+        "http": _int(meta.get("http_req")) >= MIN_HTTP_REQUESTS,
+        "icmp": (_int(meta.get("icmp_unreach")) + _int(meta.get("icmp_timeout"))
+                 >= MIN_ICMP_ERRORS),
+        "arp": _int(meta.get("arp_req_max")) >= MIN_ARP_REQUESTS,
+    }
+    if any(dims.values()):
+        return Sufficiency(ok=True)
+
+    needed = (("collect_longer_offline", INSUFFICIENT_NEEDED[1])
+              if _is_offline(meta) else INSUFFICIENT_NEEDED)
+    return Sufficiency(
+        ok=False,
+        reasons=(INSUFFICIENT_REASON,),
+        needed=needed,
+        reason_args={INSUFFICIENT_REASON: _insufficient_reason_args(
+            meta, _int(meta.get("packets")))},
+    )
+
+
 def build(result: dict) -> dict:
     """生成最终判定：一句话结论 + 分层状态 + 处置建议。
 
@@ -207,14 +436,19 @@ def build(result: dict) -> dict:
         result: 诊断结果字典（``meta`` / ``rows`` / ``metrics`` / ``summary``）。
 
     Returns:
-        dict: 键 ``level``（严重/警告/提示/正常）/ ``headline``（一句话结论）/
-            ``plain``（白话解释）/ ``layer``（问题所在层）/ ``layers``（四层状态）/
-            ``points``（问题明细）/ ``next_steps``（按优先级排序的处置建议）/
-            ``metrics`` / ``flags``。
+        dict: 键 ``level``（严重/警告/提示/正常/证据不足）/ ``headline``（一句话结论）/
+            ``plain``（白话解释）/ ``impact``（对业务意味着什么）/ ``layer``（问题所在层）/
+            ``layers``（四层状态）/ ``points``（问题明细）/
+            ``next_steps``（按优先级排序的处置建议）/ ``metrics`` / ``flags`` /
+            ``sufficiency``（:meth:`contracts.Sufficiency.to_dict` 的结果）。
 
     Note:
-        抓空包（``packets == 0``）时会先返回「无法定位」而不是「各层正常」，
-        这是避免「没抓到 = 没问题」这类误报的第一道闸门。
+        两道闸门拦「没抓到 = 没问题」：
+
+        1. 抓空包（``packets == 0``）先返回「无法定位」而不是「各层正常」。
+        2. 抓到了包但**没有任何可判定维度**时，``level`` 是「证据不足」而不是「正常」。
+           见 :func:`_sufficiency`：判的是「每个维度有没有能支撑规则的样本」，
+           不是全局的报文总数。
     """
     result = result or {}
     meta = result.get("meta") or {}
@@ -229,8 +463,10 @@ def build(result: dict) -> dict:
             "headline": "这次没抓到任何报文，无法定位",
             "plain": ("抓包文件是空的，可能是网卡选错、过滤器写得太窄，或者开始抓包后没有任何流量。"
                       "请重新抓一次再判断。"),
+            "impact": "无法定位（抓包为空，没有任何数据）",
             "layer": "—",
-            "layers": compute_layers([], meta, m),
+            # 空包是「证据不足」的极端情形：四层都没有样本，不许显示成 ✅ 正常。
+            "layers": compute_layers([], meta, m, sufficient=False),
             "points": [{
                 "severity": "警告", "layer": "—", "protocol": "—", "category": "采集有效性",
                 "title": "本次采集没有数据",
@@ -241,6 +477,10 @@ def build(result: dict) -> dict:
             "next_steps": ["在界面上把「网卡」改成实际在用的那块，目标留空抓 30 秒。"],
             "metrics": m,
             "flags": {"network_ok": None, "security_ok": None},
+            # 空包是「证据不足」的极端情形：连一个维度都没有样本。
+            "sufficiency": Sufficiency(
+                ok=False, reasons=("packets_zero",), needed=("collect_again",),
+            ).to_dict(),
         }
 
     net_rows = [r for r in rows if r.get("layer") != "安全观察"]
@@ -250,6 +490,9 @@ def build(result: dict) -> dict:
     # 算进去会让「什么都没抓到」变成一条故障，把 level 拉成警告。
     bad = sorted([r for r in net_rows if r.get("severity") in PROBLEM_SEVERITIES], key=_sort_key)
     hints = [r for r in net_rows if r.get("severity") == "提示"]
+
+    # 证据充分性：没有任何可判定维度时，后面的「正常」就是没有依据的正常。
+    suff = _sufficiency(meta, net_rows)
 
     points: list[dict] = []
     for r in (bad + hints)[:6]:
@@ -280,7 +523,33 @@ def build(result: dict) -> dict:
         })
 
     # ---------- 主判定 ----------
-    if bad:
+    if not suff.ok:
+        # 抓到了包，但没有一个维度有样本可判。这时候说「正常」等于凭空断言：
+        # 「什么都没测到」和「测了没问题」是两件事，结论必须是「无法判断」。
+        level = "证据不足"
+        headline = "这次抓包没有可判定的流量，不能下「正常」的结论"
+        plain = ("没有一个维度能判：没有 TCP 流量（报文不足或没有会话），"
+                 "没有 DNS 查询、没有 HTTP 请求，没有 ICMP 错误报文，"
+                 "ARP 请求也不足以判「无应答」（规则要求同一目标至少 2 次）。\n\n"
+                 "「没抓到」不等于「没问题」——每个维度都无从判断，"
+                 "所以本次结论是**无法判断**，而不是网络正常。")
+        impact = "无法判断（不代表网络正常）"
+        layer = "—"
+        ins_steps = _insufficient_steps(meta)
+        # 追加而不是覆盖：前面已构好的安全观察/提示明细是**已经成立的结论**，
+        # 覆盖会让「有安全隐患」这条信息在报告里消失（机器侧 security_ok 却还是 False）。
+        points = [{
+            "severity": "提示",
+            "layer": "—",
+            "protocol": "—",
+            "category": "采集有效性",
+            "title": "本次采集没有可判定的流量",
+            "plain": ("抓到的报文不构成任何一个可判定维度，"
+                      "任何「正常」的说法都缺证据。"),
+            "proof": _insufficient_proof(meta, packets),
+            "action": ins_steps[0],
+        }] + points
+    elif bad:
         main = bad[0]
         level = "严重" if main.get("severity") == "严重" else "警告"
         headline = _headline(main, meta, m)
@@ -316,12 +585,16 @@ def build(result: dict) -> dict:
 
     # ---------- 处置顺序：按排查优先级，底层先动 ----------
     steps: list[str] = []
-    for r in bad:
-        adv = (r.get("advice") or "").strip()
-        if adv and adv not in steps:
-            steps.append(adv)
-    if not steps:
-        steps = ["本次无需处理，保留报告作为基线；下次出现卡顿时再抓一次对比指标变化。"]
+    if not suff.ok:
+        # 证据不足时，处置建议是「怎么重新采到能判的样本」，不是「怎么修网络」。
+        steps = _insufficient_steps(meta)
+    else:
+        for r in bad:
+            adv = (r.get("advice") or "").strip()
+            if adv and adv not in steps:
+                steps.append(adv)
+        if not steps:
+            steps = ["本次无需处理，保留报告作为基线；下次出现卡顿时再抓一次对比指标变化。"]
 
     return {
         "level": level,
@@ -329,14 +602,18 @@ def build(result: dict) -> dict:
         "plain": plain,
         "impact": impact,
         "layer": layer,
-        "layers": compute_layers(rows, meta, m),
+        # 证据不足时没有样本的层要显示成 na（见 compute_layers 的 sufficient 参数）。
+        "layers": compute_layers(rows, meta, m, sufficient=suff.ok),
         "points": points,
         "next_steps": steps[:6],
         "metrics": m,
         "flags": {
-            "network_ok": not bool(bad),
+            # 「证据不足」= 网络是否正常无从判断，与空包分支的 None 对齐；
+            # 不能因为 bad 为空就写 True（那等于拿「没测到」当「正常」）。
+            "network_ok": None if not suff.ok else not bool(bad),
             "security_ok": not bool(sec_bad),
         },
+        "sufficiency": suff.to_dict(),
     }
 
 

@@ -474,6 +474,29 @@ def case_icmp_unreachable() -> list[tuple[float, bytes]]:
     return frames
 
 
+def case_empty_capture() -> list[tuple[float, bytes]]:
+    """证据不足对照（**没有可判定维度**）：3 个包，五个维度都不成立。
+
+    * 1 个 ARP 请求：数量 < 2，不足以判「无应答」（ARP 规则要求 ≥ 2）
+    * 1 个 ICMP echo request：无回包；ICMP 规则只看错误报文，echo 不产生故障行
+    * 1 个 UDP 包发往高位端口：无响应；UDP 无序号语义，不构成任何结论
+
+    期望：verdict.level == "证据不足"、sufficiency.ok is False、无任何 rule 命中。
+    """
+    frames: list[tuple[float, bytes]] = [
+        (0.0, eth(CLIENT_MAC, "ff:ff:ff:ff:ff:ff",
+                  arp(1, CLIENT_MAC, CLIENT_IP, "00:00:00:00:00:00",
+                      GATEWAY_IP), ETH_P_ARP)),
+        (0.5, eth(CLIENT_MAC, GATEWAY_MAC,
+                  ipv4(CLIENT_IP, GATEWAY_IP, IPPROTO_ICMP,
+                       icmp(8, 0, b"ping", rest=struct.pack("!HH", 0x4321, 1))))),
+        (1.0, eth(CLIENT_MAC, SERVER_MAC,
+                  ipv4(CLIENT_IP, "10.0.1.99", IPPROTO_UDP,
+                       udp(CLIENT_IP, "10.0.1.99", 52000, 61000, b"probe")))),
+    ]
+    return frames
+
+
 # ---------------------------------------------------------------- 注册表
 
 CaseFn = Callable[[], list[tuple[float, bytes]]]
@@ -543,6 +566,13 @@ CASES: tuple[Case, ...] = (
          {}, "ok",
          note=("UDP 无序号语义，单点抓包不能据此判丢包。本样本专门守「不误报」："
                "RTP 序号故意缺第 6 个，工具也不许报 L4 传输问题。")),
+    Case("empty_capture.pcap", case_empty_capture,
+         "证据不足：ARP×1 + ICMP echo×1 + UDP×1，五个可判定维度都不成立",
+         [], [],
+         {}, "insufficient",
+         note=("没有故障行，也没有任一可判定维度（tcp/dns/http/icmp/arp 全不达标）。"
+               "verdict.level 必须是「证据不足」，sufficiency.ok 必须为 False——"
+               "否则「没抓到」会被当成「正常」报出去。")),
 )
 
 BY_NAME = {Path(c.filename).stem: c for c in CASES}

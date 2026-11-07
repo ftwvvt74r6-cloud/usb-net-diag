@@ -116,6 +116,9 @@
   },
   "next_step": {
     "collect_again": "在界面上把「网卡」改成实际在用的那块，目标留空抓 30 秒。",
+    "collect_longer": "把抓包时长加长（建议 30 秒以上），并换成实际在用的网卡再抓一次。",
+    "collect_longer_offline": "把抓包时长加长（建议 30 秒以上），用 Wireshark 等工具重新抓一次再上传分析。",
+    "confirm_traffic_path": "确认目标流量真的经过本机：换个位置抓（如交换机镜像口），或先在体检页直接测一次目标端口。",
     "probe_link": "先用「链路体检」测目标端口是否可达，确认是端口不通还是链路慢。",
     "path_probe": "对同一目标做一次路径探测，确认丢包从哪一跳开始。",
     "baseline": "本次无需处理，保留报告作为基线；下次出现卡顿时再抓一次对比指标变化。",
@@ -137,6 +140,7 @@
     "too_few_streams": "TCP 会话只有 {actual} 个（低于 {need}），样本不足以判断",
     "too_few_rtt": "RTT 采样只有 {actual} 个（低于 {need}）",
     "no_app_sample": "没有任何 DNS/HTTP 样本，应用层无结论",
+    "no_decidable_dimension": "没有一个可判定的维度：报文 {packets} 个 —— TCP {tcp_packets} 个、DNS {dns_total} 次、HTTP {http_req} 个、ICMP 错误 {icmp_err} 条、ARP {arp_req} 次（同一目标最多 {arp_req_max} 次）",
     "packets_zero": "抓包文件为空"
   }
 }
