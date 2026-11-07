@@ -374,6 +374,7 @@
     <button class="topbtn" id="ai-open" title="配置用于生成结论的大模型接口，可随时修改">
       <span class="st" id="ai-dot"></span>AI 解读<span class="k" id="ai-badge">未配置</span>
     </button>
+    <button class="topbtn" id="diagpack" title="把本机日志脱敏后打包成一个 zip，发给维护者排障（工具不会自动上传）">导出诊断包</button>
     <button class="topbtn ghost" id="quit-app" title="停止本机后台服务（浏览器可随后关闭）">退出</button>
   </div>
 </header>
@@ -1412,6 +1413,35 @@ async function loadAppInfo() {
     }
   }
 }
+
+/* ---------------- 导出诊断包（M2） ---------------- */
+async function exportDiagPack() {
+  const btn = $("#diagpack");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "正在打包…";
+  try {
+    const r = await fetch("/api/diagpack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }).then((x) => x.json());
+    if (!r.ok) throw new Error(r.error || "导出失败");
+    alert(
+      `诊断包已生成：\n${r.path}\n\n` +
+      `大小：${(r.size / 1024).toFixed(0)} KB，共 ${r.entries} 个文件。\n` +
+      `已自动脱敏（内网 IP / 域名 / 用户名 / MAC）。\n\n` +
+      `请把这个文件原样发回给维护者。工具不会自动上传任何数据。`
+    );
+  } catch (e) {
+    alert("导出诊断包失败：" + e + "\n可改用工具目录下的「导出诊断包.bat」。");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+$("#diagpack").onclick = exportDiagPack;
 
 $("#quit-app").onclick = quitApp;
 

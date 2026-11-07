@@ -19,6 +19,7 @@ ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
 
 import analyzer  # noqa: E402
+import diagpack  # noqa: E402
 import logstore  # noqa: E402
 import report  # noqa: E402
 import tshark  # noqa: E402
@@ -387,6 +388,36 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
     return result
 
 
+def _export_diag(args) -> int:
+    """导出诊断包并打印结果（``--export-diag`` 的实现体）。
+
+    Args:
+        args: ``argparse`` 解析结果，读取 ``out`` / ``include_reports`` / ``raw``。
+
+    Returns:
+        int: 0 表示成功；1 表示输出目录不可写等失败（错误信息写 stderr）。
+    """
+    try:
+        path = diagpack.build(out_dir=args.out, include_reports=args.include_reports,
+                              raw=args.raw)
+    except Exception as exc:  # noqa: BLE001  命令行入口只报错，不吐栈
+        print(f"[错误] 导出诊断包失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    print(f"诊断包已生成：{path}")
+    try:
+        print(f"包体积：{path.stat().st_size / 1024:.0f} KB")
+    except OSError:
+        pass
+    if args.raw:
+        # SPEC V6：--raw 必须控制台 + README 双警告，不能只在包里写。
+        print("[警告] --raw 已生效：本包未脱敏，含原始 IP/域名/用户名/MAC，"
+              "只允许发给可信任的维护者！", file=sys.stderr)
+    else:
+        print("已脱敏：包内 IP/域名/用户名/MAC 均替换为不可还原的伪名。")
+    print("请把这个文件发回给维护者（工具不会自动上传任何数据）。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """``diagnose.py`` 的命令行入口（不开界面也能出报告）。
 
@@ -394,7 +425,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
             ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
             ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
-            省略时仍写 ``reports/``）。
+            省略时仍写 ``reports/``）/ ``--export-diag``（导出脱敏诊断包后退出，
+            可配 ``--include-reports`` / ``--raw`` / ``--out``）。
 
     Returns:
         int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
@@ -409,6 +441,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--report-out", default=None, metavar="DIR",
                     help="只写该目录（不再写 reports/）：把完整报告 .md/.json "
                          "导出到指定目录；省略时仍写 reports/")
+    ap.add_argument("--export-diag", action="store_true",
+                    help="导出诊断包（zip）后退出，不执行抓包/分析；默认脱敏")
+    ap.add_argument("--include-reports", action="store_true",
+                    help="诊断包内附最近 3 份报告（.md/.json）")
+    ap.add_argument("--raw", action="store_true",
+                    help="诊断包不做脱敏（危险：保留原始 IP/域名/用户名/MAC）")
+    ap.add_argument("--out", default=None, metavar="DIR",
+                    help="诊断包输出目录；省略时写 logs/exports/")
     args = ap.parse_args(argv)
 
     # 日志基建（CLI 也是一次「启动」）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
@@ -417,6 +457,9 @@ def main(argv: list[str] | None = None) -> int:
     logstore.prune()
     logstore.write_env_snapshot({"entry": "diagnose"})
     logstore.install_excepthooks()
+
+    if args.export_diag:
+        return _export_diag(args)
 
     if args.interfaces:
         for i in tshark.list_interfaces():
