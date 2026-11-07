@@ -223,6 +223,7 @@ class ElevationTest(unittest.TestCase):
         with mock.patch.object(server.tshark, "is_admin", return_value=False), \
                 mock.patch.object(app, "relaunch_as_admin", return_value=True), \
                 mock.patch.object(server, "request_quit"), \
+                mock.patch.object(server.logstore, "diag_log"), \
                 mock.patch.object(server.threading, "Timer") as timer:
             res = server.request_elevation()
         self.assertTrue(res["ok"])
@@ -248,7 +249,7 @@ class DegradedEmptyCaptureTest(unittest.TestCase):
                                   return_value=gateway):
             return server.diagnose.degraded_empty_capture_result(
                 target=target, duration=10, interface="12",
-                capture_error="0 packets", bpf="")
+                capture_error="0 packets", bpf="", logger=lambda _m: None)
 
     def test_target_reachable_reports_rtt_jitter_loss(self):
         res = self._degrade("baidu.com", [{
