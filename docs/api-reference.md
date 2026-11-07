@@ -207,9 +207,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 335 | ✅ |
-| `build_findings` | function | 845 | ✅ |
-| `analyze` | function | 1337 | ✅ |
+| `collect` | function | 407 | ✅ |
+| `build_findings` | function | 902 | ✅ |
+| `analyze` | function | 1394 | ✅ |
 
 ### `collect`
 
