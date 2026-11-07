@@ -226,12 +226,12 @@ def package_readme(version: str, mode: str) -> str:
             "不含 Python、Wireshark、Npcap 等第三方二进制。\n"
             "运行前请按下面第二节自行准备环境（Python 必装）。"
         )
-        first_step = "在包根目录打开命令行，运行 `python 自检.bat`（或直接双击 `自检.bat`）。"
+        first_step = "双击 `自检.bat`（或在包根目录的命令行里运行 `自检.bat`；**不要**用 `python 自检.bat`）。"
         launch = (
             "启动控制台：在包根目录运行 `python core\\server.py`（浏览器自动打开\n"
             "http://127.0.0.1:8787/ ，Ctrl+C 停止）。\n"
             "注意：`start.bat` / `NetDiag.vbs` 依赖 `tools\\python`，只有内部离线包才带；\n"
-            "lite 包请用上面的 python 命令启动。"
+            "lite 包请用上面的 python 命令启动（前提是系统 Python 在 PATH 里）。"
         )
         py_tree = "  python 命令      系统 Python 3.11+（不在包内）"
     elif mode == MODE_INTERNAL:
@@ -295,7 +295,8 @@ def package_readme(version: str, mode: str) -> str:
 第一次使用
 ------------------------------------------------
 {first_step}
-看到 `RESULT: USABLE` 就说明当前环境可用；WARN 项按提示补齐即可。
+看到 `RESULT: USABLE` 表示**核心功能可用**；若 `tshark` / `Npcap` / 管理员 显示 WARN，
+则对应能力暂不可用（离线分析 / 实时抓包 / 被动监听），按 WARN 提示补齐后重跑即可。
 {launch}
 
 运行前提
