@@ -19,6 +19,7 @@ API:
   POST /api/passive/stop    提前结束被动监听
   GET  /api/ping            存活探测（单实例判断）
   GET  /api/app             应用信息（版本/端口/PID/是否静默模式）
+  POST /api/diagpack        导出脱敏诊断包（zip），返回 path / size / entries
   POST /api/quit            优雅退出（界面右上角「退出」调用）
 """
 from __future__ import annotations
@@ -31,6 +32,7 @@ import time
 import traceback
 import urllib.parse
 import webbrowser
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -46,6 +48,7 @@ sys.path.insert(0, str(CORE))
 import ai  # noqa: E402
 import bootstrap  # noqa: E402
 import diagnose  # noqa: E402
+import diagpack  # noqa: E402
 import logstore  # noqa: E402
 import passive  # noqa: E402
 import probe  # noqa: E402
@@ -783,6 +786,25 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/scan":
             payload = self._read_json()
             return self._json(start_job(payload))
+        if parsed.path == "/api/diagpack":
+            # 前端顶部「导出诊断包」按钮：默认脱敏，不联网，产物落在 logs/exports/。
+            payload = self._read_json()
+            raw = bool(payload.get("raw"))
+            include_reports = bool(payload.get("include_reports"))
+            try:
+                path = diagpack.build(include_reports=include_reports, raw=raw)
+                with zipfile.ZipFile(path) as zf:
+                    entries = len(zf.namelist())
+                size = path.stat().st_size
+            except Exception as exc:  # noqa: BLE001  导出失败只回错误，不吐栈给浏览器
+                diagnose._log_to_file(traceback.format_exc())
+                return self._json({"ok": False,
+                                   "error": f"导出诊断包失败：{type(exc).__name__}: {exc}"})
+            if raw:
+                log("[警告] 诊断包 --raw 未脱敏：包含原始 IP/域名/用户名/MAC")
+            log(f"诊断包已导出：{path}（{size / 1024:.0f} KB，{entries} 个条目）")
+            return self._json({"ok": True, "path": str(path), "size": size,
+                               "entries": entries})
         if parsed.path == "/api/upload":
             q = urllib.parse.parse_qs(parsed.query)
             raw_name = Path((q.get("name") or ["upload.pcapng"])[0]).name
