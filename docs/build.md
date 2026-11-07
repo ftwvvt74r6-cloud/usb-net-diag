@@ -11,7 +11,7 @@
 
 | 模式 | 命令（仓库根目录） | 产物 | zip 体积 | 解压后 | 包内第三方二进制 | 能发给谁 |
 |---|---|---|---|---|---|---|
-| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-0.2.0-lite.zip` | 约 **0.7 MB** | 约 **1.5 MB** | **无** | **公开 Release / 任何人** |
+| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-0.2.0-lite.zip` | 约 **0.7 MB** | 约 **1.7 MB** | **无** | **公开 Release / 任何人** |
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-0.2.0-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
 | **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-0.2.0-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
 
@@ -242,10 +242,15 @@ python scripts\build_release.py --out logs\dist\release
 gh release create v0.2.0 `
   logs\dist\release\NetDiag-0.2.0-lite.zip `
   logs\dist\release\SHA256SUMS.txt `
-  --target 6015614 `
+  --target 601561426ffd8a4d569ec8b9e6242e1052df0ed5 `
   --title "NetDiag · 网络矩阵 v0.2.0（lite 源码包）" `
   --notes-file logs\dist\release\release-notes.md
+```
 
+> `--target` 必须用**完整 40 位 SHA**：实测短 SHA `6015614` 会被 GitHub 拒绝
+> （`HTTP 422 Release.target_commitish is invalid`）。
+
+```powershell
 # 4) 核对：附件里绝不能出现 npcap / tools / Wireshark
 gh release view v0.2.0
 gh api repos/ftwvvt74r6-cloud/usb-net-diag/releases/tags/v0.2.0 --jq '.assets[].name'

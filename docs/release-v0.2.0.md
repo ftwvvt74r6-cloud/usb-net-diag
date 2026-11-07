@@ -85,7 +85,7 @@
 ## 8. 复现
 
 ```bat
-git checkout <发布构建提交>
+git checkout d831853
 python scripts\build_release.py --out logs\dist\release
 ```
 
