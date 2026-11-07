@@ -21,21 +21,25 @@
 * §3 被动监听依赖**固定网卡序号 + 管理员 + Npcap + 真实流量**，不是机器无关的；
   用例只验证 skip 登记并传播（人工自检仍用 ``tests/selftest.py --fast``）。
 * §4 离线分析有 tshark 就真跑，没有就 skip；§2b TLS 有 openssl 就真跑，没有就 skip。
-* 测试**不写仓库 ``logs/``**（B3）：``diagnose.LOGS`` 在 ``setUp`` 里指向临时目录，
-  ``tearDown`` 再用「目录文件列表 before/after」证明仓库 ``logs/`` 一个文件都没多。
+* 测试**不写仓库 ``logs/``**（B3）：``setUp`` 把 ``NETDIAG_LOG_DIR`` 指到临时目录
+  （``logstore.log_root()`` 每次读环境变量），``tearDown`` 再用「目录文件列表 before/after」
+  证明仓库 ``logs/`` 一个文件都没多。
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 
 import selftest  # noqa: E402
+import logstore  # noqa: E402
 
 diagnose = selftest.diagnose
 REPO_LOGS = ROOT / "logs"
@@ -68,24 +72,27 @@ class _SelftestCase(unittest.TestCase):
         # 段标题对 unittest 没有价值，直接静音。
         selftest.section = lambda title: None
 
-        # B3：磁盘日志改道临时目录。server.log() 转发到 diagnose._log_to_file，
-        # 而 _log_to_file 每次调用都读模块级 LOGS，所以这里改一次就够。
+        # B3：磁盘日志改道临时目录。所有日志出口（server.log → logstore.diag_log、
+        # diagnose 的 run 记录、崩溃快照）都读 NETDIAG_LOG_DIR，所以改环境变量一次就够。
         self._tmp = tempfile.TemporaryDirectory()
-        self._orig_logs = diagnose.LOGS
-        diagnose.LOGS = Path(self._tmp.name) / "logs"
+        self._env = mock.patch.dict(
+            os.environ, {logstore.ENV_LOG_DIR: str(Path(self._tmp.name) / "logs")})
+        self._env.start()
+        logstore.close_streams()
         self._repo_logs_before = _dir_state(REPO_LOGS)
 
     def tearDown(self) -> None:
         try:
             self.assertEqual(
                 _dir_state(REPO_LOGS), self._repo_logs_before,
-                "测试往仓库 logs/ 写了文件：应把 diagnose.LOGS 指向临时目录",
+                "测试往仓库 logs/ 写了文件：应把 NETDIAG_LOG_DIR 指向临时目录",
             )
         finally:
+            logstore.close_streams()
+            self._env.stop()
             selftest.check = self._orig_check
             selftest.skip = self._orig_skip
             selftest.section = self._orig_section
-            diagnose.LOGS = self._orig_logs
             self._tmp.cleanup()
 
     def _check(self, name: str, cond: bool, detail: str = "") -> None:
@@ -173,8 +180,9 @@ class ApiSectionTest(_SelftestCase):
     def test_lifecycle_section_passes(self):
         """探活 / 应用信息 / 优雅退出后端口释放（4 项）。
 
-        这条会走 ``POST /api/quit`` → ``server.log`` → ``diagnose._log_to_file``，
-        是 B3 里唯一真正会写 ``logs/`` 的路径；``setUp`` 已把 LOGS 改道临时目录。
+        这条会走 ``POST /api/quit`` → ``server.log`` → ``logstore.diag_log``，
+        是 B3 里唯一真正会写 ``logs/`` 的路径；``setUp`` 已把
+        ``NETDIAG_LOG_DIR`` 改道临时目录。
         """
         selftest.test_lifecycle()
         self.finish_section("§6 应用生命周期", 4)

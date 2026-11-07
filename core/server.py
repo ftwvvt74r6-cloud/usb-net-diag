@@ -46,6 +46,7 @@ sys.path.insert(0, str(CORE))
 import ai  # noqa: E402
 import bootstrap  # noqa: E402
 import diagnose  # noqa: E402
+import logstore  # noqa: E402
 import passive  # noqa: E402
 import probe  # noqa: E402
 import tshark  # noqa: E402
@@ -201,15 +202,36 @@ def doctor_cached(ttl: int = 60) -> dict:
 
 
 def _probe_guarded(target: str, port, count, timeout, proto) -> dict:
-    """体检会向目标发真实报文，加并发闸门，避免被误用成压测工具。"""
+    """体检会向目标发真实报文，加并发闸门，避免被误用成压测工具。
+
+    Args:
+        target: 目标主机/URL。
+        port: 端口；``None`` 表示按协议画像自动选。
+        count: 探测次数。
+        timeout: 单次超时秒数；假值回落到 3.0。
+        proto: 强制协议（``http``/``tls``/``smb``/...），``None`` 表示自动识别。
+
+    Returns:
+        dict: ``probe.run()`` 的结果；并发超限时 ``{"ok": False, "error": ...}``
+            （不记 run，因为这次体检根本没执行）。
+    """
     if not PROBE_SEM.acquire(blocking=False):
         return {"ok": False,
                 "error": f"同时进行的体检已达 {MAX_CONCURRENT_PROBE} 个，请等待前一个结束"}
+    started = time.monotonic()
+    params = {"target": (target or "")[:300], "port": port or "",
+              "count": count, "proto": proto or ""}
     try:
-        return probe.run(target, port=port, count=count,
-                         timeout=timeout if timeout else 3.0, proto=proto)
-    finally:
-        PROBE_SEM.release()
+        try:
+            res = probe.run(target, port=port, count=count,
+                            timeout=timeout if timeout else 3.0, proto=proto)
+        finally:
+            PROBE_SEM.release()
+    except Exception:
+        _record_ui_run("probe", params, started, {"ok": False})
+        raise
+    _record_ui_run("probe", params, started, res)
+    return res
 
 
 def log(msg: str) -> None:
@@ -220,16 +242,50 @@ def log(msg: str) -> None:
 
     Returns:
         None: 内存里最多保留 400 条（超出丢最早的 100 条），界面靠轮询取增量；
-            磁盘那份由 ``diagnose._log_to_file`` 追加，供事后排障。
+            磁盘那份委托给 :func:`logstore.diag_log`（``logs/diag-YYYYMMDD.log``），
+            供事后排障。
     """
     with LOCK:
         JOB["logs"].append({"t": time.strftime("%H:%M:%S"), "m": str(msg)})
         if len(JOB["logs"]) > 400:
             del JOB["logs"][:100]
-    diagnose._log_to_file(str(msg))
+    logstore.diag_log(str(msg))
+
+
+def _record_ui_run(mode: str, params: dict, started: float, result: dict) -> None:
+    """记录一次 UI 触发的被动监听/链路体检（诊断任务由 ``diagnose.run_scan`` 自记）。
+
+    Args:
+        mode: ``passive`` 或 ``probe``。
+        params: 本次参数（只留模式/目标/时长等，不写绝对路径）。
+        started: ``time.monotonic()`` 起点。
+        result: ``passive.run()`` / ``probe.run()`` 的结果。
+
+    Returns:
+        None: 写盘失败静默忽略（日志不影响体检/监听）。
+    """
+    try:
+        result = result or {}
+        ok = bool(result.get("ok"))
+        logstore.record_run({
+            "mode": mode,
+            "params": dict(params or {}),
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "level": str(result.get("level") or ""),
+            "critical": 0,
+            "warning": 0,
+            "sufficiency_ok": ok,
+            "error_code": "" if ok else "E_INTERNAL",
+            "tshark_version": tshark.version(),
+            "ok": ok,
+        })
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None) -> None:
+    # run 记录由 diagnose.run_scan() 统一写（UI 的 /api/scan 也走它），
+    # 这里不再重复 record_run —— 否则同一次分析会出现两条记录。
     try:
         if mode == "offline":
             res = diagnose.run_scan(target=target, pcap=pcap, logger=log)
@@ -317,10 +373,14 @@ def engine_info() -> dict:
 
 
 def _passive_worker(interface: str | None, duration: int, target: str, engine: str) -> None:
+    started = time.monotonic()
+    params = {"interface": str(interface or ""), "duration": int(duration or 0),
+              "target": (target or "")[:300], "engine": engine}
     try:
         res = passive.run(interface=interface, duration=duration, target=target,
                           engine=engine, logger=log,
                           should_stop=lambda: bool(PJOB.get("stop")))
+        _record_ui_run("passive", params, started, res)
         with LOCK:
             if res.get("ok"):
                 PJOB["state"] = "done"
@@ -330,6 +390,7 @@ def _passive_worker(interface: str | None, duration: int, target: str, engine: s
                 PJOB["error"] = res.get("error", "未知错误")
             PJOB["finished_at"] = time.time()
     except Exception as exc:  # noqa: BLE001
+        _record_ui_run("passive", params, started, {"ok": False})
         diagnose._log_to_file(traceback.format_exc())
         with LOCK:
             PJOB["state"] = "error"
@@ -773,6 +834,11 @@ def main() -> int:
     Returns:
         int: 进程退出码。0 正常退出；1 端口全被占用。
     """
+    # 日志基建（每次启动一次）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
+    logstore.ensure_dirs()
+    logstore.prune()
+    logstore.write_env_snapshot({"entry": "server"})
+    logstore.install_excepthooks()
     cfg = diagnose.load_config()
     bootstrap.gen_configs()
     port = int(cfg.get("server_port", 8787))
