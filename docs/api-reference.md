@@ -1574,9 +1574,9 @@ Returns:
 | `load_config` | function | 44 | ✅ |
 | `log` | function | 76 | ✅ |
 | `bpf_for` | function | 89 | ✅ |
-| `capture_live` | function | 196 | ✅ |
-| `run_scan` | function | 354 | ✅ |
-| `main` | function | 540 | ✅ |
+| `capture_live` | function | 282 | ✅ |
+| `run_scan` | function | 451 | ✅ |
+| `main` | function | 637 | ✅ |
 
 ### `load_config`
 
@@ -1644,22 +1644,25 @@ Args:
     duration: 抓包秒数。
     interface: 网卡序号或名称关键字；空则按 :func:`tshark.order_interfaces`
         的候选顺序逐块探测（每块 2 秒、最多 5 块），取第一块真有流量的；
-        全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时先抓该网卡，
-        若它 0 包仍会按候选顺序换卡重试。
+        全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时**只抓该网卡**：
+        抓到 0 包/0 字节也不换卡（尊重用户选择，避免「指定 Meta 却静默换到 WLAN」
+        给出错误结论），直接返回带候选网卡与自助命令的错误。
     logger: 日志回调。
 
 Returns:
     dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
         "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
         "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-        环境问题，前端据此提示改用离线分析。抓满 0 包/0 字节时不直接失败，
-        会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
-        ``--interfaces`` / ``--interface`` 指引与常见原因。
+        环境问题，前端据此提示改用离线分析。自动选择模式下抓满 0 包/0 字节时不
+        直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+        ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
+        不换卡，错误里列出本次探测发现有流量的候选网卡和两条自助命令。
 
 Note:
     返回前会等文件大小稳定（最多 3 秒）。tshark 进程退出 ≠ 数据已落盘，
     在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
-    0 包的空抓包文件会被删除，避免在 ``captures/`` 留下无法分析的垃圾。
+    0 包的空抓包文件会被删除（日志写一行「已删除空抓包」），避免在
+    ``captures/`` 留下无法分析的垃圾。
 ```
 
 ### `run_scan`

@@ -5,13 +5,16 @@
 低序号的虚拟网卡占满，真正的 WLAN/Meta 根本没被试到；抓完 0 包后直接把空
 pcap 交给分析器，最后只报一句「未捕获到任何报文」。
 
-这里守四件事：
+这里守五件事：
 
 1. ``SKIP_HINTS`` 覆盖 Meta/VMware/蓝牙等，但**只降优先级、不删除**候选；
 2. ``order_interfaces`` 把物理网卡排在虚拟网卡前面；
 3. ``capture_live`` 无显式网卡时先用 ``probe_interface`` 找有流量的那块；
-4. 抓到 0 包/0 字节会自动换下一块候选（最多 3 块），全失败时错误里必须带
-   ``--interfaces`` / ``--interface`` 指引与常见原因。
+4. 自动模式抓到 0 包/0 字节会自动换下一块候选（最多 3 块），全失败时错误里必须带
+   ``--interfaces`` / ``--interface`` 指引与常见原因；
+5. **显式 ``--interface`` 抓到 0 包绝不换卡**：报错要说清「停在你指定的网卡」、
+   列出本次探测发现有流量的候选，并给 ``--interfaces`` / 不指定 ``--interface``
+   两条命令（Lead 裁定：指定 Meta 时静默换到 WLAN 会给出错误结论）。
 
 全部用例都不依赖真 Npcap / tshark：``tshark.run`` 与 ``probe_interface`` 都是 mock。
 """
@@ -150,6 +153,7 @@ class CaptureLiveRetryTest(unittest.TestCase):
         self.capture_calls: list[int] = []
         self.written: dict[str, int] = {}
         self.probe_calls: list[list[int]] = []
+        self.traffic_probe_calls: list[int] = []
         patches = [
             mock.patch.object(diagnose, "CAPTURES", self.captures),
             mock.patch.object(diagnose, "_wait_file_stable", return_value=True),
@@ -161,8 +165,13 @@ class CaptureLiveRetryTest(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def _install_run(self, traffic: set[int], zero_bytes: set[int] = frozenset()) -> None:
-        """假 tshark：``-w`` 落盘，``-r`` 按接口报告是否读到第一帧。"""
+    def _install_run(self, traffic: set[int], zero_bytes: set[int] = frozenset(),
+                     probe_traffic: set[int] = frozenset()) -> None:
+        """假 tshark：``-w`` 落盘，``-r`` 按接口报告是否读到第一帧。
+
+        ``probe_traffic`` 是显式 0 包后「探测其它候选」里哪些网卡有流量
+        （形如 ``-a duration:2 -c 20 -T fields``，没有 ``-w`` / ``-r``）。
+        """
 
         def fake_run(args, timeout=180):
             if "-w" in args:
@@ -178,7 +187,9 @@ class CaptureLiveRetryTest(unittest.TestCase):
             if "-r" in args:
                 idx = self.written.get(args[args.index("-r") + 1])
                 return 0, ("1\n" if idx in traffic else ""), ""
-            return 0, "", ""
+            idx = int(args[args.index("-i") + 1])
+            self.traffic_probe_calls.append(idx)
+            return 0, ("1\n" if idx in probe_traffic else ""), ""
 
         patcher = mock.patch.object(tshark, "run", side_effect=fake_run)
         patcher.start()
@@ -244,6 +255,46 @@ class CaptureLiveRetryTest(unittest.TestCase):
         self.assertGreater(len(error), 80, "错误信息不能只有一句「未捕获到任何报文」")
         self.assertEqual(self.capture_calls, [12, 5, 10],
                          "重试上限应为 3 块候选网卡；第三块应是 VPN 而不是蓝牙")
+
+    def test_explicit_interface_zero_packets_does_not_switch(self):
+        """显式指定 12（断线以太网）0 包：不换卡，列出有流量候选与两条命令。"""
+        self._install_run(traffic=set(), probe_traffic={5, 10})
+        logs: list[str] = []
+
+        result = diagnose.capture_live(duration=8, interface="12", logger=logs.append)
+
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(self.capture_calls, [12],
+                         "显式指定时 0 包后绝不允许换卡")
+        error = result.get("error", "")
+        for needle in ("你指定的网卡 #12", "以太网", "8 秒内没抓到任何包",
+                       "#5 WLAN", "#10 Meta", "--interfaces",
+                       "python core\\diagnose.py --duration 8"):
+            self.assertIn(needle, error)
+        self.assertEqual(self.traffic_probe_calls, [5, 10, 1, 4, 6],
+                         "应探测除显式网卡外的候选（最多 5 块），顺序按物理/VPN/虚拟")
+        self.assertEqual(self.probe_calls, [], "显式指定时不应走自动探测")
+        self.assertFalse(any("自动换下一块" in line for line in logs),
+                         "显式指定时日志里不能出现换卡提示")
+        self.assertTrue(any("已删除空抓包" in line for line in logs),
+                        "删除 0 包 pcap 要留一行日志")
+        self.assertEqual(list(self.captures.glob("*.pcapng")), [],
+                         "0 包 pcap 必须删除")
+
+    def test_explicit_interface_zero_bytes_does_not_switch(self):
+        """显式指定 12 连文件都没写出来（0 字节）同样不换卡、同样可操作。"""
+        self._install_run(traffic=set(), zero_bytes={12}, probe_traffic={5})
+
+        result = diagnose.capture_live(duration=8, interface="12",
+                                       logger=lambda _m: None)
+
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(self.capture_calls, [12], "0 字节也不能换卡")
+        error = result.get("error", "")
+        self.assertIn("你指定的网卡 #12", error)
+        self.assertIn("#5 WLAN", error)
+        self.assertIn("--interfaces", error)
+        self.assertIn("python core\\diagnose.py --duration 8", error)
 
 
 if __name__ == "__main__":

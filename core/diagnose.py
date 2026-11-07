@@ -193,6 +193,92 @@ def _capture_empty_error(plan: list[dict], duration: int, bpf: str) -> str:
     return f"{lead}。{reasons}{hint}"
 
 
+def _probe_traffic_candidates(ts: Path, candidates: list[dict],
+                              seconds: int = 2) -> list[dict]:
+    """探测候选网卡里哪些真有流量（**只用于提示，绝不用于换卡**）。
+
+    显式指定网卡的抓包失败后，用户需要知道「哪块有流量」才知道下一步选谁；
+    这里把候选里真有流量的都列出来（最多 5 块，每块试 ``seconds`` 秒），
+    但不拿它们继续抓包——显式选择必须被尊重。
+
+    Args:
+        ts: tshark 可执行文件路径。
+        candidates: 候选网卡列表（调用方已按优先级排序、并剔除刚失败的显式网卡）。
+        seconds: 每块网卡试抓的秒数。
+
+    Returns:
+        list[dict]: 有流量的候选网卡项（保持传入顺序）；一块都没有时返回 ``[]``。
+    """
+    hits: list[dict] = []
+    for cand in candidates[:5]:
+        _rc, out, _err = tshark.run(
+            [str(ts), "-i", str(cand["index"]), "-a", f"duration:{seconds}",
+             "-c", "20", "-T", "fields", "-e", "frame.number"],
+            timeout=seconds + 15,
+        )
+        if any(line.strip() for line in (out or "").splitlines()):
+            hits.append(cand)
+    return hits
+
+
+def _explicit_empty_error(iface: dict, duration: int, bpf: str,
+                          traffic: list[dict]) -> str:
+    """构造「用户显式指定的网卡没抓到包」的错误文案。
+
+    与 :func:`_capture_empty_error` 的关键差别：这里**不会换卡**，所以文案必须
+    先说明「停在你指定的网卡」，再给出本次探测发现有流量的候选，让用户自己决定
+    是否改指定或改用自动选择。
+
+    Args:
+        iface: 用户显式指定的网卡（``index`` / ``name``）。
+        duration: 在这块网卡上抓了多少秒。
+        bpf: 本次使用的 BPF 过滤器；空串表示全网。
+        traffic: :func:`_probe_traffic_candidates` 探测到有流量的候选网卡。
+
+    Returns:
+        str: 中文错误说明，含 ``--interfaces`` 与「不指定 --interface」两条命令；
+            有流量候选时逐个列出（形如 ``#5 WLAN、#10 Meta``）。
+    """
+    name = tshark.short_name(iface["name"])
+    lead = f"你指定的网卡 #{iface['index']} {name} 在 {duration} 秒内没抓到任何包。"
+    lead += "已按显式指定停在这块网卡，不会自动换卡。"
+    if traffic:
+        found = "、".join(f"#{i['index']} {tshark.short_name(i['name'])}" for i in traffic)
+        body = f"本次探测发现有流量的候选网卡：{found}，可供参考。"
+    else:
+        body = "本次探测也没有发现其它有流量的候选网卡。"
+    hint = ("请运行 `python core\\diagnose.py --interfaces` 查看完整网卡清单；"
+            "或不指定 `--interface`、让程序自动选择有流量的网卡重试："
+            f"`python core\\diagnose.py --duration {duration}`。")
+    if bpf:
+        hint += f" 当前还设置了过滤器 `{bpf}`，可先去掉 `--target` 抓全网确认网卡是否选对。"
+    return f"{lead}{body}{hint}"
+
+
+def _explicit_empty_result(ts: Path, iface: dict, ordered: list[dict], duration: int,
+                           bpf: str, logger) -> dict:
+    """显式指定网卡抓空后的返回值：只探测提示、绝不换卡。
+
+    Args:
+        ts: tshark 可执行文件路径。
+        iface: 用户显式指定的网卡。
+        ordered: 全部网卡的候选顺序（用于挑出「其它」网卡去探测）。
+        duration: 在这块网卡上抓了多少秒（写进错误信息）。
+        bpf: 本次使用的 BPF 过滤器。
+        logger: 日志回调。
+
+    Returns:
+        dict: ``{"ok": False, "degraded": True, "error": 可操作错误文案}``；
+            错误里列出本次探测发现有流量的候选网卡（不会用它们继续抓包）。
+    """
+    others = [i for i in ordered if i["index"] != iface["index"]]
+    logger(f"[提示] 显式指定网卡[{iface['index']}] 抓包为空，按指定不换卡；"
+           "正在探测其它候选网卡是否有流量（仅用于提示）...")
+    traffic = _probe_traffic_candidates(ts, others)
+    return {"ok": False, "degraded": True,
+            "error": _explicit_empty_error(iface, duration, bpf, traffic)}
+
+
 def capture_live(target: str = "", duration: int = 30, interface: str | None = None,
                  logger=log) -> dict:
     """实时抓包并落盘到 ``captures/``。
@@ -202,22 +288,25 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         duration: 抓包秒数。
         interface: 网卡序号或名称关键字；空则按 :func:`tshark.order_interfaces`
             的候选顺序逐块探测（每块 2 秒、最多 5 块），取第一块真有流量的；
-            全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时先抓该网卡，
-            若它 0 包仍会按候选顺序换卡重试。
+            全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时**只抓该网卡**：
+            抓到 0 包/0 字节也不换卡（尊重用户选择，避免「指定 Meta 却静默换到 WLAN」
+            给出错误结论），直接返回带候选网卡与自助命令的错误。
         logger: 日志回调。
 
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
             "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
             "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-            环境问题，前端据此提示改用离线分析。抓满 0 包/0 字节时不直接失败，
-            会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
-            ``--interfaces`` / ``--interface`` 指引与常见原因。
+            环境问题，前端据此提示改用离线分析。自动选择模式下抓满 0 包/0 字节时不
+            直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+            ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
+            不换卡，错误里列出本次探测发现有流量的候选网卡和两条自助命令。
 
     Note:
         返回前会等文件大小稳定（最多 3 秒）。tshark 进程退出 ≠ 数据已落盘，
         在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
-        0 包的空抓包文件会被删除，避免在 ``captures/`` 留下无法分析的垃圾。
+        0 包的空抓包文件会被删除（日志写一行「已删除空抓包」），避免在
+        ``captures/`` 留下无法分析的垃圾。
     """
     ts = tshark.find_tshark()
     if not ts:
@@ -246,6 +335,8 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             iface = next((i for i in interfaces if i["index"] == int(interface)), None)
         else:
             iface = next((i for i in interfaces if interface.lower() in i["name"].lower()), None)
+    # 显式指定的网卡必须被尊重：0 包时停在原地报错，不静默换到别的网卡。
+    explicit = iface is not None
     if not iface:
         # 先按候选顺序真实抓 2 秒；名字只能猜（以太网可能没插网线），流量不会说谎。
         logger("探测网卡流量（每块 2 秒，最多 5 块），自动选择有流量的网卡 ...")
@@ -260,7 +351,8 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     duration = max(3, min(int(duration or 30), 180))
     CAPTURES.mkdir(parents=True, exist_ok=True)
 
-    plan = _capture_candidates(iface, ordered, limit=3)
+    # 显式指定只抓这一块；自动模式才允许「0 包换下一块」重试（最多 3 块）。
+    plan = [iface] if explicit else _capture_candidates(iface, ordered, limit=3)
     failures: list[str] = []
     for attempt, cand in enumerate(plan, 1):
         pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
@@ -288,6 +380,8 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
                         "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
                                  "或使用离线分析已有 pcap 文件。"}
             failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 字节(rc={rc})")
+            if explicit:
+                return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
             logger(f"[提示] 网卡[{cand['index']}] 没有生成有效抓包（rc={rc}），"
                    "自动换下一块候选网卡重试 ...")
             continue
@@ -299,12 +393,15 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         # 0 包也会写 ~444 B 的 pcapng 头：文件非空不代表抓到了流量，必须真读一帧。
         if not _pcap_has_packets(ts, pcap):
             failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 包")
-            logger(f"[提示] 网卡[{cand['index']}] {tshark.short_name(cand['name'])} "
-                   f"在 {duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
             try:
                 pcap.unlink()
+                logger(f"[提示] 已删除空抓包：{pcap.name}")
             except OSError:
                 pass
+            if explicit:
+                return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
+            logger(f"[提示] 网卡[{cand['index']}] {tshark.short_name(cand['name'])} "
+                   f"在 {duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
             continue
 
         logger(f"抓包完成：{pcap.name}（{size / 1024:.0f} KB）")
