@@ -127,5 +127,28 @@ class VbsLauncherContract(unittest.TestCase):
             )
 
 
+class StopLauncherEncodingTest(unittest.TestCase):
+    """``NetDiag-stop.vbs`` 与主启动器同源同坑：必须 UTF-16 LE BOM + CRLF。
+
+    背景（R 轮复审 B1）：两个 VBS 原本都是 UTF-8 无 BOM，中文系统 WSH(ACP936) 会报
+    「未结束的字符串常量 / 语句未结束」，双击等于坏文件。主启动器已在 R 轮修好，
+    停止器漏了 —— 而 UI 上「退出」按钮正是提示用户双击它。
+    """
+
+    def test_stop_vbs_is_utf16_bom_crlf(self) -> None:
+        raw = STOP_VBS.read_bytes()
+        self.assertTrue(raw.startswith(b"\xff\xfe"),
+                        "NetDiag-stop.vbs 必须保存为 UTF-16 LE BOM（中文系统 WSH 才认）")
+        text = raw.decode("utf-16")
+        self.assertIn("\r\n", text, "NetDiag-stop.vbs 必须用 CRLF 换行（cmd/wscript 兼容）")
+        self.assertIn("port = 8787", text, "停止器应保留默认端口契约")
+
+    def test_main_vbs_has_no_dead_py_branch(self) -> None:
+        """``py`` 从未赋值，``FileExists(py)`` 是死分支，必须删掉。"""
+        text = VBS.read_bytes().decode("utf-16")
+        self.assertNotIn("fso.FileExists(py)", text,
+                         "NetDiag.vbs 里 FileExists(py) 是死分支（py 从未赋值）")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
