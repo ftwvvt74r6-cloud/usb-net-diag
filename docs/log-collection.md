@@ -81,9 +81,13 @@ NetDiag-diag-<机器名sha1前8位>-<YYYYmmdd-HHMM>.zip
 | 公网 IP | `8.8.8.8` | `8.8.***.***#b5c1` | 保留前两段，后两段打码 |
 | 域名 | `www.company.com` | `w**.c******.com#9d0e` | 每段留首字符，顶级域保留 |
 | 用户目录 | `C:\Users\alice\x.log` | `C:\Users\<user>\x.log` | 用户名换 `<user>`，文件名保留 |
+| 用户目录变体 | `%USERPROFILE%\alice`、`C:\Users/alice/x.log`、`C:\Documents and Settings\alice` | `<home>\<user>`、`C:\Users\<user>\x.log` | `%USERPROFILE%` / `%HOMEPATH%`、正反斜杠混用、含空格的用户目录都覆盖 |
+| UNC 路径 | `\\fileserver\share\z` | `\\<host>\share\z` | 主机名段换 `<host>`，共享名保留（排障需要） |
+| 前导零 IP | `192.168.001.100` | `192.168.1.***#a3f2` | 先归一化再判断公私网，不因前导零跳过 |
+| **文件名** | `192.168.1.100.pcap`、`www.company.com.pcap` | `192.168.1.***#25c9.pcap`、`w**.c******.com#37f4.pcap` | 只保留扩展名，stem 里的 IP / 域名 / 用户名照常脱敏 |
 | MAC | `aa:bb:cc:dd:ee:ff` | `aa:bb:cc:**:**:**#4e2a` | 前 3 字节（厂商）保留，尾 3 字节打码 |
 | 其它绝对路径 | `D:\builds\agent-7\NetDiag\...\tshark.exe` | `<root>\Wireshark\tshark.exe` | 盘符与上层目录隐去，留最后两段 |
-| IPv6 | `2001:db8::1` | `<ipv6>#856d` | 整段隐去（前缀也可能定位到单位） |
+| IPv6 | `2001:db8::1` | `<ipv6>#1eec` | 整段隐去（前缀也可能定位到单位）；IPv4-mapped（`::ffff:192.168.1.100`）同样整段 `<ipv6>#8514` |
 
 ### 伪名后缀 `#xxxx`
 
@@ -93,14 +97,21 @@ NetDiag-diag-<机器名sha1前8位>-<YYYYmmdd-HHMM>.zip
 ### 保留不动的信息
 
 * **端口**、协议、方向、错误码、版本号（排障必需，SPEC 明确不打码）；
-* 文件名（`faults_demo.json` / `app-20261107.log` 不会被当成域名误伤）；
+* **普通**文件名（`faults_demo.json` / `app-20261107.log` 不会被当成域名误伤）；
+  但 stem 里出现 IP / 域名 / 用户名时会脱敏，只保留扩展名；
 * 时间戳。
 
-### 两条保证
+### 三条保证
 
-1. **幂等**：已经脱敏过的文本再跑一遍不会二次打码（`***` / `#a3f2` 不会被再次匹配）。
+1. **幂等**：已经脱敏过的文本再跑一遍不会二次打码（`***` / `#a3f2` / `<user>` 不会被再次匹配）。
 2. **脱敏失败就跳过**：某个文件读不了 / 处理异常时，该文件**不会进包**，只会在
    `README.txt` 的「没有收录 / 被跳过的文件」里留一行。**宁可少一个文件，也不导出原文。**
+3. **写 zip 前做泄漏自检**：把脱敏过程中识别出的原值 token，对每个条目的**名字 + 内容**
+   （以及 README）再扫一遍；任何 token 仍出现就**抛异常、不生成 zip**。错误信息只报
+   命中类别（如「域名」），不打印原值。**宁可导出失败，不可泄露。**
+
+> zip 条目名里的 `*` / `<` / `>` 会换成 `_`（Windows 解压不允许这些字符），例如
+> `192.168.1.100.pcap` 在包内显示为 `192.168.1.___#25c9.pcap`；脱敏效果不变。
 
 ---
 
@@ -137,7 +148,8 @@ NetDiag-diag-<机器名sha1前8位>-<YYYYmmdd-HHMM>.zip
 * **不含 pcap / pcapng 抓包文件，也不含任何报文载荷** —— 体积大、可能带业务数据；
   需要抓包时让同事单独发 pcap（并说明用途）。
 * 不含 `config/ai-config.json` 里的 AI Key，也不含 `config/app-config.json` 的任何值；
-  `env.json` 只保留 `config_sha256` 指纹。
+  `env.json` 只保留 `config_sha256` 指纹。诊断日志里若出现 AI 模型 / 地址，其中的
+  域名与 IP 同样会脱敏。
 * **工具不联网、不上传任何数据**：zip 只在本机生成，发不发、发给谁完全由使用者决定。
 
 ---
@@ -169,7 +181,7 @@ NetDiag-diag-<机器名sha1前8位>-<YYYYmmdd-HHMM>.zip
 | `[ERROR] 导出失败` / 返回码非 0 | 检查 `logs\` 是否可写、磁盘是否满；把窗口里的错误发回维护者 |
 | 界面按钮提示「导出失败」 | 确认 `logs\` 可写；也可改用 bat 或命令行 |
 | 包很小 / 只有 README | 看 README 的「没有收录 / 被跳过的文件」；常见原因：刚装好还没跑过诊断（无 runs）、日志超过 30 天 |
-| 想确认脱敏是否生效 | 解压后搜索同事的 IP / 域名 / 用户名：应搜不到；能搜到 `#xxxx` 伪名即正常 |
+| 想确认脱敏是否生效 | 解压后搜索同事的 IP / 域名 / 用户名（**文件名也要搜**）：应搜不到；能搜到 `#xxxx` 伪名即正常。条目名里的 `*` 显示为 `_` 属正常 |
 | 需要原始值 | 维护者明确要求时，用 `--export-diag --raw`，并走可信渠道 |
 | zip 打不开 | 传输中断，重新导出 / 重新发送；不要用文本方式发 zip |
 
@@ -179,8 +191,8 @@ NetDiag-diag-<机器名sha1前8位>-<YYYYmmdd-HHMM>.zip
 
 | 文件 | 作用 |
 |---|---|
-| `core/sanitize.py` | 纯函数：`mask_text` / `mask_obj` / `pseudonym`（无 I/O、无网络 import） |
-| `core/diagpack.py` | `build(out_dir=None, include_reports=False, raw=False) -> Path` |
+| `core/sanitize.py` | 纯函数：`mask_text` / `mask_obj` / `collect_tokens` / `pseudonym`（无 I/O、无网络 import） |
+| `core/diagpack.py` | `build(out_dir=None, include_reports=False, raw=False) -> Path`；写 zip 前调 `_verify_no_leaks` 自检 |
 | `core/diagnose.py` | CLI：`--export-diag` / `--include-reports` / `--raw` / `--out` |
 | `core/server.py` | `POST /api/diagpack` → `{ok, path, size, entries}` |
 | `ui/index.html` | 顶部按钮 `#diagpack`（「导出诊断包」） |

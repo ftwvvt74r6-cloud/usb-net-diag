@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**28** 个（有模块说明 28 个）
-- 公开符号：**202** 个（有 docstring 202 个，合格 202 个）
+- 公开符号：**203** 个（有 docstring 203 个，合格 203 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -1712,7 +1712,7 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `build` | function | 61 | ✅ |
+| `build` | function | 68 | ✅ |
 
 ### `build`
 
@@ -1737,6 +1737,11 @@ Returns:
 Raises:
     OSError: 输出目录不可写、zip 写盘失败（半成品会被删除后重新抛出）。
         单个源文件读不到或脱敏失败不算错误，只会跳过并写进 README。
+    RuntimeError: 泄漏自检发现仍有原值残留；此时**不会生成 zip**，错误信息只报
+        token 类别、不含原值（默认拒绝：宁可导出失败，不可泄露）。
+
+Note:
+    自检只在默认（非 ``raw``）模式执行；``raw=True`` 按设计保留原值。
 ```
 
 ## `core/errors.py`
@@ -3069,9 +3074,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `pseudonym` | function | 90 | ✅ |
-| `mask_text` | function | 105 | ✅ |
-| `mask_obj` | function | 126 | ✅ |
+| `pseudonym` | function | 159 | ✅ |
+| `collect_tokens` | function | 174 | ✅ |
+| `mask_text` | function | 226 | ✅ |
+| `mask_obj` | function | 257 | ✅ |
 
 ### `pseudonym`
 
@@ -3090,27 +3096,50 @@ Returns:
         这里只用于「看得出是不是同一个对象」，不作为身份凭据。
 ```
 
+### `collect_tokens`
+
+```python
+def collect_tokens(s: str) -> dict[str, str]
+```
+
+```text
+扫描文本，返回 ``{原始敏感 token: 类别}``（供诊断包写 zip 前做泄漏自检）。
+
+识别范围与 :func:`mask_text` 一致：IPv4 / IPv6 / 域名 / MAC / 用户名 / UNC 主机名。
+只收集**确定会被替换**的 token（例如 ``999.999.999.999`` 这种非法 IP 不收集），
+因此不会因为日志里出现版本号而误报。
+
+Args:
+    s: 待扫描文本（日志行、JSON 字段值、文件名都可以）。空串返回空字典。
+
+Returns:
+    dict[str, str]: token → 类别；类别取值 ``ipv4`` / ``ipv6`` / ``domain`` /
+    ``mac`` / ``user`` / ``host``。
+```
+
 ### `mask_text`
 
 ```python
-def mask_text(s: str) -> str
+def mask_text(s: str, tokens: dict[str, str] | None=None) -> str
 ```
 
 ```text
 把一段文本里的 IP / 域名 / 用户名 / MAC 全部替换成脱敏形态。
 
 Args:
-    s: 待脱敏文本（日志行、JSON 字段值、报告正文都可以）。
+    s: 待脱敏文本（日志行、JSON 字段值、报告正文、文件名都可以）。
+    tokens: 可选收集器；传入 ``dict`` 时把识别到的原始敏感 token 写进去
+        （供 ``core/diagpack.py`` 的泄漏自检使用），不传则不做收集。
 
 Returns:
     str: 脱敏后的文本。空串原样返回；已经脱敏过的文本再跑一遍结果不变（幂等）。
-        端口、版本号、文件名等诊断必需信息保持原样。
+        端口、版本号、普通文件名等诊断必需信息保持原样。
 ```
 
 ### `mask_obj`
 
 ```python
-def mask_obj(o)
+def mask_obj(o, tokens: dict[str, str] | None=None)
 ```
 
 ```text
@@ -3121,6 +3150,7 @@ def mask_obj(o)
 
 Args:
     o: 任意 JSON 兼容对象。
+    tokens: 可选收集器；递归传给 :func:`mask_text`。
 
 Returns:
     object: 与入参同构的新对象；字符串值已按 :func:`mask_text` 脱敏。
