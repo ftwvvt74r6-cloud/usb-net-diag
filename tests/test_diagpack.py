@@ -252,6 +252,84 @@ class SanitizeInPackageTests(_TempLogCase):
         self.assertIn("已保留原值", texts["README.txt"])
 
 
+class FilenameLeakTests(_TempLogCase):
+    """审查阻塞 ①：pcap / 报告文件名本身就是 IP / 域名时，包内名字与内容都不能带原值。"""
+
+    def test_sensitive_filenames_masked_in_names_and_contents(self):
+        """``192.168.1.100.pcap`` / ``www.company.com.md`` / ``MAIL.Corp.Example.COM`` 全链路。"""
+        _seed(self.root, runs=0, crashes=0)
+        _write(self.root / "192.168.1.100.log", "peer=192.168.1.100\n")
+        for index, pcap_name in enumerate(
+                ("192.168.1.100.pcap", "www.company.com.pcap", "MAIL.Corp.Example.COM.md")):
+            _write(self.root / "runs" / f"20260101-00000{index}-abcdef0{index}.json",
+                   json.dumps({"mode": "offline", "params": {"pcap": pcap_name}}))
+        reports = Path(self._tmp.name) / "reports"
+        for index, stem in enumerate(
+                ("192.168.1.100", "www.company.com", "MAIL.Corp.Example.COM")):
+            _write(reports / f"{stem}.md", f"# {stem}.pcap\npeer=192.168.1.100\n")
+            _set_age(reports / f"{stem}.md", 10 - index)
+        with mock.patch.object(diagpack, "REPORTS", reports):
+            path = diagpack.build(include_reports=True)
+        names, texts = _zip_text(path)
+        blob = "\n".join(names) + "\n" + "\n".join(texts.values())
+        for secret in ("192.168.1.100", "www.company.com", "MAIL.Corp.Example.COM"):
+            with self.subTest(secret=secret):
+                self.assertNotIn(secret, blob, f"包内仍能搜到原值：{secret}")
+        for name in names:
+            with self.subTest(name=name):
+                self.assertIsNone(re.search(r'[<>:"|?*]', name),
+                                  f"zip 条目名含 Windows 非法字符，解压会失败：{name}")
+
+    def test_oversized_sensitive_filename_masked_in_readme(self):
+        """被跳过的文件名也要脱敏后才写进 README（不能从跳过清单泄露）。"""
+        _seed(self.root, runs=0, crashes=0)
+        big = _write(self.root / "192.168.1.100.log", _sensitive_line() + "\n" * 300)
+        self.assertGreater(big.stat().st_size, 500)
+        with mock.patch.object(diagpack, "MAX_FILE_BYTES", 500):
+            _names, texts = _zip_text(diagpack.build())
+        readme = texts["README.txt"]
+        self.assertNotIn("192.168.1.100", readme)
+        self.assertIn("192.168.1.___#25c9", readme)
+
+
+class LeakSelfCheckTests(_TempLogCase):
+    """验收 3：默认拒绝的泄漏自检 —— 命中即抛异常、不产生 zip、错误信息不含原值。"""
+
+    def test_verify_no_leaks_direct(self):
+        """独立函数可单测：名字命中、内容命中都会抛；干净条目放行。"""
+        with self.assertRaises(RuntimeError) as ctx:
+            diagpack._verify_no_leaks(
+                [("192.168.1.100.pcap", b"clean")], {"192.168.1.100": "ipv4"})
+        self.assertIn("ipv4", str(ctx.exception))
+        self.assertNotIn("192.168.1.100", str(ctx.exception))
+        with self.assertRaises(RuntimeError) as ctx:
+            diagpack._verify_no_leaks(
+                [("clean.txt", b"peer=www.company.com")], {"www.company.com": "domain"})
+        self.assertIn("域名", str(ctx.exception))
+        self.assertNotIn("www.company.com", str(ctx.exception))
+        diagpack._verify_no_leaks(
+            [("192.168.1.___#25c9.pcap", b"peer=192.168.1.***#25c9")],
+            {"192.168.1.100": "ipv4"})
+
+    def test_build_aborts_and_writes_no_zip_when_mask_rule_neutralized(self):
+        """把域名规则“关掉”（替换函数退化为原样返回）→ build 必须抛异常且不写 zip。"""
+        _seed(self.root, runs=0, crashes=0)  # 日志/崩溃快照里含 www.company.com
+        out = Path(self._tmp.name) / "mut-out"
+        with mock.patch.object(diagpack.sanitize, "_mask_domain",
+                               lambda match: match.group(0)):
+            with self.assertRaises(RuntimeError) as ctx:
+                diagpack.build(out_dir=out)
+        message = str(ctx.exception)
+        self.assertIn("域名", message)
+        self.assertNotIn("www.company.com", message, "错误信息不许打印原值")
+        self.assertEqual(list(out.glob("*.zip")), [], "自检失败后不许留下 zip")
+        # 恢复规则后正常导出
+        path = diagpack.build(out_dir=out)
+        self.assertTrue(path.is_file())
+        _names, texts = _zip_text(path)
+        self.assertNotIn("www.company.com", "\n".join(texts.values()))
+
+
 class GuardrailTests(_TempLogCase):
     def test_oversized_file_skipped_and_noted(self):
         """单文件超过上限 → 跳过并写进 README，原值不会以任何形式进包（SPEC V9）。"""

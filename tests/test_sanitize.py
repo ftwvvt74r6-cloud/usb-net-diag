@@ -104,16 +104,22 @@ class DomainMaskTests(unittest.TestCase):
                 self.assertTrue(out.endswith("#" + _hash4(domain)), out)
 
     def test_filenames_are_not_domains(self):
-        """文件名不能被当成域名（SPEC 陷阱 4）。"""
+        """**普通**文件名不能被当成域名（SPEC 陷阱 4）。
+
+        注意：``report.ai.md`` 不在此列 —— ``.ai`` 是真实顶级域，stem 看起来就是域名，
+        按「宁可多脱敏」会打码；这里用 ``report.v2.md`` 验证「扩展名不当域名」。
+        """
         for name in ("faults_demo.json", "app-20261107.log", "docs/api-reference.md",
-                     "report.ai.md", "captures/faults_demo.pcap"):
+                     "report.v2.md", "captures/faults_demo.pcap"):
             with self.subTest(name=name):
                 self.assertEqual(sanitize.mask_text(name), name)
 
     def test_email_domain_part_is_masked(self):
-        """``user@company.com`` 的域名部分也要脱敏（用户名部分不属本规则）。"""
+        """``user@company.com``：用户名与域名都脱敏（审查建议：本地部分也是用户名）。"""
         out = sanitize.mask_text("联系 alice@company.com")
         self.assertNotIn("company.com", out)
+        self.assertNotIn("alice", out)
+        self.assertIn("<user>@", out)
         self.assertIn(f"c******.com#{_hash4('company.com')}", out)
 
 
@@ -141,6 +147,180 @@ class PathMaskTests(unittest.TestCase):
         """``C:\\Users\\<user>`` 再跑一遍仍是原样（幂等，陷阱 2）。"""
         text = r"C:\Users\<user>\x.log"
         self.assertEqual(sanitize.mask_text(text), text)
+
+
+class FilenameMaskTests(unittest.TestCase):
+    """审查阻塞 ①：文件名 stem 里的 IP / 域名必须脱敏，扩展名保留。"""
+
+    def test_private_ip_filename_keeps_extension(self):
+        """``192.168.1.100.pcap`` → ``192.168.1.***#25c9.pcap``。"""
+        out = sanitize.mask_text("192.168.1.100.pcap")
+        self.assertEqual(out, f"192.168.1.***#{_hash4('192.168.1.100')}.pcap")
+        self.assertNotIn("192.168.1.100", out)
+
+    def test_public_ip_filename_keeps_extension(self):
+        """公网 IP 文件名同样打码，扩展名不变。"""
+        out = sanitize.mask_text("8.8.8.8.pcap")
+        self.assertIn(f"8.8.***.***#{_hash4('8.8.8.8')}", out)
+        self.assertTrue(out.endswith(".pcap"), out)
+
+    def test_domain_filename_keeps_extension(self):
+        """``www.company.com.pcap`` → ``w**.c******.com#37f4.pcap``。"""
+        out = sanitize.mask_text("www.company.com.pcap")
+        self.assertEqual(out, f"w**.c******.com#{_hash4('www.company.com')}.pcap")
+
+    def test_uppercase_domain_filename_keeps_extension(self):
+        """``MAIL.Corp.Example.COM.md`` 不能因为 ``.md`` 像扩展名就整串放过。"""
+        out = sanitize.mask_text("MAIL.Corp.Example.COM.md")
+        self.assertTrue(out.endswith(".md"), out)
+        self.assertNotIn("MAIL.Corp.Example.COM", out)
+        self.assertIn(f"M***.C***.E******.COM#{_hash4('MAIL.Corp.Example.COM')}", out)
+
+    def test_trailing_sentence_period_does_not_bypass(self):
+        """句末点号不能绕过 IPv4 规则（``192.168.1.100.``）。"""
+        out = sanitize.mask_text("目标 192.168.1.100.")
+        self.assertNotIn("192.168.1.100", out)
+        self.assertIn(f"192.168.1.***#{_hash4('192.168.1.100')}.", out)
+
+    def test_masked_filename_is_idempotent(self):
+        """已脱敏的文件名再跑一遍不二次打码。"""
+        once = sanitize.mask_text("www.company.com.pcap")
+        self.assertEqual(sanitize.mask_text(once), once)
+
+
+class LeadingZeroIpTests(unittest.TestCase):
+    """审查阻塞 ②：前导零 IPv4 先归一化再判断，不许因 ``ipaddress`` 拒绝而跳过。"""
+
+    def test_leading_zero_ip_is_masked(self):
+        """``192.168.001.100`` 必须脱敏，且与 ``192.168.1.100`` 是同一个伪名。"""
+        out = sanitize.mask_text("peer=192.168.001.100")
+        self.assertNotIn("192.168.001.100", out)
+        self.assertIn(f"192.168.1.***#{_hash4('192.168.1.100')}", out)
+
+    def test_leading_zero_public_ip_masked(self):
+        """公网前导零（``008.008.008.008``）同样归一化后打码。"""
+        out = sanitize.mask_text("dns=008.008.008.008")
+        self.assertNotIn("008.008.008.008", out)
+        self.assertIn(f"8.8.***.***#{_hash4('8.8.8.8')}", out)
+
+
+class PathVariantTests(unittest.TestCase):
+    """审查阻塞 ②：``%USERPROFILE%`` / UNC / 混合斜杠 / Documents and Settings。"""
+
+    def test_userprofile_username_masked(self):
+        """``%USERPROFILE%\\alice`` → ``<home>\\<user>``（原值全消失）。"""
+        out = sanitize.mask_text(r"%USERPROFILE%\alice")
+        self.assertNotIn("alice", out)
+        self.assertNotIn("%USERPROFILE%", out)
+        self.assertIn(r"<home>\<user>", out)
+
+    def test_userprofile_with_trailing_file(self):
+        """``%USERPROFILE%\\alice\\x.log`` 只抹用户名，文件名保留。"""
+        out = sanitize.mask_text(r"%USERPROFILE%\alice\x.log")
+        self.assertNotIn("alice", out)
+        self.assertIn(r"<home>\<user>\x.log", out)
+
+    def test_userprofile_known_subdir_not_mistaken_for_user(self):
+        """``%USERPROFILE%\\AppData`` 的 ``AppData`` 不是用户名，不要误伤。"""
+        out = sanitize.mask_text(r"%USERPROFILE%\AppData\Local")
+        self.assertEqual(out, r"<home>\AppData\Local")
+
+    def test_unc_host_masked(self):
+        """``\\\\fileserver\\share\\z`` 的主机名段 → ``<host>``。"""
+        out = sanitize.mask_text(r"\\fileserver\share\z")
+        self.assertNotIn("fileserver", out)
+        self.assertIn(r"\\<host>\share\z", out)
+
+    def test_mixed_separator_user_path(self):
+        """``C:\\Users/alice/x.log``（正反斜杠混用）用户名必须消失。"""
+        out = sanitize.mask_text(r"C:\Users/alice/x.log")
+        self.assertNotIn("alice", out)
+        self.assertIn(r"<user>", out)
+        self.assertIn("x.log", out)
+
+    def test_documents_and_settings_user(self):
+        """``C:\\Documents and Settings\\alice`` 的用户目录分支必须可达。"""
+        out = sanitize.mask_text(r"C:\Documents and Settings\alice\z.log")
+        self.assertNotIn("alice", out)
+        self.assertIn(r"C:\Documents and Settings\<user>\z.log", out)
+
+    def test_standalone_users_segment_masked(self):
+        """没有盘符的 ``/Users/alice``（例如 JSON 片段）也覆盖。"""
+        out = sanitize.mask_text("/Users/alice/x.log")
+        self.assertEqual(out, "/Users/<user>/x.log")
+
+
+class VariantTableTests(unittest.TestCase):
+    """验收变体表（16 项）一次跑完：不含原值、端口保留、幂等。"""
+
+    CASES = (
+        ("10.0.0.1:8080", ("10.0.0.1",), (":8080",)),
+        ("http://192.168.1.100/x", ("192.168.1.100",), ("http://", "/x")),
+        ("172.16.5.5", ("172.16.5.5",), ()),
+        ("8.8.8.8", ("8.8.8.8",), ()),
+        ("1.1.1.1", ("1.1.1.1",), ()),
+        ("MAIL.Corp.Example.COM", ("MAIL.Corp.Example.COM", "mail.corp.example.com"), ("COM#",)),
+        ("a.b.c.d.example.com", ("a.b.c.d.example.com",), ("com#",)),
+        ("192.168.001.100", ("192.168.001.100",), ("192.168.1.***",)),
+        (r"%USERPROFILE%\alice", ("%USERPROFILE%", "alice"), ("<home>", "<user>")),
+        (r"\\fileserver\share\z", ("fileserver",), (r"\\<host>\share\z",)),
+        (r"C:\Users/alice/x.log", ("alice",), ("<user>", "x.log")),
+        (r"C:\Documents and Settings\alice", ("alice",), ("<user>",)),
+        ("aa:bb:cc:dd:ee:ff", ("aa:bb:cc:dd:ee:ff", "dd:ee:ff"), ("aa:bb:cc:",)),
+        ("AA-BB-CC-DD-EE-FF", ("AA-BB-CC-DD-EE-FF", "DD-EE-FF"), ("AA-BB-CC-",)),
+        ("2001:db8::1", ("2001:db8::1", "db8"), ("<ipv6>#",)),
+        ("::ffff:192.168.1.100", ("::ffff:192.168.1.100", "192.168.1.100"), ("<ipv6>#",)),
+    )
+
+    def test_all_16_variants_have_no_original_value(self):
+        """16 个变体逐个断言：原值搜不到、必须保留的片段仍在、再跑一遍不变。"""
+        for text, forbidden, required in self.CASES:
+            with self.subTest(text=text):
+                out = sanitize.mask_text(text)
+                lowered = out.lower()
+                for value in forbidden:
+                    self.assertNotIn(value.lower(), lowered, f"{text} 仍含原值 {value!r}")
+                for value in required:
+                    self.assertIn(value.lower(), lowered)
+                self.assertEqual(sanitize.mask_text(out), out, f"{text} 脱敏不幂等")
+
+    def test_same_object_same_pseudonym(self):
+        """同一 IP 的不同变体（前导零 / 大小写域名）得到同一伪名。"""
+        canonical = sanitize.mask_text("192.168.1.100")
+        leading_zero = sanitize.mask_text("192.168.001.100")
+        self.assertEqual(canonical, leading_zero)
+        upper = sanitize.mask_text("WWW.Company.COM")
+        lower = sanitize.mask_text("www.company.com")
+        self.assertEqual(upper.lower(), lower.lower())
+
+
+class TokenCollectionTests(unittest.TestCase):
+    """泄漏自检的输入：收集到的 token 类别必须准确，且普通文本不产生噪声。"""
+
+    def test_collects_all_categories(self):
+        """IPv4/IPv6/域名/MAC/用户名/UNC 主机名各一个。"""
+        tokens = sanitize.collect_tokens(
+            "peer=10.0.0.1 host=www.company.com mac=aa:bb:cc:dd:ee:ff "
+            r"log=C:\Users\alice\x.log unc=\\fileserver\share "
+            "ipv6=2001:db8::1"
+        )
+        self.assertEqual(tokens["10.0.0.1"], "ipv4")
+        self.assertEqual(tokens["2001:db8::1"], "ipv6")
+        self.assertEqual(tokens["www.company.com"], "domain")
+        self.assertEqual(tokens["aa:bb:cc:dd:ee:ff"], "mac")
+        self.assertEqual(tokens["alice"], "user")
+        self.assertEqual(tokens["fileserver"], "host")
+
+    def test_filename_tokens_collected(self):
+        """文件名里的 IP / 域名也是 token（供 diagpack 自检）。"""
+        self.assertEqual(sanitize.collect_tokens("192.168.1.100.pcap"),
+                         {"192.168.1.100": "ipv4"})
+        self.assertEqual(sanitize.collect_tokens("www.company.com.pcap"),
+                         {"www.company.com": "domain"})
+
+    def test_plain_text_has_no_tokens(self):
+        """普通文本/版本号不产生 token（避免自检误报）。"""
+        self.assertEqual(sanitize.collect_tokens("faults_demo.json 版本 1.2.3 port=8080"), {})
 
 
 class MACMaskTests(unittest.TestCase):
