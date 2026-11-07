@@ -1687,7 +1687,8 @@ def main(argv: list[str] | None=None) -> int
 Args:
     argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
         ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
-        ``--report-out``（把完整报告导出到指定目录，默认 ``reports/``）。
+        ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
+        省略时仍写 ``reports/``）。
 
 Returns:
     int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
