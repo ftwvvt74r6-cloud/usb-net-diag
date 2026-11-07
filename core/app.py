@@ -89,6 +89,11 @@ def relaunch_as_admin() -> bool:
     """
     try:
         exe = sys.executable
+        # UAC 拉起的新进程不能再弹控制台：优先换成同目录的 pythonw.exe。
+        # 若当前就是 pythonw，Path(...).with_name("pythonw.exe") 还是它自己。
+        pythonw = Path(exe).with_name("pythonw.exe")
+        if pythonw.is_file():
+            exe = str(pythonw)
         # pythonw 提权后仍无控制台；__file__ 用绝对路径，工作目录设为 ROOT
         params = f'"{Path(__file__).resolve()}" --elevated'
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, str(ROOT), 1)
@@ -143,8 +148,16 @@ def main() -> int:
     as_console = "--console" in sys.argv
     elevated = "--elevated" in sys.argv
 
-    # 1. 已有一个实例在跑：直接开浏览器，不重复起服务
+    # 1. 已有一个实例在跑：直接开浏览器，不重复起服务。
+    #    例外：本次是「界面点提权重启」拉起的 --elevated 新进程，旧实例会主动退出，
+    #    这里要等它释放端口，否则新进程会误以为已有实例、把浏览器指回旧的普通权限服务。
     url = find_running()
+    if url and elevated:
+        for _ in range(40):  # 最多等 10 秒
+            time.sleep(0.25)
+            url = find_running()
+            if not url:
+                break
     if url:
         webbrowser.open(url)
         return 0
