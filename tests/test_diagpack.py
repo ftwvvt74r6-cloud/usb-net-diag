@@ -307,6 +307,12 @@ class LeakSelfCheckTests(_TempLogCase):
                 [("clean.txt", b"peer=www.company.com")], {"www.company.com": "domain"})
         self.assertIn("域名", str(ctx.exception))
         self.assertNotIn("www.company.com", str(ctx.exception))
+        # MAC 出现在文件名里（后跟 .pcap）也要能命中，不能被边界漏掉
+        with self.assertRaises(RuntimeError) as ctx:
+            diagpack._verify_no_leaks(
+                [("aa:bb:cc:dd:ee:ff.pcap", b"clean")],
+                {"aa:bb:cc:dd:ee:ff": "mac"})
+        self.assertIn("MAC", str(ctx.exception))
         diagpack._verify_no_leaks(
             [("192.168.1.___#25c9.pcap", b"peer=192.168.1.***#25c9")],
             {"192.168.1.100": "ipv4"})
