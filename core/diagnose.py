@@ -509,10 +509,13 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
             "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
-            "degraded": bool, "empty": bool}``，``empty=True`` 表示抓包窗口内
-            0 包（可走 0 包降级），``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-            环境问题，前端据此提示改用分析抓包文件。自动选择模式下抓满 0 包/0 字节时不
-            直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+            "degraded": bool, "empty": bool, "interface": str, "bpf": str}``。
+            **所有**返回路径都带 ``interface`` / ``bpf``（没有可用值时为 ``""``），
+            供降级卡与 ``degraded_*`` 报告写「最终网卡 / 实际过滤器」；``empty=True``
+            表示抓包窗口内 0 包（可走 0 包降级），``degraded=True`` 表示
+            「缺 tshark/Npcap/提权」这类环境问题，前端据此提示改用分析抓包文件。
+            自动选择模式下抓满 0 包/0 字节时不直接失败，会按候选顺序自动换卡重试
+            （最多 3 块）；全失败时 ``interface`` 是最后尝试的那块，错误里带
             ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
             不换卡，错误里列出本次探测发现有流量的候选网卡和两条自助命令。
 
@@ -527,19 +530,23 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         return {
             "ok": False,
             "degraded": True,
+            "interface": "",
+            "bpf": "",
             "error": "未找到 tshark。请确认 tools/WiresharkPortable/App/Wireshark/tshark.exe 是否存在。",
         }
     if not tshark.npcap_installed():
         return {
             "ok": False,
             "degraded": True,
+            "interface": "",
+            "bpf": "",
             "error": "Npcap 未安装或未生效，实时抓包不可用。请以管理员身份运行 start.bat 完成安装，"
                      "或改用「分析抓包文件」上传已有 pcap 文件。",
         }
 
     interfaces = tshark.list_interfaces(ts)
     if not interfaces:
-        return {"ok": False, "degraded": True,
+        return {"ok": False, "degraded": True, "interface": "", "bpf": "",
                 "error": "未枚举到可用网卡，请确认 Npcap 已安装且 tshark -D 可正常输出。"}
 
     ordered = tshark.order_interfaces(interfaces)
@@ -556,12 +563,14 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         logger("探测网卡流量（每块 2 秒，最多 5 块），自动选择有流量的网卡 ...")
         iface = tshark.probe_interface(ts, ordered) or tshark.pick_interface(interfaces)
     if iface is None:
-        return {"ok": False, "degraded": True, "error": "未枚举到可用网卡。"}
+        return {"ok": False, "degraded": True, "interface": "", "bpf": "",
+                "error": "未枚举到可用网卡。"}
 
     try:
         decision = capture_filter_for(target, logger=logger)
     except ValueError as exc:
-        return {"ok": False, "error": f"目标不合法：{exc}"}
+        return {"ok": False, "interface": tshark.short_name(iface["name"]),
+                "bpf": "", "error": f"目标不合法：{exc}"}
     bpf = decision["bpf"]
     logger(f"[提示] 最终使用的抓包过滤器：{bpf or '无（全网）'}")
     duration = max(3, min(int(duration or 30), 180))
@@ -597,6 +606,8 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             if ("permission" in low or "access is denied" in low
                     or "not permitted" in low or "admin" in low):
                 return {"ok": False, "degraded": True,
+                        "interface": tshark.short_name(cand["name"]),
+                        "bpf": bpf or "无（全网）",
                         "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
                                  "或使用「分析抓包文件」分析已有 pcap。"}
             failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 字节(rc={rc})")
@@ -639,7 +650,15 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     error = _capture_empty_error(plan, durations, bpf)
     if failures:
         error += f"（各网卡结果：{'；'.join(failures)}）"
-    return {"ok": False, "degraded": True, "empty": True, "error": error}
+    # 复审阻塞 1：全失败也要交代「最终用的是哪块卡、哪个过滤器」，否则
+    # server 的降级卡与 degraded_* 报告只能填「自动选择 / 无（全网）」，
+    # 把实际用过的 `host 8.8.8.8` 误报成没过滤。
+    last = plan[-1] if plan else iface
+    return {"ok": False, "degraded": True, "empty": True,
+            "interface": tshark.short_name(last["name"]),
+            "interface_index": last["index"],
+            "bpf": bpf or "无（全网）",
+            "error": error}
 
 
 def _fmt_ms(value: float) -> str:

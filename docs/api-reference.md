@@ -1576,9 +1576,9 @@ Returns:
 | `capture_filter_for` | function | 218 | ✅ |
 | `bpf_for` | function | 304 | ✅ |
 | `capture_live` | function | 493 | ✅ |
-| `degraded_empty_capture_result` | function | 674 | ✅ |
-| `run_scan` | function | 851 | ✅ |
-| `main` | function | 1050 | ✅ |
+| `degraded_empty_capture_result` | function | 693 | ✅ |
+| `run_scan` | function | 870 | ✅ |
+| `main` | function | 1069 | ✅ |
 
 ### `load_config`
 
@@ -1683,10 +1683,13 @@ Args:
 Returns:
     dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
         "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
-        "degraded": bool, "empty": bool}``，``empty=True`` 表示抓包窗口内
-        0 包（可走 0 包降级），``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-        环境问题，前端据此提示改用分析抓包文件。自动选择模式下抓满 0 包/0 字节时不
-        直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+        "degraded": bool, "empty": bool, "interface": str, "bpf": str}``。
+        **所有**返回路径都带 ``interface`` / ``bpf``（没有可用值时为 ``""``），
+        供降级卡与 ``degraded_*`` 报告写「最终网卡 / 实际过滤器」；``empty=True``
+        表示抓包窗口内 0 包（可走 0 包降级），``degraded=True`` 表示
+        「缺 tshark/Npcap/提权」这类环境问题，前端据此提示改用分析抓包文件。
+        自动选择模式下抓满 0 包/0 字节时不直接失败，会按候选顺序自动换卡重试
+        （最多 3 块）；全失败时 ``interface`` 是最后尝试的那块，错误里带
         ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
         不换卡，错误里列出本次探测发现有流量的候选网卡和两条自助命令。
 
