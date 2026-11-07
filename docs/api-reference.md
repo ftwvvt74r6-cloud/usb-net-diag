@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**24** 个（有模块说明 24 个）
-- 公开符号：**171** 个（有 docstring 171 个，合格 171 个）
+- 扫描模块：**25** 个（有模块说明 25 个）
+- 公开符号：**176** 个（有 docstring 176 个，合格 176 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -27,15 +27,15 @@ _（无公开符号）_
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `AIError` | class | 65 | ✅ |
-| `load_config` | function | 70 | ✅ |
-| `save_config` | function | 137 | ✅ |
-| `mask_key` | function | 155 | ✅ |
-| `public_config` | function | 173 | ✅ |
-| `chat` | function | 227 | ✅ |
-| `test_connection` | function | 314 | ✅ |
-| `build_messages` | function | 378 | ✅ |
-| `analyze_result` | function | 501 | ✅ |
+| `AIError` | class | 88 | ✅ |
+| `load_config` | function | 93 | ✅ |
+| `save_config` | function | 160 | ✅ |
+| `mask_key` | function | 178 | ✅ |
+| `public_config` | function | 196 | ✅ |
+| `chat` | function | 250 | ✅ |
+| `test_connection` | function | 337 | ✅ |
+| `build_messages` | function | 365 | ✅ |
+| `analyze_result` | function | 490 | ✅ |
 
 ### `AIError`  (class)
 
@@ -174,6 +174,10 @@ Args:
 Returns:
     list[dict]: 两条消息 —— ``system``（角色约束：不许编造未观测到的事实）
         与 ``user``（拼好的诊断摘要 + 追问）。
+
+Note:
+    prompt 里的中文全部来自 ``core/copy/zh-CN.json`` 的 ``prompt`` section；
+    本模块只负责拼装与取数。system 提示词同样来自文案表，改措辞不用改代码。
 ```
 
 ### `analyze_result`
@@ -203,9 +207,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 259 | ✅ |
-| `build_findings` | function | 695 | ✅ |
-| `analyze` | function | 1115 | ✅ |
+| `collect` | function | 301 | ✅ |
+| `build_findings` | function | 751 | ✅ |
+| `analyze` | function | 1213 | ✅ |
 
 ### `collect`
 
@@ -245,9 +249,10 @@ Args:
     streams: :func:`_stream_rows` 聚合出的会话列表。
 
 Returns:
-    list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``，
-        全部是**中文文案**（历史包袱，PR2 起改由规则引擎产出 ``findings_v2``）。
-        没有异常时仍会有一条「安全观察」行，表示「检查过，没发现」。
+    list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``。
+        ``finding`` / ``evidence`` / ``advice`` 的中文全部来自
+        ``core/copy/zh-CN.json``（section：``finding`` / ``evidence`` / ``advice``），
+        本模块只保留 key 与占位符实参。
 
 Note:
     ``severity`` 有三种非故障取值：``"严重"/"警告"/"提示"`` 之外，
@@ -257,6 +262,10 @@ Note:
     中性行（``"—"``）的保留与否**不在产出的位置决定**，而是最后按 ``category``
     统一裁定：同类别只要出现过故障行，中性行一律丢弃。否则会出现
     「传输质量正常」与「出现 TCP 零窗口」并列这种自相矛盾的报告。
+
+    ``layer`` / ``category`` / ``severity`` 三个字段是**结构化标识**（既被
+    ``verdict`` / ``legacy_map`` 当键匹配，也直接进报告表格）：它们不是本轮
+    可迁移的「文案」，改值会连带改变判定与映射，因此保留在代码里。
 ```
 
 ### `analyze`
@@ -1448,6 +1457,103 @@ Returns:
         ``error`` 内含 ``code`` / ``message`` / ``hint``（有 extra 时加 ``detail``）。
 ```
 
+## `core/copytext.py`
+
+**职责**：文案表访问器：``core/copy/zh-CN.json`` 的唯一读取入口（带进程内缓存）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `reload` | function | 61 | ✅ |
+| `load_table` | function | 72 | ✅ |
+| `section` | function | 88 | ✅ |
+| `get` | function | 106 | ✅ |
+| `text` | function | 122 | ✅ |
+
+### `reload`
+
+```python
+def reload() -> None
+```
+
+```text
+清空文案表缓存。
+
+正常运行时不需要调用（文件变化会按 mtime/size 自动失效）。
+只有「测试 monkeypatch 了 ``core.config.load_copy``」这种**文件没变、来源变了**
+的场景必须显式调用，否则会读到缓存里的真实表。
+```
+
+### `load_table`
+
+```python
+def load_table() -> dict
+```
+
+```text
+读取文案表（按文件 mtime/size 缓存，重复调用 O(1)）。
+
+Returns:
+    dict: 解析后的 copy 表；文件缺失 / 损坏 / 顶层不是对象时返回空表。
+        不抛异常 —— 调用方会回退成显示 key。
+```
+
+### `section`
+
+```python
+def section(table: dict, path: str) -> dict
+```
+
+```text
+按点号路径取子表（如 ``verdict.titles``）。
+
+Args:
+    table: :func:`load_table` 返回的表。
+    path: 点号分隔的 section 路径。
+
+Returns:
+    dict: 命中的子表；任一层缺失或不是对象时返回空表。
+```
+
+### `get`
+
+```python
+def get(table: dict, path: str, key: str, default=None)
+```
+
+```text
+从给定表里取字符串文案（不格式化）。
+
+Args:
+    table: 文案表。
+    path: section 点号路径。
+    key: section 内的键（键本身可以带点，如 ``L4.RETRANS.ADVICE``）。
+    default: 缺失或不是字符串时的返回值。
+
+Returns:
+    str | None: 命中返回字符串，否则返回 ``default``。
+```
+
+### `text`
+
+```python
+def text(path: str, key: str, default: str='', table: dict | None=None, **args) -> str
+```
+
+```text
+取文案并按 ``str.format(**args)`` 填充占位符。
+
+Args:
+    path: section 点号路径（如 ``report`` / ``verdict.titles``）。
+    key: section 内的键。
+    default: 缺 key 时的回退值；为空时回退成 key 本身。
+    table: 可选的已加载表。热循环（如 ``_stream_rows`` 的会话标记）传它可以把
+        「读表」摊销到一次；不传时走 :func:`load_table`（有缓存，O(1)）。
+    **args: 占位符实参。
+
+Returns:
+    str: 可直接展示的文案。缺 key / 缺实参都不抛异常。
+```
+
 ## `core/diagnose.py`
 
 **职责**：USB-Net-Diag 采集与诊断主流程（CLI 入口）。
@@ -2315,8 +2421,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 47 | ✅ |
-| `save` | function | 273 | ✅ |
+| `render_markdown` | function | 71 | ✅ |
+| `save` | function | 317 | ✅ |
 
 ### `render_markdown`
 
@@ -2374,15 +2480,15 @@ _（无公开符号）_
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `LegacyPattern` | class | 64 | ✅ |
-| `match` | function | 188 | ✅ |
-| `is_normal` | function | 214 | ✅ |
-| `to_finding` | function | 240 | ✅ |
-| `map_rows` | function | 302 | ✅ |
-| `find_unmatched` | function | 319 | ✅ |
-| `coverage` | function | 333 | ✅ |
-| `mapped_rule_ids` | function | 357 | ✅ |
-| `missing_from_registry` | function | 369 | ✅ |
+| `LegacyPattern` | class | 60 | ✅ |
+| `match` | function | 184 | ✅ |
+| `is_normal` | function | 223 | ✅ |
+| `to_finding` | function | 246 | ✅ |
+| `map_rows` | function | 308 | ✅ |
+| `find_unmatched` | function | 325 | ✅ |
+| `coverage` | function | 345 | ✅ |
+| `mapped_rule_ids` | function | 376 | ✅ |
+| `missing_from_registry` | function | 388 | ✅ |
 
 ### `LegacyPattern`  (class)
 
@@ -2423,23 +2529,24 @@ def is_normal(row: Mapping) -> bool
 ```
 
 ```text
-判断这一行是不是「正常 / 无样本」的陈述（不该产出 Finding）。
+判断这一行是不是「测了、正常」的陈述（不该产出 Finding）。
 
 Args:
     row: 旧结构的一行。
 
 Returns:
-    bool: 严重度为 ``"—"``（测了，正常）时为 True；``"na"``（没样本）不再
-        走严重度分支，而是**按文案**判（「未检测到…」这类陈述同样不产出 Finding）。
+    bool: 严重度映射为 :attr:`Severity.OK`（即 ``"—"``）时为 True。
+        ``"na"``（没样本）返回 False —— 它是第三种状态，回答的是「没测到」
+        而不是「没问题」。
 
 Note:
-    为什么 ``"na"`` 不算 normal：它是第三种状态，回答的是「没测到」而不是「没问题」。
-    ``SEVERITY_MAP`` 里两者已经分开（``Severity.OK`` vs ``Severity.NA``），
-    这里也必须分开，否则下游想统计「有多少项真验过」时会把它算进去。
+    V4：判定改为**基于严重度**，不再靠 ``NORMAL_HINTS`` 对 finding 文本做
+    关键词匹配。旧实现让 ``"na"`` 行靠「未检测到…」这类词兜住，是双向陷阱：
+    改文案会静默改变迁移结果（漏项 / 多映射），而「没样本」也从来不是
+    「正常」。现在文案怎么改都不影响判定。
 
-    ⚠️ 副作用：``"na"`` 行现在靠 ``NORMAL_HINTS``（「未检测到」等词）兜住。
-    哪天文案改成「无样本」而不含这些词，这些行会立刻变成 ``find_unmatched``
-    的漏项 —— 改文案（PR F）时必须同步往 ``NORMAL_HINTS`` 里加词。
+    ``"na"`` 行虽然不算 normal，但同样不产出 Finding（没样本没有结论）：
+    :func:`to_finding` 与 :func:`find_unmatched` 各自显式跳过它。
 ```
 
 ### `to_finding`
@@ -2510,8 +2617,13 @@ Args:
     rows: 旧 ``rows[]`` 列表。
 
 Returns:
-    dict: 键 ``total``（总行数）/ ``mapped``（已映射）/ ``normal``（正常行）/
-        ``unmatched``（漏映射数）/ ``unmatched_rows``（漏映射行的摘要，便于直接看）。
+    dict: 键 ``total``（总行数）/ ``mapped``（已映射）/ ``normal``（测了正常）/
+        ``no_sample``（没样本，``severity == "na"``）/ ``unmatched``（漏映射数）/
+        ``unmatched_rows``（漏映射行的摘要，便于直接看）。
+
+Note:
+    ``na`` 行单独计数（V4 的 ``no_sample`` 桶）：它既不是 normal（没测过，
+    不能报「正常」），也不该算「漏映射」（它本来就不该产出 Finding）。
 ```
 
 ### `mapped_rule_ids`
@@ -3070,8 +3182,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 156 | ✅ |
-| `build` | function | 432 | ✅ |
+| `compute_layers` | function | 191 | ✅ |
+| `build` | function | 522 | ✅ |
 
 ### `compute_layers`
 
@@ -3123,6 +3235,9 @@ Note:
     2. 抓到了包但**没有任何可判定维度**时，``level`` 是「证据不足」而不是「正常」。
        见 :func:`_sufficiency`：判的是「每个维度有没有能支撑规则的样本」，
        不是全局的报文总数。
+
+    本函数只做路由与拼装：用户可见文案全部来自 ``core/copy/zh-CN.json``，
+    字典里的 ``level`` / ``layer`` / ``category`` 等是机器侧的结构化标识。
 ```
 
 ## `mcp/wireshark-mcp/server.py`

@@ -28,24 +28,47 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
 AI_CONFIG = CONFIG_DIR / "ai-config.json"
 
+try:                                    # 扁平导入：core/ 在 sys.path 上（runtime）
+    from copytext import text as _copy_text
+except ModuleNotFoundError:             # 包导入：仓库根在 sys.path 上（tests / core.ai）
+    from core.copytext import text as _copy_text
+
+
+def _t(key: str, **args) -> str:
+    """取 AI prompt 文案（``core/copy/zh-CN.json`` 的 ``prompt`` section）。
+
+    Args:
+        key: ``prompt`` section 内的键。
+        **args: ``{name}`` 占位符实参。
+
+    Returns:
+        str: 可直接用于 prompt 的中文文案；缺 key 时回退成 key。
+    """
+    return _copy_text("prompt", key, **args)
+
+
+def _preset_name(key: str) -> str:
+    """取 AI 配置页的预设显示名（``copy.preset.<key>``，缺表时回退成 key）。"""
+    return _copy_text("preset", key, default=key)
+
 # 预置服务商：只用于前端一键填充，不限制用户填任意 OpenAI 兼容地址
 PRESETS: list[dict] = [
-    {"id": "deepseek", "name": "DeepSeek 官方",
+    {"id": "deepseek", "name": _preset_name("deepseek"),
      "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat",
      "key_url": "https://platform.deepseek.com/api_keys"},
-    {"id": "qwen", "name": "阿里云百炼（通义千问）",
+    {"id": "qwen", "name": _preset_name("qwen"),
      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus",
      "key_url": "https://bailian.console.aliyun.com/?apiKey=1"},
-    {"id": "kimi", "name": "月之暗面 Kimi",
+    {"id": "kimi", "name": _preset_name("kimi"),
      "base_url": "https://api.moonshot.cn/v1", "model": "moonshot-v1-8k",
      "key_url": "https://platform.moonshot.cn/console/api-keys"},
-    {"id": "zhipu", "name": "智谱 GLM",
+    {"id": "zhipu", "name": _preset_name("zhipu"),
      "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4-flash",
      "key_url": "https://bigmodel.cn/usercenter/apikeys"},
     {"id": "openai", "name": "OpenAI",
      "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini",
      "key_url": "https://platform.openai.com/api-keys"},
-    {"id": "custom", "name": "自定义 / 本地模型（OpenAI 兼容）",
+    {"id": "custom", "name": _preset_name("custom"),
      "base_url": "http://127.0.0.1:11434/v1", "model": "qwen2.5:7b",
      "key_url": ""},
 ]
@@ -323,7 +346,7 @@ def test_connection(overrides: dict | None = None) -> dict:
     """
     started = time.time()
     try:
-        reply = chat([{"role": "user", "content": "只回复两个字：可用"}],
+        reply = chat([{"role": "user", "content": _t("test_probe")}],
                      overrides=overrides, timeout=30, max_tokens=16)
         cfg = load_config()
         return {
@@ -339,42 +362,6 @@ def test_connection(overrides: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- 诊断解读
-SYSTEM_PROMPT = (
-    "你是资深网络排障工程师，读者是**一线桌面运维**：懂电脑、会看日志，但不熟网络协议。"
-    "你的唯一目标：让他读完就知道「哪一层坏了、哪个协议、哪个对端、下一步做什么」。"
-    "网络安全只是附带观察，不是重点。\n"
-    "\n"
-    "输出四段，缺一不可：\n"
-    "\n"
-    "### 一句话结论（60 字以内）\n"
-    "句式：`【层】+【协议】+【现象】+【要不要立刻处理】`。"
-    "例：「L4 传输层 TCP：到 10.0.0.5:8080 的连接完全无响应，业务不可用，需要立刻处理。」\n"
-    "\n"
-    "### 故障定位\n"
-    "用小表格：层次 | 协议 | 对端/目标 | 关键数值 | 判断依据。"
-    "只列有问题的层；没问题的层一行带过。\n"
-    "\n"
-    "### 现象解释（说人话，2～4 句）\n"
-    "解释这一层坏了，用户实际会看到什么（打不开、转圈、卡顿、报 500……），"
-    "以及为什么这一层会导致这个现象。不要堆术语，出现了就顺手解释。\n"
-    "\n"
-    "### 处置步骤（编号，按执行顺序）\n"
-    "每条都是可直接落地的动作：具体命令、看哪个指标、改哪个配置、找谁。"
-    "第 1 条必须是最先做、且做完能验证有没有效果的。"
-    "排查顺序永远自下而上：先确认通不通，再看丢不丢包，最后看应用。\n"
-    "\n"
-    "硬性要求：\n"
-    "1. 只能引用给定数据里的 IP、端口、域名、数值、帧号、Stream 编号，禁止编造。\n"
-    "2. 关键数字必须原样保留：重传率、RTT、握手时间、DNS/HTTP 耗时、5xx 数量。\n"
-    "3. 必须区分「网络慢」和「服务端慢」：RTT/握手小但首字节或服务端等待大 = 服务端问题；"
-    "两者都大 = 链路问题；有建连失败 = 网络或防火墙问题。\n"
-    "4. 只给 1～3 个最可能的成因，按可能性排序，不要罗列所有可能。\n"
-    "5. 证据不足时写「需补充证据」，并说明下一步抓什么、加什么过滤条件。\n"
-    "6. 安全观察只在没有网络故障时用一句话带过，不要展开。\n"
-    "7. 总长 700 字以内，简体中文，不要免责声明。"
-)
-
-
 def build_messages(result: dict, question: str = "") -> list[dict]:
     """把诊断结果转成对话消息，**保留全部原始观测值**供模型引用。
 
@@ -386,6 +373,10 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
     Returns:
         list[dict]: 两条消息 —— ``system``（角色约束：不许编造未观测到的事实）
             与 ``user``（拼好的诊断摘要 + 追问）。
+
+    Note:
+        prompt 里的中文全部来自 ``core/copy/zh-CN.json`` 的 ``prompt`` section；
+        本模块只负责拼装与取数。system 提示词同样来自文案表，改措辞不用改代码。
     """
     result = result or {}
     meta = result.get("meta") or {}
@@ -394,7 +385,7 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
     vd = result.get("verdict") or {}
 
     lines = [
-        "以下是本次抓包诊断结果，请按四段结构分析。",
+        _t("user.intro"),
         "",
     ]
     # 规则引擎的结论置顶：下面「分层状态」只有 ok/warn/bad/na 四个机器码，
@@ -402,48 +393,44 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
     # 「没抓到」不等于「没问题」，所以 level / headline / sufficiency 必须先给它。
     if vd.get("level") or vd.get("headline"):
         lines += [
-            "【规则引擎结论】（必须与它保持一致，不得给出相反结论）",
-            f"判定等级：{vd.get('level', '-')}",
-            f"一句话结论：{vd.get('headline', '-')}",
+            _t("user.rules_header"),
+            _t("user.level", level=vd.get("level", "-")),
+            _t("user.headline", headline=vd.get("headline", "-")),
         ]
         suff = vd.get("sufficiency")
         if isinstance(suff, dict) and "ok" in suff:
-            lines.append(
-                "证据充分性：充分" if suff.get("ok") else
-                "证据充分性：不足 —— 本次抓包没有可判定的维度，"
-                "「没抓到」不等于「没问题」；禁止输出「网络正常」，"
-                "应说明证据不足并给出补采建议。"
-            )
+            lines.append(_t("user.sufficient") if suff.get("ok")
+                         else _t("user.insufficient"))
         lines.append("")
     lines += [
-        "【采集概况】",
-        f"抓包文件：{meta.get('pcap_name', '-')}｜网卡：{meta.get('interface', '-')}"
-        f"｜过滤器：{meta.get('bpf', '-')}",
-        f"报文 {meta.get('packets', '-')} 个（TCP {meta.get('tcp_packets', '-')}，会话 "
-        f"{meta.get('streams_total', '-')} 个）｜时长 {meta.get('duration', '-')} 秒"
-        f"｜吞吐 {m.get('throughput_mbps', 0)} Mbps",
+        _t("user.collect_header"),
+        _t("user.pcap_line", pcap=meta.get("pcap_name", "-"),
+           iface=meta.get("interface", "-"), bpf=meta.get("bpf", "-")),
+        _t("user.packet_line", packets=meta.get("packets", "-"),
+           tcp=meta.get("tcp_packets", "-"), streams=meta.get("streams_total", "-"),
+           duration=meta.get("duration", "-"), throughput=m.get("throughput_mbps", 0)),
         "",
-        "【分层指标】",
-        f"- L2 本地链路：ARP 无应答 {m.get('arp_no_reply', 0)} 个地址",
-        f"- L3 网络层：RTT 均值 {m.get('rtt_avg_ms', 0)}ms / P95 {m.get('rtt_p95_ms', 0)}ms"
-        f" / 最大 {m.get('rtt_max_ms', 0)}ms / 抖动 {m.get('rtt_jitter_ms', 0)}ms"
-        f"（{m.get('rtt_samples', 0)} 个采样）；ICMP 不可达 {m.get('icmp_unreach', 0)} 条，"
-        f"超时 {m.get('icmp_timeout', 0)} 条",
-        f"- L4 传输层：重传率 {m.get('retrans_rate', 0)}%；乱序 {m.get('ooo_rate', 0)}%；"
-        f"重复 ACK {m.get('dup_ack_rate', 0)}%；建连失败 {m.get('conn_fail', 0)} 个；"
-        f"被 RST {m.get('conn_refused', 0)} 个；握手均值 {m.get('hs_avg_ms', 0)}ms"
-        f"（{m.get('hs_samples', 0)} 个样本）",
-        f"- L7 应用层：DNS 均值 {m.get('dns_avg_ms', 0)}ms / P95 {m.get('dns_p95_ms', 0)}ms"
-        f" / 失败率 {m.get('dns_fail_rate', 0)}% / 超时 {m.get('dns_timeouts', 0)} 次；"
-        f"HTTP 均值 {m.get('http_avg_ms', 0)}ms / P95 {m.get('http_p95_ms', 0)}ms"
-        f" / 5xx {m.get('http_err5', 0)} 个 / 4xx {m.get('http_err4', 0)} 个",
+        _t("user.layer_header"),
+        _t("user.l2", count=m.get("arp_no_reply", 0)),
+        _t("user.l3", rtt_avg=m.get("rtt_avg_ms", 0), rtt_p95=m.get("rtt_p95_ms", 0),
+           rtt_max=m.get("rtt_max_ms", 0), jitter=m.get("rtt_jitter_ms", 0),
+           samples=m.get("rtt_samples", 0), unreach=m.get("icmp_unreach", 0),
+           timeout=m.get("icmp_timeout", 0)),
+        _t("user.l4", retrans=m.get("retrans_rate", 0), ooo=m.get("ooo_rate", 0),
+           dup=m.get("dup_ack_rate", 0), conn_fail=m.get("conn_fail", 0),
+           refused=m.get("conn_refused", 0), hs=m.get("hs_avg_ms", 0),
+           hs_samples=m.get("hs_samples", 0)),
+        _t("user.l7", dns_avg=m.get("dns_avg_ms", 0), dns_p95=m.get("dns_p95_ms", 0),
+           fail=m.get("dns_fail_rate", 0), timeouts=m.get("dns_timeouts", 0),
+           http_avg=m.get("http_avg_ms", 0), http_p95=m.get("http_p95_ms", 0),
+           err5=m.get("http_err5", 0), err4=m.get("http_err4", 0)),
         "",
-        "【分层状态】（规则引擎判定）",
+        _t("user.layer_status_header"),
     ]
     for x in vd.get("layers") or []:
         lines.append(f"- {x.get('id')} {x.get('name')}：{x.get('status')}（{x.get('detail')}）")
 
-    lines += ["", "【问题清单】（层次｜协议｜类别｜严重程度｜发现｜证据｜建议）"]
+    lines += ["", _t("user.problem_header")]
     for r in rows:
         lines.append(
             f"- {r.get('layer', '')}｜{r.get('protocol', '')}｜{r.get('category', '')}"
@@ -453,47 +440,49 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
 
     streams = meta.get("streams_top") or []
     if streams:
-        lines += ["", "【会话明细】（Stream｜客户端→服务端｜协议｜包/字节｜握手｜RTT｜重传｜"
-                      "服务端等待｜标记）"]
+        lines += ["", _t("user.stream_header")]
         for s in streams:
-            lines.append(
-                f"- #{s.get('stream')}｜{s.get('client')}:{s.get('sport')}→"
-                f"{s.get('server')}:{s.get('dport')}｜{s.get('app')}｜{s.get('packets')} 包/"
-                f"{s.get('bytes')} 字节｜握手 {s.get('handshake_ms')}ms｜RTT {s.get('rtt_avg')}ms"
-                f"｜重传 {s.get('retrans')}｜服务端等待 {s.get('think_ms')}ms"
-                f"｜{'、'.join(s.get('flags') or []) or '正常'}"
-            )
+            lines.append(_t(
+                "user.stream_row", stream=s.get("stream"), client=s.get("client"),
+                sport=s.get("sport"), server=s.get("server"), dport=s.get("dport"),
+                app=s.get("app"), packets=s.get("packets"), bytes=s.get("bytes"),
+                handshake=s.get("handshake_ms"), rtt=s.get("rtt_avg"),
+                retrans=s.get("retrans"), think=s.get("think_ms"),
+                flags="、".join(s.get("flags") or []) or _t("user.flag_none")))
 
     slow = meta.get("http_slow") or []
     if slow:
-        lines += ["", "【HTTP 请求（按耗时降序）】"]
+        lines += ["", _t("user.http_header")]
         for h in slow[:6]:
-            lines.append(f"- {h.get('method')} {h.get('host')}{h.get('uri')} → {h.get('code')}"
-                         f"，耗时 {h.get('ms')}ms，帧 #{h.get('frame')}")
+            lines.append(_t("user.http_row", method=h.get("method"), host=h.get("host"),
+                            uri=h.get("uri"), code=h.get("code"), ms=h.get("ms"),
+                            frame=h.get("frame")))
 
     dns_detail = meta.get("dns_detail") or []
     if dns_detail:
-        lines += ["", "【DNS 解析（按耗时降序）】"]
+        lines += ["", _t("user.dns_header")]
         for d in dns_detail[:8]:
-            lines.append(f"- {d.get('name')} → {d.get('ms')}ms，rcode {d.get('rcode')}，"
-                         f"服务器 {d.get('server')}，帧 #{d.get('frame')}")
+            lines.append(_t("user.dns_row", name=d.get("name"), ms=d.get("ms"),
+                            rcode=d.get("rcode"), server=d.get("server"),
+                            frame=d.get("frame")))
 
     if meta.get("icmp_detail"):
-        lines += ["", "【ICMP 异常】"]
+        lines += ["", _t("user.icmp_header")]
         for i in meta["icmp_detail"][:6]:
-            lines.append(f"- {i.get('src')}→{i.get('dst')} {i.get('desc')}，帧 #{i.get('frame')}")
+            lines.append(_t("user.icmp_row", src=i.get("src"), dst=i.get("dst"),
+                            desc=i.get("desc"), frame=i.get("frame")))
 
     sec = [r for r in rows if r.get("layer") == "安全观察" and r.get("severity") != "—"]
     if sec:
-        lines += ["", "【安全观察（附带项，非主线）】"]
+        lines += ["", _t("user.security_header")]
         for r in sec[:4]:
             lines.append(f"- {r.get('category')}：{r.get('finding')}（{r.get('severity')}）")
 
     if question.strip():
-        lines += ["", "另外请重点回答这个问题：" + question.strip()]
+        lines += ["", _t("user.question_prefix") + question.strip()]
 
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _t("system")},
         {"role": "user", "content": "\n".join(lines)},
     ]
 

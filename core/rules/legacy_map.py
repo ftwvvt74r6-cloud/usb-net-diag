@@ -17,6 +17,8 @@
    零窗口这种「方向决定结论」的规则给 ``confidence=0.5 / INFERRED``。
 3. **不匹配就报**：``find_unmatched()`` 必须能在 CI 里断言「映射无漏项」，
    否则规则一改、映射静默漏掉，迁移就永远做不完。
+4. **不靠文案判状态**：``is_normal()`` 只看 ``severity``，不再对 finding 文本做
+   关键词匹配 —— 否则改文案就会静默改变迁移结果。
 
 用法::
 
@@ -53,12 +55,6 @@ SEVERITY_MAP: dict[str, Severity] = {
     "": Severity.OK,
     "na": Severity.NA,
 }
-
-#: 出现这些词的行表示「这一层正常/没样本」，不产出 Finding。
-NORMAL_HINTS: tuple[str, ...] = (
-    "正常", "未检测到", "未收到", "未发现", "无需处理", "三层转发正常",
-)
-
 
 @dataclass(frozen=True)
 class LegacyPattern:
@@ -211,30 +207,40 @@ def match(row: Mapping) -> LegacyPattern | None:
     return None
 
 
+def _severity(row: Mapping) -> Severity:
+    """取一行的规范严重度。
+
+    Args:
+        row: 旧结构的一行；``severity`` 缺失或取未知值时按 ``"—"`` 处理
+            （与历史行为一致）。
+
+    Returns:
+        Severity: 映射后的严重度枚举。
+    """
+    return SEVERITY_MAP.get(str(row.get("severity", "—")).strip(), Severity.OK)
+
+
 def is_normal(row: Mapping) -> bool:
-    """判断这一行是不是「正常 / 无样本」的陈述（不该产出 Finding）。
+    """判断这一行是不是「测了、正常」的陈述（不该产出 Finding）。
 
     Args:
         row: 旧结构的一行。
 
     Returns:
-        bool: 严重度为 ``"—"``（测了，正常）时为 True；``"na"``（没样本）不再
-            走严重度分支，而是**按文案**判（「未检测到…」这类陈述同样不产出 Finding）。
+        bool: 严重度映射为 :attr:`Severity.OK`（即 ``"—"``）时为 True。
+            ``"na"``（没样本）返回 False —— 它是第三种状态，回答的是「没测到」
+            而不是「没问题」。
 
     Note:
-        为什么 ``"na"`` 不算 normal：它是第三种状态，回答的是「没测到」而不是「没问题」。
-        ``SEVERITY_MAP`` 里两者已经分开（``Severity.OK`` vs ``Severity.NA``），
-        这里也必须分开，否则下游想统计「有多少项真验过」时会把它算进去。
+        V4：判定改为**基于严重度**，不再靠 ``NORMAL_HINTS`` 对 finding 文本做
+        关键词匹配。旧实现让 ``"na"`` 行靠「未检测到…」这类词兜住，是双向陷阱：
+        改文案会静默改变迁移结果（漏项 / 多映射），而「没样本」也从来不是
+        「正常」。现在文案怎么改都不影响判定。
 
-        ⚠️ 副作用：``"na"`` 行现在靠 ``NORMAL_HINTS``（「未检测到」等词）兜住。
-        哪天文案改成「无样本」而不含这些词，这些行会立刻变成 ``find_unmatched``
-        的漏项 —— 改文案（PR F）时必须同步往 ``NORMAL_HINTS`` 里加词。
+        ``"na"`` 行虽然不算 normal，但同样不产出 Finding（没样本没有结论）：
+        :func:`to_finding` 与 :func:`find_unmatched` 各自显式跳过它。
     """
-    severity = str(row.get("severity", "—")).strip()
-    if SEVERITY_MAP.get(severity, Severity.OK) is Severity.OK:
-        return True
-    text = str(row.get("finding", ""))
-    return any(hint in text for hint in NORMAL_HINTS)
+    return _severity(row) is Severity.OK
 
 
 def to_finding(row: Mapping, index: int = 0) -> Finding | None:
@@ -252,7 +258,7 @@ def to_finding(row: Mapping, index: int = 0) -> Finding | None:
         （重传、零窗口）会把置信度压到 0.6 并标成 ``INFERRED`` ——
         宁可写「疑似」，也不要给出确定结论。
     """
-    if is_normal(row):
+    if is_normal(row) or _severity(row) is Severity.NA:
         return None
     pattern = match(row)
     if pattern is None:
@@ -326,8 +332,14 @@ def find_unmatched(rows: Iterable[Mapping]) -> list[Mapping]:
         list[Mapping]: 漏映射的行。**CI 里应断言为空** ——
             非空意味着有人加了新规则却忘了补映射，迁移会静默漏项。
     """
-    return [row for row in (rows or ())
-            if not is_normal(row) and match(row) is None]
+    out: list[Mapping] = []
+    for row in rows or ():
+        severity = _severity(row)
+        if severity is Severity.OK or severity is Severity.NA:
+            continue
+        if match(row) is None:
+            out.append(row)
+    return out
 
 
 def coverage(rows: Sequence[Mapping]) -> dict:
@@ -337,17 +349,24 @@ def coverage(rows: Sequence[Mapping]) -> dict:
         rows: 旧 ``rows[]`` 列表。
 
     Returns:
-        dict: 键 ``total``（总行数）/ ``mapped``（已映射）/ ``normal``（正常行）/
-            ``unmatched``（漏映射数）/ ``unmatched_rows``（漏映射行的摘要，便于直接看）。
+        dict: 键 ``total``（总行数）/ ``mapped``（已映射）/ ``normal``（测了正常）/
+            ``no_sample``（没样本，``severity == "na"``）/ ``unmatched``（漏映射数）/
+            ``unmatched_rows``（漏映射行的摘要，便于直接看）。
+
+    Note:
+        ``na`` 行单独计数（V4 的 ``no_sample`` 桶）：它既不是 normal（没测过，
+        不能报「正常」），也不该算「漏映射」（它本来就不该产出 Finding）。
     """
     rows = list(rows or ())
     mapped = [r for r in rows if to_finding(r) is not None]
     normal = [r for r in rows if is_normal(r)]
+    no_sample = [r for r in rows if not is_normal(r) and _severity(r) is Severity.NA]
     unmatched = find_unmatched(rows)
     return {
         "total": len(rows),
         "mapped": len(mapped),
         "normal": len(normal),
+        "no_sample": len(no_sample),
         "unmatched": len(unmatched),
         "unmatched_rows": [{"layer": r.get("layer"), "category": r.get("category"),
                             "finding": str(r.get("finding", ""))[:80]} for r in unmatched],
@@ -382,7 +401,7 @@ def missing_from_registry() -> tuple[str, ...]:
 
 
 __all__ = [
-    "SEVERITY_MAP", "NORMAL_HINTS", "LAYER_MAP", "LegacyPattern", "PATTERNS",
+    "SEVERITY_MAP", "LAYER_MAP", "LegacyPattern", "PATTERNS",
     "match", "is_normal", "to_finding", "map_rows",
     "find_unmatched", "coverage", "mapped_rule_ids", "missing_from_registry",
 ]

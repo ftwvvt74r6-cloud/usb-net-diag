@@ -18,6 +18,11 @@ try:                                    # 扁平导入：core/ 在 sys.path 上�
 except ImportError:                     # 包导入：仓库根在 sys.path 上（tests / core.rules）
     from core.contracts import Sufficiency
 
+try:                                    # 扁平导入：core/ 在 sys.path 上（report.py / diagnose.py）
+    from copytext import get as _copy_get
+except ModuleNotFoundError:             # 包导入：仓库根在 sys.path 上（tests / core.rules）
+    from core.copytext import get as _copy_get
+
 #: 仓库根：copy 文案表按「仓库根在 sys.path 上」的包导入方式读取（与 analyzer 同款）。
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -83,53 +88,83 @@ CAT_RANK = {
     "域名解析": 5, "应用响应": 6, "可疑外联": 7, "端口扫描": 7, "明文凭证": 8,
 }
 
-LAYERS = [
-    {"id": "L2", "name": "本地链路", "protocol": "ARP / 以太网"},
-    {"id": "L3", "name": "网络层", "protocol": "IP / ICMP"},
-    {"id": "L4", "name": "传输层", "protocol": "TCP / UDP"},
-    {"id": "L7", "name": "应用层", "protocol": "DNS / HTTP / TLS"},
-]
+#: 层 id → copy 表 ``verdict.layer_name`` / ``layer_protocol`` 的键。
+_LAYER_COPY_KEYS = (("L2", "l2"), ("L3", "l3"), ("L4", "l4"), ("L7", "l7"))
 
-# 每一类故障：现象解释（说给不懂协议的人听）
-EXPLAIN = {
-    "连接建立": ("表现是：访问这个地址时一直转圈，最后提示「无法连接」或连接超时。"
-                 "网络本身可能是通的，卡在「建立连接」这一步 —— 要么对方端口没有服务在听，"
-                 "要么中间的防火墙/安全组把包丢了。"),
-    "传输质量": ("表现是：网页加载到一半卡住、远程桌面一顿一顿、文件传输速度上不去。"
-                 "数据发出去没被对方确认，只能重发；重发越多，有效速度越低。这是链路质量问题，不是应用问题。"),
-    "网络时延": ("表现是：每个操作都要等一会儿才有反应，但最终能成功，就是慢。"
-                 "时延大而稳定多半是物理距离或运营商路径绕行；时延忽大忽小则是链路拥塞或无线不稳。"),
-    "网络可达性": ("表现是：某个网段或某台主机完全连不上。"
-                   "ICMP 的提示直接指明了原因：端口不可达=服务没起，主机不可达=路由/防火墙拦了，"
-                   "需要分片=路径 MTU 不匹配。"),
-    "域名解析": ("表现是：网址打不开，但直接用 IP 能打开；或者每次打开网页前都要愣几秒。"
-                 "这一步是上网的第一跳，DNS 慢会让所有网站都显得慢。"),
-    "TLS 会话": ("表现是：HTTPS 站点证书报错、握手失败，或提示「连接不安全」。"
-                 "少量告警多为正常的关闭通知，不用处理；成片告警才是证书或协议问题。"),
-    "应用响应": ("表现是：网页能打开，但很慢，或者直接报 500/502。"
-                 "网络是通的，问题在服务端处理或应用本身。"),
-    "本地可达性": ("表现是：同一个网段内的设备互相访问不了。"
-                   "二层地址解析都没有回应，说明对方没开机、IP 冲突，或者被划到了不同 VLAN。"),
-    "可疑外联": ("与网络故障无关，是顺带发现的安全隐患，优先级低于上面的连通性问题。"),
-    "端口扫描": ("与网络故障无关，是顺带发现的安全观察项。"),
-    "明文凭证": ("与网络故障无关，是顺带发现的安全隐患，建议单独处理。"),
+#: 故障类别（中文，同时是 ``rows[].category`` 的结构化取值）→ copy 表 key 后缀。
+#: 类别中文值本身是数据契约（verdict 的排序表、legacy_map 的匹配模式都用它），
+#: 不迁进 copy 表；这里只维护「类别 → 文案 key」的映射。
+_CAT_KEYS = {
+    "连接建立": "connect", "传输质量": "transport", "网络时延": "latency",
+    "网络可达性": "unreach", "域名解析": "dns", "TLS 会话": "tls", "应用响应": "app",
+    "本地可达性": "arp", "可疑外联": "exfil", "端口扫描": "scan", "明文凭证": "plaintext",
 }
 
-# 每一类故障的标题（不带数字，数字由 finding 提供）
-TITLES = {
-    "连接建立": "建立 TCP 连接这一步失败或偏慢",
-    "连接建立-RST": "对方明确拒绝了连接（端口没开）",
-    "传输质量": "链路上在丢包，实际速度被拖慢",
-    "网络时延": "网络往返时延偏大",
-    "网络可达性": "网络层不通，被设备拦截",
-    "域名解析": "域名解析（DNS）出了问题",
-    "TLS 会话": "TLS 会话有告警",
-    "应用响应": "服务端响应异常",
-    "本地可达性": "同网段内找不到对方（ARP 无应答）",
-    "可疑外联": "发现可疑的外联端口",
-    "端口扫描": "发现疑似端口扫描行为",
-    "明文凭证": "发现明文传输的账号口令",
-}
+
+def _t(section: str, key: str, **args) -> str:
+    """从 copy 表取文案（走本模块校验过的 :func:`_load_copy`）。
+
+    Args:
+        section: copy 表 section 名（支持 ``verdict.titles`` 这类点号路径）。
+        key: section 内的键。
+        **args: ``{name}`` 占位符实参。
+
+    Returns:
+        str: 可直接展示的文案。缺 key / 缺实参时回退成 key 或原文，不抛异常。
+    """
+    raw = _copy_get(_load_copy(), section, key)
+    if raw is None:
+        return key
+    if not args:
+        return raw
+    try:
+        return raw.format(**args)
+    except (KeyError, IndexError, ValueError):
+        return raw
+
+
+def _title(cat: str, rst: bool = False) -> str:
+    """类别的标题文案（``copy.verdict.titles``）。
+
+    Args:
+        cat: ``rows[].category`` 的中文值。
+        rst: 是否「被对端 RST 拒绝」变体（仅「连接建立」有单独标题）。
+
+    Returns:
+        str: 标题；未知类别回退成类别名本身。
+    """
+    if cat == "连接建立" and rst:
+        return _t("verdict.titles", "connect_rst")
+    key = _CAT_KEYS.get(cat)
+    return _t("verdict.titles", key) if key else cat
+
+
+def _explain(cat: str, rst: bool = False) -> str:
+    """类别的现象解释（``copy.verdict.explain`` / ``copy.verdict.rst_explain``）。
+
+    Args:
+        cat: ``rows[].category`` 的中文值。
+        rst: 是否「被对端 RST 拒绝」变体。
+
+    Returns:
+        str: 白话解释；未知类别返回空串。
+    """
+    if cat == "连接建立" and rst:
+        return _t("verdict", "rst_explain")
+    key = _CAT_KEYS.get(cat)
+    return _t("verdict.explain", key) if key else ""
+
+
+def _layer_defs() -> list[dict]:
+    """四层的展示定义（层名与协议文案来自 copy 表）。
+
+    Returns:
+        list[dict]: 每项 ``{"id", "name", "protocol"}``，供 :func:`compute_layers` 使用。
+    """
+    return [{"id": lid,
+             "name": _t("verdict.layer_name", key),
+             "protocol": _t("layer_protocol", key)}
+            for lid, key in _LAYER_COPY_KEYS]
 
 
 def _worst(rows: list[dict]) -> str:
@@ -172,7 +207,7 @@ def compute_layers(rows: list[dict], meta: dict, metrics: dict,
             "severity", "detail", "count"}``。
     """
     out: list[dict] = []
-    for d in LAYERS:
+    for d in _layer_defs():
         mine = [r for r in rows if r.get("layer", "").startswith(d["id"])]
         net = [r for r in mine if r.get("category") != "安全观察"]
         status = _worst(net)
@@ -201,80 +236,111 @@ def compute_layers(rows: list[dict], meta: dict, metrics: dict,
         out.append({
             "id": d["id"], "name": d["name"], "protocol": d["protocol"],
             "status": state, "severity": status,
-            "detail": _layer_note(d["id"], meta, metrics),
+            "detail": _layer_note(d["id"], meta, metrics, state),
         })
     return out
 
 
-def _layer_note(lid: str, meta: dict, m: dict) -> str:
+def _layer_note(lid: str, meta: dict, m: dict, status: str = "ok") -> str:
+    """层状态块的关键指标短语（文案来自 copy 表 ``layer_note``）。
+
+    Args:
+        lid: 层 id（``L2``/``L3``/``L4``/``L7``）。
+        meta: 采集元信息。
+        m: 指标表。
+        status: 该层状态（``ok``/``warn``/``bad``/``na``）。
+
+    Returns:
+        str: 可直接展示的指标短语。
+
+    Note:
+        B1：层状态是 ``na``（这次没样本）时，旧实现让 L2 输出
+        「同网段地址解析正常」——没测过却报正常。现在 na 一律走
+        ``layer_note.<层>.na`` 的「无样本」文案，不再出现「…正常」的肯定句。
+        L3/L4/L7 的 na 文案与它们的「无样本」短语同值（``本次无 TCP 流量`` 这类
+        本来就是否定式陈述），所以只有 L2 的那句可见文字会变。
+    """
+    if status == "na":
+        return _t("layer_note", f"{lid.lower()}.na")
     if lid == "L2":
         n = meta.get("arp_no_reply") or 0
-        return f"ARP 无应答 {n} 个地址" if n else "同网段地址解析正常"
+        return _t("layer_note", "l2.arp", count=n) if n else _t("layer_note", "l2.ok")
     if lid == "L3":
         if not m.get("rtt_samples"):
-            return "本次无 RTT 采样（纯 UDP/短连接）"
-        parts = [f"RTT 均值 {m.get('rtt_avg_ms', 0):.0f}ms"]
+            return _t("layer_note", "l3.no_sample")
+        parts = [_t("layer_note", "l3.rtt_avg", avg=m.get("rtt_avg_ms", 0))]
         if m.get("rtt_jitter_ms"):
-            parts.append(f"抖动 {m['rtt_jitter_ms']:.0f}ms")
+            parts.append(_t("layer_note", "l3.jitter", jitter=m["rtt_jitter_ms"]))
         if m.get("icmp_unreach") or m.get("icmp_timeout"):
-            parts.append(f"ICMP 异常 {m.get('icmp_unreach', 0) + m.get('icmp_timeout', 0)} 条")
+            parts.append(_t("layer_note", "l3.icmp_err",
+                            count=m.get("icmp_unreach", 0) + m.get("icmp_timeout", 0)))
         return "，".join(parts)
     if lid == "L4":
         if not meta.get("tcp_packets"):
-            return "本次无 TCP 流量"
-        parts = [f"重传率 {m.get('retrans_rate', 0):.2f}%"]
+            return _t("layer_note", "l4.no_tcp")
+        parts = [_t("layer_note", "l4.retrans", rate=m.get("retrans_rate", 0))]
         if m.get("conn_fail"):
-            parts.append(f"建连失败 {m['conn_fail']}")
+            parts.append(_t("layer_note", "l4.conn_fail", count=m["conn_fail"]))
         if m.get("conn_refused", 0) >= 2:
-            parts.append(f"被拒绝 {m['conn_refused']}")
+            parts.append(_t("layer_note", "l4.refused", count=m["conn_refused"]))
         if m.get("hs_samples"):
-            parts.append(f"握手均值 {m['hs_avg_ms']:.0f}ms")
+            parts.append(_t("layer_note", "l4.handshake", avg=m["hs_avg_ms"]))
         return "，".join(parts)
     parts = []
     if m.get("dns_samples"):
-        parts.append(f"DNS 均值 {m.get('dns_avg_ms', 0):.0f}ms")
+        parts.append(_t("layer_note", "l7.dns", avg=m.get("dns_avg_ms", 0)))
     if m.get("http_samples"):
-        parts.append(f"HTTP 均值 {m.get('http_avg_ms', 0):.0f}ms")
-    return "，".join(parts) or "本次无应用层样本"
+        parts.append(_t("layer_note", "l7.http", avg=m.get("http_avg_ms", 0)))
+    return "，".join(parts) or _t("layer_note", "l7.none")
 
 
 def _headline(main: dict, meta: dict, m: dict) -> str:
+    """一句话结论文案（全部来自 copy 表 ``verdict.headline``）。
+
+    Args:
+        main: 主判定行（``bad[0]``）。
+        meta: 采集元信息（``zero_win`` 等计数在这里）。
+        m: 指标表。
+
+    Returns:
+        str: 一句话结论；未知类别回退成 finding 前 48 字或「未发现明显故障」。
+    """
     cat = main.get("category")
     f = main.get("finding", "")
     if cat == "连接建立":
         if m.get("conn_fail"):
-            return f"{m['conn_fail']} 个目标端口完全连不上：TCP 握手没有回应"
+            return _t("verdict.headline", "connect.no_response", count=m["conn_fail"])
         if m.get("conn_refused"):
-            return f"{m['conn_refused']} 个连接被对方拒绝（RST）"
-        return f"建立连接偏慢：TCP 握手平均 {m.get('hs_avg_ms', 0):.0f}ms"
+            return _t("verdict.headline", "connect.refused", count=m["conn_refused"])
+        return _t("verdict.headline", "connect.slow", avg=m.get("hs_avg_ms", 0))
     if cat == "传输质量":
         # 零窗口看的是「接收方缓冲区被塞满」，不是链路丢包 —— 这两个结论的
         # 排查方向完全相反（查接收端应用 vs 查网络）。
         # 计数在 meta["zero_win"]，metrics 里没有这个键：早先读 m 的那版
         # 永远取到默认值 0，分支从不成立，零窗口场景会被误报成「链路上在丢包」。
         if meta.get("zero_win", 0) >= 3 and m.get("retrans_rate", 0) < 2:
-            return "接收端处理不过来：出现 TCP 零窗口（接收缓冲区已满），不是网络慢"
-        return f"链路上在丢包：TCP 重传率 {m.get('retrans_rate', 0):.2f}%"
+            return _t("verdict.headline", "transport.zero_win")
+        return _t("verdict.headline", "transport.loss", rate=m.get("retrans_rate", 0))
     if cat == "网络时延":
-        return (f"网络往返偏慢：RTT 平均 {m.get('rtt_avg_ms', 0):.0f}ms、"
-                f"抖动 {m.get('rtt_jitter_ms', 0):.0f}ms")
+        return _t("verdict.headline", "latency", avg=m.get("rtt_avg_ms", 0),
+                  jitter=m.get("rtt_jitter_ms", 0))
     if cat == "网络可达性":
-        return "网络层被拦截：收到 ICMP 不可达/超时"
+        return _t("verdict.headline", "unreach")
     if cat == "域名解析":
         if (m.get("dns_fail_rate") or 0) >= 20:
-            return f"域名解析出问题：失败率 {m['dns_fail_rate']:.0f}%"
+            return _t("verdict.headline", "dns.fail", rate=m["dns_fail_rate"])
         if m.get("dns_timeouts", 0) >= 3:
-            return f"DNS 查询有 {m['dns_timeouts']} 次没有响应"
-        return f"DNS 解析偏慢：平均 {m.get('dns_avg_ms', 0):.0f}ms"
+            return _t("verdict.headline", "dns.timeout", count=m["dns_timeouts"])
+        return _t("verdict.headline", "dns.slow", avg=m.get("dns_avg_ms", 0))
     if cat == "应用响应":
         if m.get("http_err5"):
-            return f"服务端报错：{m['http_err5']} 个请求返回 5xx"
-        return f"服务端响应慢：HTTP 平均 {m.get('http_avg_ms', 0):.0f}ms"
+            return _t("verdict.headline", "app.5xx", count=m["http_err5"])
+        return _t("verdict.headline", "app.slow", avg=m.get("http_avg_ms", 0))
     if cat == "本地可达性":
-        return "本地网段内找不到对方：ARP 请求没有应答"
+        return _t("verdict.headline", "arp.no_reply")
     if cat in ("可疑外联", "端口扫描", "明文凭证"):
-        return "网络连通性正常，但发现了安全隐患"
-    return f[:48] if f else "未发现明显故障"
+        return _t("verdict.headline", "security")
+    return f[:48] if f else _t("verdict.headline", "fallback")
 
 
 def _int(v) -> int:
@@ -285,20 +351,41 @@ def _int(v) -> int:
         return 0
 
 
+#: 本模块消费、且值必须是「字符串键 → 字符串值」映射的 copy section。
+_STRING_SECTIONS = ("next_step", "insufficient", "impact", "layer_note", "layer_protocol")
+
+
+def _is_str_map(value) -> bool:
+    """判断一个 section 是否是「字符串键 → 字符串值」的映射。
+
+    Args:
+        value: 待校验的 section 值。
+
+    Returns:
+        bool: 是合法字符串映射时为 True。
+    """
+    return isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+
+
 def _load_copy() -> dict:
     """读 ``core/copy/zh-CN.json`` 文案表。
 
     Returns:
-        dict: 文案表。以下任一情况都返回空表、**不抛异常**，由调用方回退内联常量：
+        dict: 文案表。以下任一情况都返回空表、**不抛异常**，由调用方回退成 key：
             文件缺失 / 包导入失败 / **结构不合法**（顶层不是对象，或本模块消费的
-            ``next_step`` / ``insufficient`` 不是「字符串键 → 字符串值」的映射）。
+            section 形状不对）。
 
     Note:
-        copy 表是本 PR 新增的消费点：以前 copy 无人消费，畸形表不会有人崩；
-        现在 ``{"next_step": []}`` 会让 ``verdict.build`` 抛 ``AttributeError``，
-        ``{"insufficient": {"no_decidable_dimension": {...}}}`` 会抛
-        ``'dict' object has no attribute 'format'``。所以「读不到」与
+        copy 表是本 PR 的唯一文案来源（以前 copy 无人在报告链路消费，畸形表不会
+        有人崩；现在 ``{"next_step": []}`` 会让 ``verdict.build`` 抛
+        ``AttributeError``，``{"insufficient": {"no_decidable_dimension": {...}}}``
+        会抛 ``'dict' object has no attribute 'format'``）。所以「读不到」与
         「读到了但形状不对」走同一条回退路径，绝不让报告渲染崩在文案表上。
+
+        ⚠️ 本模块消费的 section 必须列进白名单（``_STRING_SECTIONS`` 以及
+        ``verdict`` 的每个子表）。漏列时畸形表会被当成可用表，逐 key 取到非字符串，
+        症状是「文案悄悄回退成 key、你以为改了」。
     """
     try:
         if str(_ROOT) not in sys.path:
@@ -309,13 +396,16 @@ def _load_copy() -> dict:
         return {}
     if not isinstance(table, dict):
         return {}
-    # 只校验本模块消费的两块：其它 section 畸形与我们无关，不该拖累这两块。
-    for section in ("next_step", "insufficient"):
-        values = table.get(section, {})
-        if not isinstance(values, dict):
+    for name in _STRING_SECTIONS:
+        if not _is_str_map(table.get(name, {})):
             return {}
-        if not all(isinstance(k, str) and isinstance(v, str)
-                   for k, v in values.items()):
+    nested = table.get("verdict", {})
+    if not isinstance(nested, dict):
+        return {}
+    for _key, sub in nested.items():
+        if isinstance(sub, str):
+            continue
+        if not _is_str_map(sub):
             return {}
     return table
 
@@ -449,6 +539,9 @@ def build(result: dict) -> dict:
         2. 抓到了包但**没有任何可判定维度**时，``level`` 是「证据不足」而不是「正常」。
            见 :func:`_sufficiency`：判的是「每个维度有没有能支撑规则的样本」，
            不是全局的报文总数。
+
+        本函数只做路由与拼装：用户可见文案全部来自 ``core/copy/zh-CN.json``，
+        字典里的 ``level`` / ``layer`` / ``category`` 等是机器侧的结构化标识。
     """
     result = result or {}
     meta = result.get("meta") or {}
@@ -460,21 +553,21 @@ def build(result: dict) -> dict:
     if packets == 0:
         return {
             "level": "警告",
-            "headline": "这次没抓到任何报文，无法定位",
-            "plain": ("抓包文件是空的，可能是网卡选错、过滤器写得太窄，或者开始抓包后没有任何流量。"
-                      "请重新抓一次再判断。"),
-            "impact": "无法定位（抓包为空，没有任何数据）",
+            "headline": _t("verdict.headline", "empty"),
+            "plain": _t("verdict.plain", "empty"),
+            "impact": _t("impact", "empty"),
             "layer": "—",
             # 空包是「证据不足」的极端情形：四层都没有样本，不许显示成 ✅ 正常。
             "layers": compute_layers([], meta, m, sufficient=False),
             "points": [{
                 "severity": "警告", "layer": "—", "protocol": "—", "category": "采集有效性",
-                "title": "本次采集没有数据",
-                "plain": "抓包文件为空，所有指标都不可信。",
-                "proof": f"报文数 0，网卡 {meta.get('interface', '-')}，过滤器 {meta.get('bpf', '-')}",
-                "action": "换网卡重抓，或把过滤器清空后再试一次。",
+                "title": _t("verdict.plain", "collect_empty_title"),
+                "plain": _t("verdict.plain", "collect_empty_plain"),
+                "proof": _t("verdict.plain", "collect_empty_proof",
+                            iface=meta.get("interface", "-"), bpf=meta.get("bpf", "-")),
+                "action": _t("verdict.plain", "collect_empty_action"),
             }],
-            "next_steps": ["在界面上把「网卡」改成实际在用的那块，目标留空抓 30 秒。"],
+            "next_steps": [_t("next_step", "collect_again")],
             "metrics": m,
             "flags": {"network_ok": None, "security_ok": None},
             # 空包是「证据不足」的极端情形：连一个维度都没有样本。
@@ -498,27 +591,33 @@ def build(result: dict) -> dict:
     for r in (bad + hints)[:6]:
         cat = r.get("category", "")
         finding = r.get("finding") or ""
-        is_rst = cat == "连接建立" and "RST" in finding and "无响应" not in finding
-        plain_txt = (RST_EXPLAIN if is_rst else EXPLAIN.get(cat, "")) + "具体：" + finding
+        # 与旧实现逐字等价：类别 + finding 里含协议缩写 RST + 不含中文「无响应」。
+        # 「无响应」守卫不是装饰：copy 文案若同时含 RST 与「无响应」（例如写成
+        # 「未收到 SYN-ACK/RST」），没有它会误判成「被拒」并把结论讲反。
+        # 彻底机制化需要给 rows[] 加机器标记（会改报告 JSON 形状）→ 登记 BACKLOG。
+        is_rst = (cat == "连接建立" and "RST" in finding
+                  and "无响应" not in finding)
+        plain_txt = _explain(cat, is_rst) + _t("verdict.plain", "explain_join") + finding
         points.append({
             "severity": r.get("severity"),
             "layer": r.get("layer", "—"),
             "protocol": r.get("protocol", "—"),
             "category": cat,
-            "title": TITLES.get(cat + "-RST" if is_rst else cat, cat),
+            "title": _title(cat, is_rst),
             "plain": plain_txt,
-            "proof": f"{finding}｜证据：{r.get('evidence', '-')}",
+            "proof": finding + _t("verdict.plain", "proof_join") + str(r.get("evidence", "-")),
             "action": r.get("advice", ""),
         })
 
     # 安全项单独放最后，明确标注「非本次主线」
     for r in sec_bad[:2]:
         cat = r.get("category", "")
+        finding = r.get("finding") or ""
         points.append({
             "severity": r.get("severity"), "layer": "安全观察", "protocol": r.get("protocol", "—"),
-            "category": cat, "title": TITLES.get(cat, cat),
-            "plain": EXPLAIN.get(cat, "") + "具体：" + (r.get("finding") or ""),
-            "proof": f"{r.get('finding', '')}｜证据：{r.get('evidence', '-')}",
+            "category": cat, "title": _title(cat),
+            "plain": _explain(cat) + _t("verdict.plain", "explain_join") + finding,
+            "proof": finding + _t("verdict.plain", "proof_join") + str(r.get("evidence", "-")),
             "action": r.get("advice", ""),
         })
 
@@ -527,13 +626,9 @@ def build(result: dict) -> dict:
         # 抓到了包，但没有一个维度有样本可判。这时候说「正常」等于凭空断言：
         # 「什么都没测到」和「测了没问题」是两件事，结论必须是「无法判断」。
         level = "证据不足"
-        headline = "这次抓包没有可判定的流量，不能下「正常」的结论"
-        plain = ("没有一个维度能判：没有 TCP 流量（报文不足或没有会话），"
-                 "没有 DNS 查询、没有 HTTP 请求，没有 ICMP 错误报文，"
-                 "ARP 请求也不足以判「无应答」（规则要求同一目标至少 2 次）。\n\n"
-                 "「没抓到」不等于「没问题」——每个维度都无从判断，"
-                 "所以本次结论是**无法判断**，而不是网络正常。")
-        impact = "无法判断（不代表网络正常）"
+        headline = _t("verdict.headline", "insufficient")
+        plain = _t("verdict.plain", "insufficient")
+        impact = _t("impact", "insufficient")
         layer = "—"
         ins_steps = _insufficient_steps(meta)
         # 追加而不是覆盖：前面已构好的安全观察/提示明细是**已经成立的结论**，
@@ -543,9 +638,8 @@ def build(result: dict) -> dict:
             "layer": "—",
             "protocol": "—",
             "category": "采集有效性",
-            "title": "本次采集没有可判定的流量",
-            "plain": ("抓到的报文不构成任何一个可判定维度，"
-                      "任何「正常」的说法都缺证据。"),
+            "title": _t("verdict.plain", "collect_insufficient_title"),
+            "plain": _t("verdict.plain", "collect_insufficient_plain"),
             "proof": _insufficient_proof(meta, packets),
             "action": ins_steps[0],
         }] + points
@@ -553,34 +647,32 @@ def build(result: dict) -> dict:
         main = bad[0]
         level = "严重" if main.get("severity") == "严重" else "警告"
         headline = _headline(main, meta, m)
-        plain = (EXPLAIN.get(main.get("category"), "") +
-                 "\n\n定位：" + (main.get("finding") or ""))
+        plain = (_explain(main.get("category")) +
+                 _t("verdict.plain", "locate_prefix") + (main.get("finding") or ""))
         impact = _impact(main, m)
         layer = f"{main.get('layer')}｜{main.get('protocol')}"
     elif sec_bad:
         level = "警告"
-        headline = "网络连通性正常，但发现了安全隐患"
-        plain = ("所有网络性能指标都在正常范围，问题不在链路。"
-                 "附带的安全观察有命中项，建议单独处理（不影响本次故障排查结论）。")
-        impact = "网络正常，存在安全隐患"
+        headline = _t("verdict.headline", "sec_only")
+        plain = _t("verdict.plain", "sec_only")
+        impact = _t("impact", "sec_only")
         layer = "安全观察"
     else:
         level = "正常"
-        headline = "各层指标正常，本次未发现网络故障"
+        headline = _t("verdict.headline", "normal")
         facts = []
         if m.get("rtt_samples"):
-            facts.append(f"RTT 均值 {m['rtt_avg_ms']:.0f}ms")
-        facts.append(f"重传率 {m.get('retrans_rate', 0):.2f}%")
+            facts.append(_t("verdict.fact", "rtt", avg=m["rtt_avg_ms"]))
+        facts.append(_t("verdict.fact", "retrans", rate=m.get("retrans_rate", 0)))
         if m.get("dns_samples"):
-            facts.append(f"DNS 均值 {m['dns_avg_ms']:.0f}ms")
+            facts.append(_t("verdict.fact", "dns", avg=m["dns_avg_ms"]))
         if m.get("http_samples"):
-            facts.append(f"HTTP 均值 {m['http_avg_ms']:.0f}ms")
+            facts.append(_t("verdict.fact", "http", avg=m["http_avg_ms"]))
         if m.get("hs_samples"):
-            facts.append(f"握手均值 {m['hs_avg_ms']:.0f}ms")
-        plain = ("从链路、网络、传输到应用层都没有命中异常阈值（" + "、".join(facts) + "）。"
-                 "如果用户仍反馈卡顿，说明问题不在本次抓包的时段或不在本机侧，"
-                 "建议在复现卡顿的同时开启抓包，或直接用「链路体检」分段测一次。")
-        impact = "未见异常"
+            facts.append(_t("verdict.fact", "handshake", avg=m["hs_avg_ms"]))
+        plain = (_t("verdict.plain", "normal_prefix") + "、".join(facts)
+                 + _t("verdict.plain", "normal_suffix"))
+        impact = _t("impact", "ok")
         layer = "—"
 
     # ---------- 处置顺序：按排查优先级，底层先动 ----------
@@ -594,7 +686,7 @@ def build(result: dict) -> dict:
             if adv and adv not in steps:
                 steps.append(adv)
         if not steps:
-            steps = ["本次无需处理，保留报告作为基线；下次出现卡顿时再抓一次对比指标变化。"]
+            steps = [_t("next_step", "baseline")]
 
     return {
         "level": level,
@@ -617,28 +709,31 @@ def build(result: dict) -> dict:
     }
 
 
-RST_EXPLAIN = ("表现是：只有个别地址/端口连不上，其余访问正常，提示「连接被重置」。"
-               "这是对方主机明确拒绝，说明网络是通的，问题在目标端口没有服务在监听，"
-               "或被 ACL / 限流主动拒绝。")
-
-
 def _impact(main: dict, m: dict) -> str:
+    """「对业务意味着什么」的文案（来自 copy 表 ``impact``）。
+
+    Args:
+        main: 主判定行。
+        m: 指标表。
+
+    Returns:
+        str: 影响描述；未知类别回退成 ``impact.default``。
+    """
     cat = main.get("category")
     if cat == "连接建立":
         if not m.get("conn_fail"):
-            return "个别连接被拒绝，其余业务正常"
-        return "业务不可用：相关服务连不上"
+            return _t("impact", "connect_refused")
+        return _t("impact", "connect")
     if cat == "传输质量":
-        rate = m.get("retrans_rate", 0)
-        return f"体验变差：速度下降、卡顿（重传 {rate:.1f}%）"
+        return _t("impact", "transport", rate=m.get("retrans_rate", 0))
     if cat == "网络时延":
-        return "操作变慢：每次交互都要多等几十到几百毫秒"
+        return _t("impact", "net_latency")
     if cat == "网络可达性":
-        return "部分业务不通：特定网段/主机访问失败"
+        return _t("impact", "net_unreach")
     if cat == "域名解析":
-        return "上网变慢或打不开：所有依赖域名的访问都受影响"
+        return _t("impact", "dns")
     if cat == "应用响应":
-        return "业务报错或明显变慢：问题在服务端"
+        return _t("impact", "app")
     if cat == "本地可达性":
-        return "同网段互访失败：可能整段网络中断"
-    return "需关注"
+        return _t("impact", "l2_arp")
+    return _t("impact", "default")
