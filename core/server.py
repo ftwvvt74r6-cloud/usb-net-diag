@@ -5,7 +5,9 @@ API:
   GET  /api/status          任务状态 / 日志 / 结果
   GET  /api/interfaces      可用网卡
   GET  /api/captures        已有抓包文件
+  GET  /api/reports         历史报告列表（报告与导出 → 历史报告）
   POST /api/scan            启动诊断 {mode,target,duration,interface,pcap}
+  POST /api/elevate         非管理员一键请求 UAC 提权重启
   POST /api/upload?name=x   上传 pcap 后离线分析
   GET  /api/report?path=    读取报告文件
   GET  /api/doctor          环境自检
@@ -312,7 +314,8 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
         if mode == "offline":
             res = diagnose.run_scan(target=target, pcap=pcap, logger=log)
         else:
-            res = diagnose.run_scan(target=target, duration=duration, interface=interface, logger=log)
+            res = diagnose.run_scan(target=target, duration=duration,
+                                    interface=interface, logger=log)
         with LOCK:
             if res.get("ok"):
                 JOB["state"] = "done"
@@ -353,6 +356,11 @@ def start_job(payload: dict) -> dict:
         if mode not in ("live", "scan", "offline"):
             mode = "live"
         target = (payload.get("target") or "").strip()[:300]
+        ignored_target = ""
+        if mode == "scan" and target:
+            # 全网扫描的语义是「不设过滤、抓本机全部流量」。历史上前端仍显示目标框，
+            # 用户填了就被当成 host 过滤导致 0 包；这里做后端兜底：忽略并记日志。
+            ignored_target, target = target, ""
         duration = _to_int(payload.get("duration"), int(cfg.get("default_duration", 30)),
                            3, int(cfg.get("max_duration", 180)))
         interface = payload.get("interface") or None
@@ -371,9 +379,77 @@ def start_job(payload: dict) -> dict:
         JOB.update({"state": "running", "mode": mode, "target": target or "全网",
                     "started_at": time.time(), "finished_at": 0, "logs": [],
                     "result": None, "error": ""})
+    if ignored_target:
+        log(f"[提示] 全网扫描模式忽略目标 {ignored_target}，抓取全部流量")
     log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s")
     threading.Thread(target=_worker, args=(mode, target, duration, interface, pcap), daemon=True).start()
     return {"ok": True}
+
+
+def report_index(limit: int = 50) -> list[dict]:
+    """列出 ``reports/`` 下的历史报告（界面「报告与导出 → 历史报告」用）。
+
+    只读目录，不生成、不修改任何报告；按修改时间倒序，最多 ``limit`` 条。
+
+    Args:
+        limit: 最多返回多少条（正数；调用方负责上限）。
+
+    Returns:
+        list[dict]: 每项键 ``name``（.md 文件名）/ ``size``（字节）/
+            ``mtime``（``YYYY-MM-DD HH:MM``）/ ``json``（同名 .json 存在时为文件名，
+            否则空串）。目录不可读时返回空列表，不抛异常。
+    """
+    try:
+        paths = sorted(REPORTS.glob("*.md"), key=lambda p: p.stat().st_mtime,
+                       reverse=True)
+    except OSError:
+        return []
+    out: list[dict] = []
+    for path in paths[:max(0, int(limit))]:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        sidecar = path.with_suffix(".json")
+        out.append({
+            "name": path.name,
+            "size": stat.st_size,
+            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
+            "json": sidecar.name if sidecar.is_file() else "",
+        })
+    return out
+
+
+def request_elevation() -> dict:
+    """UI「以管理员身份重启」：调用启动器已有的 UAC 提权路径。
+
+    提权本身是 Windows 的安全桌面确认，做不到静默；这里只负责发起请求：
+
+    * 已是管理员 → 直接返回 ``already_admin``，不重复弹 UAC；
+    * 用户点「是」→ 新进程以管理员权限启动（``core/app.py --elevated`` 会等旧实例
+      释放端口后再监听，避免两个实例抢同一个端口），随后旧服务退出；
+    * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
+      离线分析与链路体检不受影响。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
+            失败 ``{"ok": False, "error": "..."}``。
+    """
+    if tshark.is_admin():
+        return {"ok": True, "already_admin": True, "message": "当前已是管理员权限"}
+    try:
+        import app  # noqa: PLC0415  延迟导入：只有提权时才需要启动器模块
+        started = app.relaunch_as_admin()
+    except Exception as exc:  # noqa: BLE001  提权失败只回可读错误，不影响服务
+        return {"ok": False, "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
+    if not started:
+        return {"ok": False,
+                "error": "未获得管理员权限（已取消，或被系统策略禁止）。"
+                         "仍可继续使用离线分析与链路体检。"}
+    log("[提示] 已请求以管理员身份重启，等待 Windows 授权…")
+    threading.Timer(0.8, lambda: request_quit("正在以管理员权限重启，服务即将退出…")
+                    ).start()
+    return {"ok": True, "message": "已请求管理员权限，服务将重启"}
 
 
 # ---------------------------------------------------------------- 被动监听
@@ -733,6 +809,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"files": [{"name": p.name, "size": p.stat().st_size,
                                           "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))}
                                          for p in files[:50]]})
+        if path == "/api/reports":
+            return self._json({"ok": True, "files": report_index()})
         if path == "/api/report":
             q = urllib.parse.parse_qs(parsed.query)
             name = (q.get("path") or [""])[0]
@@ -768,6 +846,9 @@ class Handler(BaseHTTPRequestHandler):
             self._discard_body()
             request_quit("收到界面退出指令，正在停止本地服务…")
             return self._json({"ok": True, "message": "服务已停止，可以关闭本页面了"})
+        if parsed.path == "/api/elevate":
+            self._discard_body()
+            return self._json(request_elevation())
 
         if parsed.path == "/api/ai":
             payload = self._read_json()
