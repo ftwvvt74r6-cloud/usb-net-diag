@@ -9,9 +9,12 @@
 
 ---
 
+> **占位符**：下文命令里的 `<owner>` / `<repo>` / `<你的工作目录>` 不是可执行值，
+> 请替换成你自己的 GitHub 账号、仓库名和本机工作目录（例：`alice/my-netdiag`、`C:\src`）。
+
 ## 0. 先明确三条纪律（AI 必须遵守）
 
-1. **绝不 clone 到 U 盘**。仓库放本机（如 `D:\work\usb-net-diag`）；
+1. **绝不 clone 到 U 盘**。仓库放本机（如 `<你的工作目录>\usb-net-diag`）；
    便携运行环境（`tools/`、`harness/`）仍留在 U 盘，两者互不干扰。
 2. **绝不 `git add` 整个目录**。永远 `git add <明确路径>`，并在 `git status` 里逐条看过。
 3. **绝不强推**（`git push -f`）。真需要时先问人。
@@ -120,7 +123,7 @@ Test-NetConnection github.com -Port 443 |
 ### 4.2 用 git 自己验证（比 ping 准，因为它真的走 HTTPS）
 
 ```powershell
-git ls-remote --heads https://github.com/ftwvvt74r6-cloud/usb-net-diag.git
+git ls-remote --heads https://github.com/<owner>/<repo>.git
 ```
 
 | 输出 | 结论 |
@@ -148,7 +151,7 @@ netsh winhttp show proxy
 ```powershell
 git config --global http.proxy  http://127.0.0.1:7890
 git config --global https.proxy http://127.0.0.1:7890
-git ls-remote --heads https://github.com/ftwvvt74r6-cloud/usb-net-diag.git
+git ls-remote --heads https://github.com/<owner>/<repo>.git
 ```
 
 不需要代理时记得**清掉**，否则换到能直连的网络会全部失败：
@@ -223,7 +226,7 @@ cmdkey /list | findstr /i github
 ### 路线二：SSH 密钥（§4.4 已做就选这条）
 
 ```powershell
-git clone git@github.com:ftwvvt74r6-cloud/usb-net-diag.git D:\work\usb-net-diag
+git clone git@github.com:<owner>/<repo>.git <你的工作目录>\usb-net-diag
 ```
 
 ---
@@ -231,8 +234,8 @@ git clone git@github.com:ftwvvt74r6-cloud/usb-net-diag.git D:\work\usb-net-diag
 ## 6. clone 到本机（不要 U 盘）
 
 ```powershell
-New-Item -ItemType Directory -Force D:\work | Out-Null
-git clone https://github.com/ftwvvt74r6-cloud/usb-net-diag.git D:\work\usb-net-diag
+New-Item -ItemType Directory -Force <你的工作目录> | Out-Null
+git clone https://github.com/<owner>/<repo>.git <你的工作目录>\usb-net-diag
 ```
 
 期望：`Receiving objects: 100% (27/27)`，随后 `done.`
@@ -240,7 +243,7 @@ git clone https://github.com/ftwvvt74r6-cloud/usb-net-diag.git D:\work\usb-net-d
 验证仓库内容（应该 **27 个文件**、**没有** `tools/` 和 `harness/`）：
 
 ```powershell
-cd D:\work\usb-net-diag
+cd <你的工作目录>\usb-net-diag
 (git ls-files | Measure-Object).Count        # 期望 27
 git log --oneline                            # 期望只有一行 0bd5dbf
 Test-Path tools                               # 期望 False
@@ -268,7 +271,7 @@ U 盘目录（`<你的工作目录>`）里除了源码，还有 `tools/`、`harn
 拷完先对账，**不要急着 commit**：
 
 ```powershell
-cd D:\work\usb-net-diag
+cd <你的工作目录>\usb-net-diag
 git status --short
 ```
 
@@ -290,7 +293,7 @@ git status --short
 ## 8. 第一次提交与推送
 
 ```powershell
-cd D:\work\usb-net-diag
+cd <你的工作目录>\usb-net-diag
 git switch -c chore/import-usb-changes        # 不要在 main 上直接改
 git add core ui mcp skills tests config/*.example.json *.md VERSION start.bat doctor.bat
 git add docs scaffold scripts .github .gitignore .gitattributes
@@ -382,17 +385,17 @@ git config --global core.longpaths true
 
 # 2) 网络验证（先不改任何配置）
 Test-NetConnection github.com -Port 443 | Select-Object TcpTestSucceeded
-git ls-remote --heads https://github.com/ftwvvt74r6-cloud/usb-net-diag.git
+git ls-remote --heads https://github.com/<owner>/<repo>.git
 
 # 3) 若不通：代理
 git config --global http.proxy  http://127.0.0.1:7890
 git config --global https.proxy http://127.0.0.1:7890
-git ls-remote --heads https://github.com/ftwvvt74r6-cloud/usb-net-diag.git
+git ls-remote --heads https://github.com/<owner>/<repo>.git
 
 # 4) clone 到本机（不要 U 盘）
-New-Item -ItemType Directory -Force D:\work | Out-Null
-git clone https://github.com/ftwvvt74r6-cloud/usb-net-diag.git D:\work\usb-net-diag
-cd D:\work\usb-net-diag
+New-Item -ItemType Directory -Force <你的工作目录> | Out-Null
+git clone https://github.com/<owner>/<repo>.git <你的工作目录>\usb-net-diag
+cd <你的工作目录>\usb-net-diag
 (git ls-files | Measure-Object).Count      # 期望 27
 
 # 5) 并入 U 盘改动后对账 → 开分支 → 提交 → 推送 → 网页开 PR

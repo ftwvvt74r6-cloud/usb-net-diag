@@ -466,7 +466,7 @@
       "steps": [
         "严格按 docs/git-setup.md 的 §1→§9 顺序执行，不要跳步。",
         "§4 网络/代理是最大卡点：先用 Test-NetConnection + git ls-remote 判定直连是否可行，再决定是否配 http.proxy，或改走 SSH over 443（ssh.github.com:443）。",
-        "clone 到本机（如 D:\\work\\usb-net-diag），**不要 clone 到 U 盘**（exFAT 无权限位/无硬链接，且会被拔）。",
+        "clone 到本机（如 <你的工作目录>\\usb-net-diag），**不要 clone 到 U 盘**（exFAT 无权限位/无硬链接，且会被拔）。",
         "把 U 盘上该进库的文件拷进去（清单见 git-setup §7），**tools/ harness/ logs/ reports/ dist/ captures/*.pcap 一律不拷**。",
         "git status --short 逐条对账后再 commit；commit 走新分支 + PR，不要直推 main。",
         "网页上打开分支保护（Require PR + Require check 'syntax-and-contract'），并把 AGENTS.md 提交到仓库根。"

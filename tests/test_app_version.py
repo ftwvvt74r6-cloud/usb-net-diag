@@ -15,7 +15,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "core"))
+
+from core.version import read_version  # noqa: E402
 
 import analyzer  # noqa: E402
 import diagpack  # noqa: E402
@@ -27,7 +30,9 @@ class AppVersionTest(unittest.TestCase):
     """``server.APP_VERSION`` 与 ``VERSION`` 文件的一致性。"""
 
     def test_app_version_matches_version_file(self):
-        expected = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        # 期望值也走公共读取函数：VERSION 带 UTF-8 BOM 时，裸读会把 BOM 当成
+        # 版本号的一部分，这个用例会假红。函数本身的 BOM 行为由下面几条用例守。
+        expected = read_version()
         self.assertEqual(
             server.APP_VERSION, expected,
             f"server.APP_VERSION={server.APP_VERSION!r} 与 VERSION={expected!r} 不一致",

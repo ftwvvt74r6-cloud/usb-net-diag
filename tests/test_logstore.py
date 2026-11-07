@@ -19,7 +19,10 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "core"))
+
+from core.version import read_version  # noqa: E402
 
 import app        # noqa: E402
 import diagnose   # noqa: E402
@@ -111,8 +114,8 @@ class LayoutAndSnapshotTests(_TempLogCase):
                     "console_encoding", "config_sha256", "started_at"}
         self.assertEqual(required - set(data), set())
         self.assertEqual(data["entry"], "test")
-        self.assertEqual(data["version"], (ROOT / "VERSION").read_text(
-            encoding="utf-8").strip())
+        # 期望值走公共读取函数：VERSION 带 BOM 时裸读会把 BOM 读进版本号。
+        self.assertEqual(data["version"], read_version())
         self.assertNotIn("api_key", path.read_text(encoding="utf-8"))
         self.assertEqual(info["entry"], "test")
 
