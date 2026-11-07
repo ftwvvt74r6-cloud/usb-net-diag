@@ -36,6 +36,11 @@ import threading
 import traceback
 from pathlib import Path
 
+try:                                              # 扁平导入：core/ 在 sys.path
+    from version import read_version
+except ModuleNotFoundError:                        # 包方式：仓库根在 sys.path
+    from core.version import read_version
+
 ROOT = Path(__file__).resolve().parents[1]
 
 #: 日志根目录环境变量；测试必须用它把日志指到临时目录，禁止写仓库 ``logs/``。
@@ -426,10 +431,7 @@ def _env_info() -> dict:
         "config_sha256": "",
         "started_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
     }
-    try:
-        info["version"] = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    except OSError:
-        pass
+    info["version"] = read_version(ROOT)
     try:
         tshark = _import_core("tshark")
         ts = tshark.find_tshark()
