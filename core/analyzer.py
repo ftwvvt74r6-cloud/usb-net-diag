@@ -143,24 +143,8 @@ def _flag(v) -> bool:
     return _parse_flag(v)
 
 
-def _flag_occurrences(v) -> int:
-    """tshark 逗号聚合值里「真」分段的个数。
-
-    ``tcp.analysis.duplicate_ack`` 的取值是 ``"1,1"`` 这种聚合串：它表示同一帧里
-    出现了两次重复 ACK。方向判定只看「帧数 > 0」，但排障证据需要区分
-    「2 帧 / 4 次」，所以这里单独数出现次数。
-
-    Args:
-        v: tshark 原始值，可能是 ``"1"`` / ``"1,1"`` / ``"0"`` / ``""`` / ``None``。
-
-    Returns:
-        int: 判为真的分段数（``"1,1"`` → 2；空值或全假 → 0）。
-    """
-    return sum(1 for part in str(v or "").split(",") if _parse_flag(part))
-
-
 def _new_direction_stats() -> dict:
-    """分方向统计的初始结构：``c2s`` / ``s2c`` 各四项，外加 ``unknown`` 帧数。
+    """分方向统计的初始结构：``c2s`` / ``s2c`` 各三项，外加 ``unknown`` 帧数。
 
     这是 :func:`collect` 的**内部中间结果**，只挂在 ``st["dir"]`` 上供
     :func:`build_findings` 读取；**不进** ``meta`` / ``metrics``，所以不会改变
@@ -169,12 +153,100 @@ def _new_direction_stats() -> dict:
     Returns:
         dict: ``{"c2s": {...}, "s2c": {...}, "unknown": 0}``；每侧含
             ``retrans``（数据重传帧数）/ ``dup_ack``（重复 ACK 帧数）/
-            ``dup_ack_occ``（重复 ACK 出现次数）/ ``packets``（该方向 TCP 帧数）。
+            ``packets``（该方向 TCP 帧数）。
     """
     def _side() -> dict:
-        return {"retrans": 0, "dup_ack": 0, "dup_ack_occ": 0, "packets": 0}
+        return {"retrans": 0, "dup_ack": 0, "packets": 0}
 
     return {"c2s": _side(), "s2c": _side(), "unknown": 0}
+
+
+def _observe_direction(sid: str, src: str, dst: str, row: dict,
+                       dir_client: dict[str, dict]) -> None:
+    """用握手帧维护每条 TCP 流的方向基准（客户端是谁）。
+
+    纯 SYN 的发起方、SYN-ACK 的目的方就是客户端。同一 stream 若已经确定
+    client，又出现一个**不同端点**的纯 SYN（TCP 同时打开 / 罕见握手），方向会
+    随「最后一个 SYN」漂移；此时把该流标记为方向歧义（``ambiguous=True``），
+    保留原 client 不覆盖，后续帧由 :func:`_accumulate_dir` 一律计入 ``unknown``。
+
+    Note:
+        端口扫描的多次 SYN 各自落在不同 ``tcp.stream``，互不影响，不会被误判
+        成方向歧义；同一端点重发的 SYN（``tcp.stream`` 相同、src 相同）也不算。
+
+    Args:
+        sid: tshark 的 ``tcp.stream``。
+        src: 本帧源地址。
+        dst: 本帧目的地址。
+        row: 本帧的 tshark 字段字典（只读 ``tcp.flags.syn`` / ``tcp.flags.ack``）。
+        dir_client: 流方向基准表，值形如 ``{"client": <ip>, "ambiguous": bool}``；
+            由本函数**就地更新**。
+    """
+    if not _flag(row.get("tcp.flags.syn")):
+        return
+    state = dir_client.get(sid)
+    if _flag(row.get("tcp.flags.ack")):
+        # SYN-ACK：目的方是客户端；已有基准（含歧义）时不覆盖。
+        if state is None:
+            dir_client[sid] = {"client": dst, "ambiguous": False}
+        return
+    if state is None:
+        dir_client[sid] = {"client": src, "ambiguous": False}
+    elif state["client"] != src:
+        state["ambiguous"] = True
+
+
+def _dir_of(sid: str, src: str, dir_client: dict[str, dict]) -> str | None:
+    """纯函数：判断一帧属于哪个方向桶。
+
+    Args:
+        sid: tshark 的 ``tcp.stream``。
+        src: 本帧源地址。
+        dir_client: :func:`_observe_direction` 维护的方向基准表。
+
+    Returns:
+        str | None: ``"c2s"`` / ``"s2c"``；方向未定（没看到握手）或该流方向
+            歧义时返回 ``None``，调用方计入 ``unknown``，不用端口大小去猜。
+    """
+    state = dir_client.get(sid)
+    if not state or state.get("ambiguous"):
+        return None
+    return "c2s" if src == state["client"] else "s2c"
+
+
+def _accumulate_dir(st: dict, sid: str, src: str, dst: str, row: dict,
+                    dir_client: dict[str, dict]) -> str | None:
+    """把一帧 TCP 记进 ``st["dir"]`` 的分方向桶，返回所属桶名。
+
+    先 :func:`_observe_direction` 更新方向基准，再按 :func:`_dir_of` 分桶：
+    方向未定 / 歧义的帧只累加 ``unknown``，不参与重传与重复 ACK 归属。
+    SYN 重发仍只进 ``st["syn_retrans"]``，不混入方向 ``retrans``（与既有口径一致）。
+
+    Args:
+        st: :func:`collect` 的统计字典，读取并更新其中的 ``st["dir"]``。
+        sid: tshark 的 ``tcp.stream``。
+        src: 本帧源地址。
+        dst: 本帧目的地址。
+        row: 本帧的 tshark 字段字典（``tcp.flags.*`` / ``tcp.analysis.*``）。
+        dir_client: 方向基准表（见 :func:`_observe_direction`）。
+
+    Returns:
+        str | None: ``"c2s"`` / ``"s2c"``；方向未定或歧义时返回 ``None``。
+    """
+    _observe_direction(sid, src, dst, row, dir_client)
+    bucket_name = _dir_of(sid, src, dir_client)
+    if bucket_name is None:
+        st["dir"]["unknown"] += 1
+        return None
+    bucket = st["dir"][bucket_name]
+    bucket["packets"] += 1
+    # SYN 重发说明对端没回应（连接建立问题），不能算作链路数据丢包。
+    if (_flag(row.get("tcp.analysis.retransmission"))
+            and not _flag(row.get("tcp.flags.syn"))):
+        bucket["retrans"] += 1
+    if _flag(row.get("tcp.analysis.duplicate_ack")):
+        bucket["dup_ack"] += 1
+    return bucket_name
 
 
 def _port(v) -> int:
@@ -388,8 +460,9 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
 
     sink: dict = {}
     # 每条流的方向基准：看到 SYN（客户端发起）或 SYN-ACK（服务端回应）后才确定。
-    # 此前抓到的帧属于「方向不明」，计入 st["dir"]["unknown"]，不用端口大小去猜。
-    dir_client: dict[str, str] = {}
+    # 此前抓到的帧属于「方向不明」，计入 st["dir"]["unknown"]，不用端口大小去猜；
+    # 同一流出现不同端点的纯 SYN 时标记 ``ambiguous``，后续帧同样进 unknown。
+    dir_client: dict[str, dict] = {}
     header: list[str] | None = None
     reader_lines = iter_lines(args, timeout=1800, sink=sink)
 
@@ -448,14 +521,6 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             is_syn, is_ack = _flag(r.get("tcp.flags.syn")), _flag(r.get("tcp.flags.ack"))
             is_rst, is_fin = _flag(r.get("tcp.flags.reset")), _flag(r.get("tcp.flags.fin"))
             tlen = int(_num(r.get("tcp.len")))
-
-            # 方向基准只认握手：客户端 SYN 的发起方、SYN-ACK 的目的方就是客户端。
-            # 抓包从中途开始（没看到握手）时保持未知，不拿端口启发式猜方向。
-            if is_syn:
-                if is_ack:
-                    dir_client.setdefault(sid, dst)
-                else:
-                    dir_client[sid] = src
 
             if not s["client"]:
                 try:
@@ -524,17 +589,9 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
                 st["lost"] += 1
                 s["lost"] += 1
 
-            # 分方向累计：方向未定的帧只计 unknown，不参与重传/重复 ACK 归属。
-            if sid in dir_client:
-                bucket = st["dir"]["c2s" if src == dir_client[sid] else "s2c"]
-                bucket["packets"] += 1
-                if is_retrans and not is_syn:
-                    bucket["retrans"] += 1
-                if _flag(dup_raw):
-                    bucket["dup_ack"] += 1
-                    bucket["dup_ack_occ"] += _flag_occurrences(dup_raw)
-            else:
-                st["dir"]["unknown"] += 1
+            # 分方向累计（纯函数分桶，见 _accumulate_dir）：方向未定 / 歧义的帧
+            # 只计 unknown，不参与重传 / 重复 ACK 归属。
+            _accumulate_dir(st, sid, src, dst, r, dir_client)
             rtt = _num(r.get("tcp.analysis.ack_rtt"))
             if rtt > 0:
                 s["rtt"].append(rtt * 1000.0)
@@ -817,8 +874,8 @@ def _retrans_direction(st: dict) -> str | None:
     重传本身只说明「本端重发了」，不能单独定向 —— 可能是本端上行丢，
     也可能是对端 ACK 丢 —— 所以必须两侧证据同时成立才下方向结论。
 
-    判定只用**帧数 > 0**，不用出现次数：``"1,1"`` 会让出现次数变 2，
-    但方向是否存在与次数无关。
+    判定只用**帧数 > 0**：``"1,1"`` 是同一帧里出现两次，仍按一帧计，
+    方向是否存在与出现次数无关。
 
     Args:
         st: :func:`collect` 的统计字典；``st["dir"]`` 缺失（旧测试的合成 st）

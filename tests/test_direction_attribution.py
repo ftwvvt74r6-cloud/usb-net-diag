@@ -3,6 +3,10 @@
 守的口径：
 
 * **方向统计在 collect() 内部累计**（``st["dir"]``），只用于文案，**不进报告**；
+* **分桶走 ``_accumulate_dir`` 纯函数**：c2s/s2c 计数可以用合成帧回归，
+  不需要 tshark（把分桶改成「永远 c2s」必须让用例变红）；
+* **同一 stream 出现两个不同端点的纯 SYN → 方向歧义**：不覆盖原 client，
+  后续帧一律计入 ``unknown``；端口扫描的每个 SYN 各自一条 stream，不受影响；
 * **只有 dup-ACK 证据才定向**：UP = c2s 有数据重传且 s2c 有重复 ACK，
   DOWN 反之，两侧同时成立才是 BIDIR；其余一律退回现有通用重传行；
 * **严重度阈值不变**：方向只改 finding/advice 文案，不改等级；
@@ -13,8 +17,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
+import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -24,7 +30,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "core"))
 
 from core import analyzer                                             # noqa: E402
-from core.analyzer import _retrans_direction, build_findings          # noqa: E402
+from core.analyzer import (                                           # noqa: E402
+    _accumulate_dir, _dir_of, _retrans_direction, build_findings,
+)
 from core.tshark import find_tshark                                   # noqa: E402
 
 COPY_PATH = ROOT / "core" / "copy" / "zh-CN.json"
@@ -66,16 +74,44 @@ def _empty_m() -> dict:
     }
 
 
-def _dir(c2s_retrans=0, c2s_dup=0, c2s_occ=0,
-         s2c_retrans=0, s2c_dup=0, s2c_occ=0, unknown=0) -> dict:
+def _dir(c2s_retrans=0, c2s_dup=0, s2c_retrans=0, s2c_dup=0, unknown=0) -> dict:
     """按 ``collect()`` 的形状造分方向统计（默认两侧全 0）。"""
     return {
-        "c2s": {"retrans": c2s_retrans, "dup_ack": c2s_dup,
-                "dup_ack_occ": c2s_occ, "packets": 5},
-        "s2c": {"retrans": s2c_retrans, "dup_ack": s2c_dup,
-                "dup_ack_occ": s2c_occ, "packets": 6},
+        "c2s": {"retrans": c2s_retrans, "dup_ack": c2s_dup, "packets": 5},
+        "s2c": {"retrans": s2c_retrans, "dup_ack": s2c_dup, "packets": 6},
         "unknown": unknown,
     }
+
+
+def _frame(syn: int = 0, ack: int = 0, retrans: int = 0, dup: str = "") -> dict:
+    """单个 TCP 帧的最小 tshark 字段字典（合成帧，不需要 tshark）。"""
+    return {
+        "tcp.flags.syn": str(syn),
+        "tcp.flags.ack": str(ack),
+        "tcp.analysis.retransmission": "1" if retrans else "",
+        "tcp.analysis.duplicate_ack": dup,
+    }
+
+
+def _drive(frames: list[tuple[str, str, dict]], sid: str = "0") -> tuple[dict, dict]:
+    """把合成帧逐条喂给 ``_accumulate_dir``，返回 ``(st["dir"], dir_client)``。"""
+    st = {"dir": analyzer._new_direction_stats()}
+    dir_client: dict = {}
+    for src, dst, row in frames:
+        _accumulate_dir(st, sid, src, dst, row, dir_client)
+    return st["dir"], dir_client
+
+
+def _generated_sample(name: str, out_dir: str) -> Path:
+    """用 scaffold 的纯标准库生成器造样本（不依赖 scapy / tshark）。"""
+    spec = importlib.util.spec_from_file_location(
+        "_netdiag_gen_pcap", ROOT / "scaffold" / "tests" / "fixtures" / "gen_pcap.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    frames = getattr(mod, f"case_{name}")()
+    path = Path(out_dir) / f"{name}.pcap"
+    mod.write_pcap(path, frames)
+    return path
 
 
 def _stream(stream: str = "0", retrans: int = 1) -> dict:
@@ -100,26 +136,122 @@ def _retrans_row(rows: list[dict]) -> dict:
     return next(r for r in rows if r["severity"] in ("严重", "警告", "提示"))
 
 
-class FlagOccurrenceTests(unittest.TestCase):
-    """``dup_ack`` 的逗号聚合值：帧数与出现次数必须分开算。"""
-
-    def test_comma_aggregated_values(self):
-        self.assertEqual(analyzer._flag_occurrences("1,1"), 2)
-        self.assertEqual(analyzer._flag_occurrences("1"), 1)
-        self.assertEqual(analyzer._flag_occurrences("0,1"), 1)
-        self.assertEqual(analyzer._flag_occurrences("True,False"), 1)
-        self.assertEqual(analyzer._flag_occurrences(""), 0)
-        self.assertEqual(analyzer._flag_occurrences(None), 0)
+class DirectionStatsShapeTests(unittest.TestCase):
+    """V1：``st["dir"]`` 的固定结构（两侧三项 + unknown）。"""
 
     def test_direction_stats_shape(self):
-        """V1：``st["dir"]`` 的固定结构（两侧四项 + unknown）。"""
         stats = analyzer._new_direction_stats()
         self.assertEqual(set(stats), {"c2s", "s2c", "unknown"})
         for side in ("c2s", "s2c"):
-            self.assertEqual(set(stats[side]),
-                             {"retrans", "dup_ack", "dup_ack_occ", "packets"})
+            self.assertEqual(set(stats[side]), {"retrans", "dup_ack", "packets"})
             self.assertTrue(all(v == 0 for v in stats[side].values()))
         self.assertIsInstance(stats["unknown"], int)
+
+
+class BucketAssignmentTests(unittest.TestCase):
+    """C1：分桶必须按方向归属，不能「永远算 c2s」。
+
+    合成帧的帧数取自真实样本的实测值（``collect()`` + tshark 4.7.4）：
+    ``faults_demo`` c2s 21 / s2c 15，``tcp_retransmission`` c2s 6 / s2c 5。
+    真实 pcap 的同一组数字由 ``CollectDirectionTests`` /
+    ``TcpRetransmissionIntegrationTests`` 在 tshark 可用时再核一遍。
+    """
+
+    C, S = "192.168.1.100", "10.0.0.5"
+
+    def test_demo_bucket_counts_match_measured(self):
+        """``faults_demo.pcap`` 实测 c2s 21 / s2c 15（含 c2s 重传 2）。"""
+        frames = [(self.C, self.S, _frame(syn=1))]
+        frames += [(self.C, self.S, _frame()) for _ in range(18)]
+        frames += [(self.C, self.S, _frame(retrans=1)) for _ in range(2)]
+        frames += [(self.S, self.C, _frame()) for _ in range(15)]
+        stats, dir_client = _drive(frames)
+        self.assertEqual(_dir_of("0", self.C, dir_client), "c2s")
+        self.assertEqual(_dir_of("0", self.S, dir_client), "s2c")
+        self.assertEqual(stats["c2s"], {"retrans": 2, "dup_ack": 0, "packets": 21})
+        self.assertEqual(stats["s2c"], {"retrans": 0, "dup_ack": 0, "packets": 15})
+        self.assertEqual(stats["unknown"], 0)
+        self.assertEqual(stats["c2s"]["packets"] + stats["s2c"]["packets"], 36)
+
+    def test_tcp_retransmission_bucket_counts_match_measured(self):
+        """``tcp_retransmission.pcap`` 实测 c2s 6 / s2c 5、c2s 重传 1、s2c dup-ACK 2。"""
+        frames = [
+            (self.C, self.S, _frame(syn=1)),
+            (self.S, self.C, _frame(syn=1, ack=1)),
+            (self.C, self.S, _frame(ack=1)),
+            (self.C, self.S, _frame()),
+            (self.S, self.C, _frame(ack=1)),
+            (self.C, self.S, _frame()),
+            (self.S, self.C, _frame(ack=1, dup="1,1")),
+            (self.C, self.S, _frame()),
+            (self.S, self.C, _frame(ack=1, dup="1,1")),
+            (self.C, self.S, _frame(retrans=1)),
+            (self.S, self.C, _frame(ack=1)),
+        ]
+        stats, _ = _drive(frames)
+        self.assertEqual(stats["c2s"], {"retrans": 1, "dup_ack": 0, "packets": 6})
+        self.assertEqual(stats["s2c"], {"retrans": 0, "dup_ack": 2, "packets": 5})
+        self.assertEqual(stats["unknown"], 0)
+        self.assertEqual(stats["c2s"]["packets"] + stats["s2c"]["packets"], 11)
+
+    def test_frames_before_handshake_are_unknown(self):
+        """没看到握手的抓包：不许猜方向，全部计入 unknown。"""
+        stats, _ = _drive([(self.C, self.S, _frame())])
+        self.assertEqual(stats["unknown"], 1)
+        self.assertEqual(stats["c2s"]["packets"], 0)
+        self.assertEqual(stats["s2c"]["packets"], 0)
+
+    def test_syn_retransmission_is_not_data_retransmission(self):
+        """同一端点的 SYN 重发只算握手帧，不混入方向 retrans。"""
+        stats, _ = _drive([
+            (self.C, self.S, _frame(syn=1)),
+            (self.C, self.S, _frame(syn=1, retrans=1)),
+        ])
+        self.assertEqual(stats["c2s"]["packets"], 2)
+        self.assertEqual(stats["c2s"]["retrans"], 0)
+
+
+class DirectionAmbiguityTests(unittest.TestCase):
+    """C2：同一 stream 出现两个不同端点的纯 SYN → 方向歧义，不许覆盖原 client。"""
+
+    A, B = "192.168.1.100", "10.0.0.5"
+
+    def test_two_pure_syns_make_stream_ambiguous(self):
+        """TCP 同时打开 / 罕见握手：两个纯 SYN 不同端点 → 后续帧全部 unknown。"""
+        st = {"dir": analyzer._new_direction_stats()}
+        dir_client: dict = {}
+        _accumulate_dir(st, "0", self.A, self.B, _frame(syn=1), dir_client)
+        _accumulate_dir(st, "0", self.B, self.A, _frame(syn=1), dir_client)
+        _accumulate_dir(st, "0", self.A, self.B, _frame(), dir_client)
+        _accumulate_dir(st, "0", self.B, self.A, _frame(), dir_client)
+        self.assertEqual(dir_client["0"]["client"], self.A,
+                         "原 client 不许被后一个 SYN 覆盖")
+        self.assertTrue(dir_client["0"]["ambiguous"])
+        self.assertEqual(st["dir"]["c2s"]["packets"], 1, "歧义前的帧保持原归属")
+        self.assertEqual(st["dir"]["s2c"]["packets"], 0)
+        self.assertEqual(st["dir"]["unknown"], 3, "第二个 SYN 及其后帧一律计入 unknown")
+
+    def test_same_endpoint_syn_retransmission_is_not_ambiguous(self):
+        """同一端点重发 SYN 是正常重传，不是歧义。"""
+        st = {"dir": analyzer._new_direction_stats()}
+        dir_client: dict = {}
+        _accumulate_dir(st, "0", self.A, self.B, _frame(syn=1), dir_client)
+        _accumulate_dir(st, "0", self.A, self.B, _frame(syn=1), dir_client)
+        self.assertFalse(dir_client["0"]["ambiguous"])
+        self.assertEqual(st["dir"]["c2s"]["packets"], 2)
+        self.assertEqual(st["dir"]["unknown"], 0)
+
+    def test_port_scan_streams_are_not_ambiguous(self):
+        """端口扫描：每次 SYN 一条独立 stream → 各自 c2s，绝不能判成歧义。"""
+        st = {"dir": analyzer._new_direction_stats()}
+        dir_client: dict = {}
+        for sid in ("0", "1", "2", "3"):
+            _accumulate_dir(st, sid, self.A, self.B, _frame(syn=1), dir_client)
+            _accumulate_dir(st, sid, self.A, self.B, _frame(), dir_client)
+        self.assertEqual(len(dir_client), 4)
+        self.assertFalse(any(s["ambiguous"] for s in dir_client.values()))
+        self.assertEqual(st["dir"]["c2s"]["packets"], 8)
+        self.assertEqual(st["dir"]["unknown"], 0)
 
 
 class DirectionHintTests(unittest.TestCase):
@@ -152,11 +284,6 @@ class DirectionHintTests(unittest.TestCase):
         self.assertIsNone(_retrans_direction({}))
         self.assertIsNone(_retrans_direction({"dir": {}}))
 
-    def test_occurrence_count_does_not_change_direction(self):
-        """``"1,1"`` 让出现次数变 2，但判定只看帧数。"""
-        self.assertEqual(
-            _retrans_direction({"dir": _dir(c2s_retrans=1, s2c_dup=1, s2c_occ=4)}), "up")
-
 
 class BuildFindingsDirectionTests(unittest.TestCase):
     """V2/V3/V4：行文案跟着方向走，严重度与通用行保持原口径。"""
@@ -165,7 +292,7 @@ class BuildFindingsDirectionTests(unittest.TestCase):
         self.copy = _copy_table()
 
     def test_up_row_uses_up_copy_and_advice(self):
-        row = _retrans_row(_rows({"dir": _dir(c2s_retrans=1, s2c_dup=2, s2c_occ=4)}))
+        row = _retrans_row(_rows({"dir": _dir(c2s_retrans=1, s2c_dup=2)}))
         self.assertIn("c2s 重传 1", row["finding"])
         self.assertIn("s2c 重复 ACK 2", row["finding"])
         self.assertNotIn("{", row["finding"], "占位符必须全部被 format 消费")
@@ -254,7 +381,7 @@ class CopyKeyTests(unittest.TestCase):
 
 @unittest.skipIf(NO_TSHARK, "没有 tshark，跳过现跑校验")
 class CollectDirectionTests(unittest.TestCase):
-    """V1：现跑 demo，``st["dir"]`` 必须真实累计；报告里不许出现新键。"""
+    """V1/C1：现跑 demo，``st["dir"]`` 必须真实累计；报告里不许出现新键。"""
 
     def test_collect_accumulates_direction_stats(self):
         st, err = analyzer.collect(SAMPLE)
@@ -263,12 +390,21 @@ class CollectDirectionTests(unittest.TestCase):
         self.assertIsInstance(stats, dict)
         self.assertEqual(set(stats), {"c2s", "s2c", "unknown"})
         for side in ("c2s", "s2c"):
-            self.assertEqual(set(stats[side]),
-                             {"retrans", "dup_ack", "dup_ack_occ", "packets"})
+            self.assertEqual(set(stats[side]), {"retrans", "dup_ack", "packets"})
         total = stats["c2s"]["packets"] + stats["s2c"]["packets"] + stats["unknown"]
         self.assertEqual(total, st["tcp_packets"],
                          "每个 TCP 帧必须且只能落进一个方向桶（或 unknown）")
         self.assertGreater(stats["c2s"]["packets"] + stats["s2c"]["packets"], 0)
+
+    def test_demo_bucket_counts_match_measured(self):
+        """``faults_demo.pcap`` 实测 c2s 21 / s2c 15（tshark 4.7.4，重测确认）。"""
+        st, err = analyzer.collect(SAMPLE)
+        self.assertEqual(err, "")
+        stats = st["dir"]
+        self.assertEqual((stats["c2s"]["packets"], stats["s2c"]["packets"]), (21, 15))
+        self.assertEqual((stats["c2s"]["retrans"], stats["s2c"]["retrans"]), (2, 0))
+        self.assertEqual((stats["c2s"]["dup_ack"], stats["s2c"]["dup_ack"]), (0, 0))
+        self.assertEqual(stats["unknown"], 0)
 
     def test_report_json_has_no_direction_keys(self):
         res = analyzer.analyze(SAMPLE)
@@ -278,6 +414,47 @@ class CollectDirectionTests(unittest.TestCase):
             bad = [k for k in res[block] if "c2s" in str(k).lower()
                    or "s2c" in str(k).lower()]
             self.assertEqual(bad, [], f"{block} 出现方向字段：{bad}")
+
+
+@unittest.skipIf(NO_TSHARK, "没有 tshark，跳过现跑校验")
+class TcpRetransmissionIntegrationTests(unittest.TestCase):
+    """C1 集成断言：真实 ``tcp_retransmission`` 样本必须端到端产出 UP 行。
+
+    样本由 ``scaffold/tests/fixtures/gen_pcap.py`` 在临时目录里现生成：
+    生成器是纯标准库、确定性输出，sha256 与 ``captures/`` 外的样本一致，
+    因此不需要把被 ``.gitignore`` 忽略的 ``*.pcap`` 提交进仓库。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory(prefix="netdiag_tcp_")
+        cls.pcap = _generated_sample("tcp_retransmission", cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_collect_buckets_match_measured(self):
+        """``tcp_retransmission.pcap`` 实测 c2s 6 / s2c 5（重测确认）。"""
+        st, err = analyzer.collect(self.pcap)
+        self.assertEqual(err, "")
+        stats = st["dir"]
+        self.assertEqual((stats["c2s"]["packets"], stats["s2c"]["packets"]), (6, 5))
+        self.assertEqual(stats["c2s"]["retrans"], 1)
+        self.assertEqual(stats["s2c"]["dup_ack"], 2)
+        self.assertEqual(stats["unknown"], 0)
+
+    def test_analyze_emits_up_finding(self):
+        """真正的验收：分析结果里必须有「疑似上行丢包」且等级为「严重」。"""
+        res = analyzer.analyze(str(self.pcap))
+        self.assertTrue(res.get("ok"), res.get("error"))
+        rows = [r for r in res["rows"]
+                if r["category"] == "传输质量" and r["severity"] == "严重"]
+        self.assertTrue(rows, "tcp_retransmission 必须产出严重级传输质量行")
+        row = rows[0]
+        self.assertIn("疑似上行丢包", row["finding"])
+        self.assertIn("c2s 重传 1", row["finding"])
+        self.assertEqual(row["severity"], "严重")
 
 
 if __name__ == "__main__":
