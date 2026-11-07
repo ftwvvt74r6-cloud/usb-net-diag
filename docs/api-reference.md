@@ -3047,11 +3047,11 @@ Returns:
 | `passive_status` | function | 435 | ✅ |
 | `Handler` | class | 453 | ✅ |
 | `Handler.log_message` | method | 499 | ✅ |
-| `Handler.do_GET` | method | 632 | ✅ |
-| `Handler.do_POST` | method | 649 | ✅ |
-| `DiagServer` | class | 826 | ✅ |
-| `create_server` | function | 838 | ✅ |
-| `main` | function | 885 | ✅ |
+| `Handler.do_GET` | method | 637 | ✅ |
+| `Handler.do_POST` | method | 654 | ✅ |
+| `DiagServer` | class | 831 | ✅ |
+| `create_server` | function | 843 | ✅ |
+| `main` | function | 890 | ✅ |
 
 ### `touch`
 
