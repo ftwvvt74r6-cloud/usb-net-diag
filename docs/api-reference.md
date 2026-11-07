@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**29** 个（有模块说明 29 个）
-- 公开符号：**204** 个（有 docstring 204 个，合格 204 个）
+- 公开符号：**205** 个（有 docstring 205 个，合格 205 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -1574,9 +1574,9 @@ Returns:
 | `load_config` | function | 44 | ✅ |
 | `log` | function | 76 | ✅ |
 | `bpf_for` | function | 89 | ✅ |
-| `capture_live` | function | 117 | ✅ |
-| `run_scan` | function | 235 | ✅ |
-| `main` | function | 421 | ✅ |
+| `capture_live` | function | 196 | ✅ |
+| `run_scan` | function | 354 | ✅ |
+| `main` | function | 540 | ✅ |
 
 ### `load_config`
 
@@ -1642,18 +1642,24 @@ def capture_live(target: str='', duration: int=30, interface: str | None=None, l
 Args:
     target: 抓包目标（转成 BPF）；空表示全网。
     duration: 抓包秒数。
-    interface: 网卡序号或名称关键字；空则自动挑选（见 ``tshark.pick_interface``）。
+    interface: 网卡序号或名称关键字；空则按 :func:`tshark.order_interfaces`
+        的候选顺序逐块探测（每块 2 秒、最多 5 块），取第一块真有流量的；
+        全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时先抓该网卡，
+        若它 0 包仍会按候选顺序换卡重试。
     logger: 日志回调。
 
 Returns:
     dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
         "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
         "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-        环境问题，前端据此提示改用离线分析。
+        环境问题，前端据此提示改用离线分析。抓满 0 包/0 字节时不直接失败，
+        会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+        ``--interfaces`` / ``--interface`` 指引与常见原因。
 
 Note:
     返回前会等文件大小稳定（最多 3 秒）。tshark 进程退出 ≠ 数据已落盘，
     在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
+    0 包的空抓包文件会被删除，避免在 ``captures/`` 留下无法分析的垃圾。
 ```
 
 ### `run_scan`
@@ -3465,10 +3471,11 @@ Returns:
 | `iter_lines` | function | 135 | ✅ |
 | `version` | function | 210 | ✅ |
 | `list_interfaces` | function | 231 | ✅ |
-| `pick_interface` | function | 272 | ✅ |
-| `probe_interface` | function | 295 | ✅ |
-| `is_admin` | function | 320 | ✅ |
-| `npcap_installed` | function | 337 | ✅ |
+| `order_interfaces` | function | 299 | ✅ |
+| `pick_interface` | function | 318 | ✅ |
+| `probe_interface` | function | 347 | ✅ |
+| `is_admin` | function | 372 | ✅ |
+| `npcap_installed` | function | 389 | ✅ |
 
 ### `short_name`
 
@@ -3608,6 +3615,29 @@ Returns:
         找不到 tshark 或没有网卡时返回空列表。
 ```
 
+### `order_interfaces`
+
+```python
+def order_interfaces(interfaces: list[dict]) -> list[dict]
+```
+
+```text
+按候选优先级排序（物理优先、虚拟靠后），**不删除**任何网卡。
+
+用户机器上常同时有 WLAN、断开的以太网、Clash/Meta TUN、VMware、蓝牙、
+Wi-Fi Direct 等一堆网卡；名字看不出哪块通外网，但「物理网卡优先」能先把
+最可能通外网的那块排前面，再交给 :func:`probe_interface` 用真实流量验证。
+
+Args:
+    interfaces: ``list_interfaces()`` 的返回值。
+
+Returns:
+    list[dict]: 新列表，顺序为「以太网/WLAN 等物理网卡 → 其它未命中
+        :data:`SKIP_HINTS` 的网卡 → Meta/TUN 等 VPN 虚拟网卡 → VMware/蓝牙/
+        回环/extcap 伪接口」。同类内按 :data:`PREFER_HINTS` 与 ``index``
+        稳定排序；输入为空返回 ``[]``。
+```
+
 ### `pick_interface`
 
 ```python
@@ -3615,10 +3645,15 @@ def pick_interface(interfaces: list[dict]) -> dict | None
 ```
 
 ```text
-挑一块「像样」的默认网卡。
+挑一块「像样」的默认网卡（按名字猜，不验证是否有流量）。
 
 按业务优先级：先按 :data:`PREFER_HINTS` 找物理网卡（以太网/Wi-Fi），
-再用 :data:`SKIP_HINTS` 排掉回环、蓝牙、虚拟网卡（VMware/Hyper-V 等）。
+再用 :data:`SKIP_HINTS` 把回环、蓝牙、虚拟网卡（VMware/Meta/Hyper-V 等）
+降到后面。**只排序不删除**：虚拟网卡全被跳过时会退回完整列表，
+避免「唯一可用的就是 VPN 网卡」时返回 ``None``。
+
+注意：本函数只看名字，断开的以太网也会被选中；要真正选到有流量的网卡，
+调用方应先用 :func:`probe_interface` 按 :func:`order_interfaces` 的顺序探测。
 
 Args:
     interfaces: ``list_interfaces()`` 的返回值。
