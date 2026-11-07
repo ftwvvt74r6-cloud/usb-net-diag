@@ -16,10 +16,59 @@ from __future__ import annotations
 
 import ctypes
 import os
+import socket
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
 IS_WINDOWS = os.name == "nt"
+
+
+# ---------------------------------------------------------------- 只读网络 API
+class _MIB_IPFORWARDROW(ctypes.Structure):
+    """``GetBestRoute`` 的返回结构（14 个 DWORD，Windows SDK 原样映射）。
+
+    ``dwForwardNextHop`` 就是默认路由的下一跳（即默认网关）；用 API 而不是解析
+    ``ipconfig``/``route print``，避免中文/英文系统的本地化文本差异。
+    """
+
+    _fields_ = [
+        ("dwForwardDest", ctypes.c_uint32),
+        ("dwForwardMask", ctypes.c_uint32),
+        ("dwForwardPolicy", ctypes.c_uint32),
+        ("dwForwardNextHop", ctypes.c_uint32),
+        ("dwForwardIfIndex", ctypes.c_uint32),
+        ("dwForwardType", ctypes.c_uint32),
+        ("dwForwardProto", ctypes.c_uint32),
+        ("dwForwardAge", ctypes.c_uint32),
+        ("dwForwardNextHopAS", ctypes.c_uint32),
+    ] + [(f"dwForwardMetric{i}", ctypes.c_uint32) for i in range(1, 6)]
+
+
+class _IP_OPTION_INFORMATION(ctypes.Structure):
+    """``IcmpSendEcho`` 的可选 IP 头参数（这里全部留空 = 系统默认）。"""
+
+    _fields_ = [
+        ("Ttl", ctypes.c_ubyte),
+        ("Tos", ctypes.c_ubyte),
+        ("Flags", ctypes.c_ubyte),
+        ("OptionsSize", ctypes.c_ubyte),
+        ("OptionsData", ctypes.c_void_p),
+    ]
+
+
+class _ICMP_ECHO_REPLY(ctypes.Structure):
+    """``IcmpSendEcho`` 的回复头；``RoundTripTime`` 单位毫秒。"""
+
+    _fields_ = [
+        ("Address", ctypes.c_uint32),
+        ("Status", ctypes.c_uint32),
+        ("RoundTripTime", ctypes.c_uint32),
+        ("DataSize", ctypes.c_ushort),
+        ("Reserved", ctypes.c_ushort),
+        ("Data", ctypes.c_void_p),
+        ("Options", _IP_OPTION_INFORMATION),
+    ]
 
 
 # ---------------------------------------------------------------- 权限 / 驱动
@@ -159,17 +208,119 @@ def adapters() -> tuple[Adapter, ...]:
     return tuple(out)
 
 
-def default_gateway() -> str:
-    """默认网关地址（路径探测的第 1 跳）。
+def default_gateway(dest: str = "8.8.8.8") -> str:
+    """默认网关地址（路径探测 / 0 包降级时判断「本地链路是否可达」）。
+
+    调 ``iphlpapi.GetBestRoute`` 查「去往 ``dest`` 的最优路由」的下一跳，**不解析
+    任何本地化命令行输出**。没有默认路由（如断网、只有直连网段）时返回空串。
+
+    Args:
+        dest: 查询目的地址（IPv4 字面量），默认 ``8.8.8.8``，即走默认路由。
 
     Returns:
-        str: 网关 IP。
-
-    Raises:
-        NotImplementedError: 本阶段未实现。落地方案见 docstring 正文
-            （``GetBestRoute2`` 或内置 Scapy 的 ``conf.route.default_gateway()``）。
+        str: 网关 IPv4 地址；非 Windows、无默认路由或 API 调用失败时返回 ``""``。
     """
-    raise NotImplementedError("default_gateway(): 见 docstring")
+    if not IS_WINDOWS:
+        return ""
+    try:
+        packed = socket.inet_aton(str(dest))
+    except OSError:
+        return ""
+    row = _MIB_IPFORWARDROW()
+    try:
+        rc = ctypes.windll.iphlpapi.GetBestRoute(  # type: ignore[attr-defined]
+            struct.unpack("<I", packed)[0], 0, ctypes.byref(row))
+    except Exception:  # noqa: BLE001  API 缺失/权限异常都按「没网关」处理
+        return ""
+    if rc != 0 or row.dwForwardNextHop == 0:
+        return ""
+    return socket.inet_ntoa(struct.pack("<I", row.dwForwardNextHop))
+
+
+def icmp_stats(host: str, count: int = 4, timeout_ms: int = 800) -> dict:
+    """用 Windows ``IcmpSendEcho`` 测一个地址的 RTT / 抖动 / 丢包（非管理员可用）。
+
+    0 包优雅降级需要一组「链路是否可达」的数字，但抓包可能根本看不到业务报文；
+    这里用系统 ICMP 回显做一次轻量探测。用 API 而不是解析 ``ping`` 文本：中文 /
+    英文系统的输出格式不同，做文本匹配会在别的机器上静默失效。
+
+    Args:
+        host: IPv4 字面量（域名请先解析；本函数不联网查 DNS）。
+        count: 探测次数，夹在 1~10；默认 4。
+        timeout_ms: 单次等待毫秒数，夹在 100~5000；默认 800。
+
+    Returns:
+        dict: 键 ``ok``（至少收到 1 个回复）/ ``host`` / ``sent`` / ``recv`` /
+            ``loss_pct``（0~100，1 位小数）/ ``avg_ms`` / ``jitter_ms``（RTT 总体
+            标准差，1 位小数）/ ``error``（失败原因，成功为空串）。非 Windows、
+            非 IPv4、API 不可用时 ``ok=False`` 且 ``error`` 说明原因，不抛异常。
+    """
+    host = str(host or "").strip()
+    count = max(1, min(int(count or 4), 10))
+    timeout_ms = max(100, min(int(timeout_ms or 800), 5000))
+    empty = {"ok": False, "host": host, "sent": count, "recv": 0,
+             "loss_pct": 100.0, "avg_ms": 0.0, "jitter_ms": 0.0}
+    if not IS_WINDOWS:
+        return {**empty, "error": "仅 Windows 支持 ICMP 探测"}
+    try:
+        packed = socket.inet_aton(host)
+    except OSError:
+        return {**empty, "error": "不是合法 IPv4 地址"}
+    try:
+        iphlpapi = ctypes.WinDLL("iphlpapi")
+        iphlpapi.IcmpCreateFile.restype = ctypes.c_void_p
+        iphlpapi.IcmpSendEcho.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_ushort,
+            ctypes.POINTER(_IP_OPTION_INFORMATION), ctypes.c_void_p,
+            ctypes.c_uint32, ctypes.c_uint32,
+        ]
+        iphlpapi.IcmpSendEcho.restype = ctypes.c_uint32
+        iphlpapi.IcmpCloseHandle.argtypes = [ctypes.c_void_p]
+        handle = iphlpapi.IcmpCreateFile()
+    except Exception as exc:  # noqa: BLE001  API 不可用只降级，不影响主流程
+        return {**empty, "error": f"ICMP API 不可用：{type(exc).__name__}: {exc}"}
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        return {**empty, "error": "IcmpCreateFile 失败"}
+    payload = ctypes.create_string_buffer(b"netdiag-probe")
+    reply = ctypes.create_string_buffer(ctypes.sizeof(_ICMP_ECHO_REPLY) + 256)
+    dest = struct.unpack("<I", packed)[0]
+    samples: list[float] = []
+    last_error = ""
+    try:
+        for _ in range(count):
+            n = iphlpapi.IcmpSendEcho(
+                handle, dest, payload, len(payload.raw),
+                None, reply, ctypes.sizeof(reply), timeout_ms)
+            row = _ICMP_ECHO_REPLY.from_buffer(reply)
+            if n >= 1 and row.Status == 0:
+                samples.append(float(row.RoundTripTime))
+            elif n == 0:
+                last_error = "超时或无回复"
+            else:
+                last_error = f"ICMP 状态 {row.Status}"
+    except Exception as exc:  # noqa: BLE001  探测异常按丢包处理
+        last_error = f"{type(exc).__name__}: {exc}"
+    finally:
+        try:
+            iphlpapi.IcmpCloseHandle(handle)
+        except Exception:  # noqa: BLE001  关闭句柄失败不影响结果
+            pass
+
+    recv = len(samples)
+    if recv == 0:
+        return {**empty, "error": last_error or "没有收到 ICMP 回复"}
+    avg = sum(samples) / recv
+    jitter = (sum((x - avg) ** 2 for x in samples) / recv) ** 0.5
+    return {
+        "ok": True,
+        "host": host,
+        "sent": count,
+        "recv": recv,
+        "loss_pct": round((count - recv) / count * 100.0, 1),
+        "avg_ms": round(avg, 1),
+        "jitter_ms": round(jitter, 1),
+        "error": "",
+    }
 
 
 def dns_servers() -> tuple[str, ...]:
@@ -204,5 +355,6 @@ def interface_index_map() -> dict[str, int]:
 
 __all__ = [
     "IS_WINDOWS", "is_admin", "npcap_installed", "Adapter",
-    "adapters", "default_gateway", "dns_servers", "interface_index_map",
+    "adapters", "default_gateway", "icmp_stats", "dns_servers",
+    "interface_index_map",
 ]

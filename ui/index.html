@@ -54,32 +54,66 @@
   .topbtn.ghost:hover{background:#fef2f2;border-color:var(--crit-line);color:#b91c1c}
 
   /* ---------------- 主框架 ---------------- */
-  .shell{display:grid;grid-template-columns:308px minmax(0,1fr);height:calc(100vh - 56px)}
-  @media (max-width:1080px){
+  .shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:calc(100vh - 56px)}
+  @media (max-width:1150px){
+    .shell{grid-template-columns:264px minmax(0,1fr)}
+  }
+  @media (max-width:900px){
     body{overflow:auto}
     .shell{grid-template-columns:1fr;height:auto}
     .side{border-right:0;border-bottom:1px solid var(--line)}
     .main{overflow:visible}
+    .main-scroll{overflow:visible}
+    .consolepanel{position:static}
   }
   .side{background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;
-    min-height:0;overflow:auto;padding:12px}
+    min-height:0;overflow:hidden;padding:12px}
+  .side-scroll{flex:1 1 auto;min-height:0;overflow:auto}
   .sidehead{font-size:10.5px;letter-spacing:.9px;color:#94a3b8;font-weight:800;
     margin:2px 0 7px 4px}
-  .main{overflow:auto;padding:14px 18px 40px;min-width:0}
+  .main{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+  .main-scroll{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 18px 28px}
 
-  /* ---------------- 工作区导航 ---------------- */
-  .nav{display:flex;flex-direction:column;gap:3px;margin-bottom:14px}
-  .nav button{display:grid;grid-template-columns:24px 1fr;gap:9px;align-items:center;
+  /* ---------------- 一级 / 二级菜单 ---------------- */
+  .nav{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+  .navgroup{min-width:0}
+  .navhead{display:grid;grid-template-columns:24px minmax(0,1fr) 14px;gap:9px;align-items:center;
     text-align:left;padding:7px 9px;border-radius:10px;border:1px solid transparent;
-    background:transparent;cursor:pointer;font:inherit;color:var(--text);transition:.13s}
-  .nav button:hover{background:#f7f9fc}
-  .nav button .ic{width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;
+    background:transparent;cursor:pointer;font:inherit;color:var(--text);transition:.13s;
+    width:100%}
+  .navhead:hover{background:#f7f9fc}
+  .navhead .ic{width:24px;height:24px;border-radius:7px;background:#f1f5f9;color:#64748b;
     display:grid;place-items:center;font-size:12px;flex:none}
-  .nav button .t{font-size:12.5px;font-weight:650;line-height:1.3;display:block}
-  .nav button .d{font-size:10.5px;color:var(--muted);line-height:1.3;display:block}
-  .nav button.active{background:var(--accent-soft);border-color:#dbeafe}
-  .nav button.active .t{color:var(--accent-2)}
-  .nav button.active .ic{background:#dbeafe;color:var(--accent-2)}
+  .navhead .t{font-size:12.5px;font-weight:650;line-height:1.3;display:block}
+  .navhead .d{font-size:10.5px;color:var(--muted);line-height:1.3;display:block}
+  .navhead .chev{color:#94a3b8;font-size:13px;line-height:1;transition:.15s;text-align:center}
+  .navgroup.open .navhead .chev{transform:rotate(90deg)}
+  .navgroup.active>.navhead{background:var(--accent-soft);border-color:#dbeafe}
+  .navgroup.active>.navhead .t{color:var(--accent-2)}
+  .navgroup.active>.navhead .ic{background:#dbeafe;color:var(--accent-2)}
+  .navhead.active{background:var(--accent-soft);border-color:#dbeafe}
+  .navhead.active .t{color:var(--accent-2)}
+  .navhead.active .ic{background:#dbeafe;color:var(--accent-2)}
+  .navsub{display:flex;flex-direction:column;gap:2px;margin:2px 0 5px 15px;
+    padding-left:10px;border-left:1px solid var(--line)}
+  .navgroup:not(.open) .navsub{display:none}
+  .navitem{display:block;text-align:left;padding:6px 8px;border-radius:8px;
+    border:1px solid transparent;background:transparent;cursor:pointer;font:inherit;
+    color:var(--text);transition:.13s;width:100%}
+  .navitem:hover{background:#f7f9fc}
+  .navitem .t{font-size:12.5px;font-weight:650;line-height:1.3;display:block}
+  .navitem .d{font-size:10.5px;color:var(--muted);line-height:1.3;display:block}
+  .navitem.active{background:var(--accent-soft);border-color:#dbeafe}
+  .navitem.active .t{color:var(--accent-2)}
+  .navitem.locked{opacity:.5;cursor:not-allowed}
+  .navitem.locked .t::after{content:" · 需管理员";font-size:9.5px;font-weight:600;
+    color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;
+    padding:0 5px;margin-left:5px;white-space:nowrap}
+  .navitem.locked:hover{background:#fffdf6}
+  .navhead.locked{opacity:.62}
+  .navhead.locked .t::after{content:" · 需管理员";font-size:9.5px;font-weight:600;
+    color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;
+    padding:0 5px;margin-left:5px;white-space:nowrap}
 
   /* ---------------- 表单 ---------------- */
   .pane{border-top:1px solid var(--line);padding-top:12px}
@@ -105,28 +139,134 @@
     font-weight:600;box-shadow:none}
   .btn.ghost:hover{background:#f8fafc;border-color:#c3ccdb}
   .btn.sm{width:auto;padding:6px 11px;font-size:12px}
+  .btn.locked{background:#cbd5e1;box-shadow:none;cursor:not-allowed}
   .spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;
     border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:6px;
     animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
   .hidden{display:none!important}
 
-  /* ---------------- 日志抽屉 ---------------- */
-  .logwrap{margin-top:auto;padding-top:10px}
-  .logwrap summary{cursor:pointer;list-style:none;font-size:11px;color:var(--muted);
-    display:flex;align-items:center;gap:6px;padding:6px 4px;border-radius:7px;user-select:none}
-  .logwrap summary::-webkit-details-marker{display:none}
-  .logwrap summary::before{content:"›";font-size:14px;line-height:1;transition:.15s;
-    display:inline-block;transform:rotate(0)}
-  .logwrap[open] summary::before{transform:rotate(90deg)}
-  .logwrap summary:hover{background:#f7f9fc;color:var(--text-2)}
-  .logwrap summary b{color:#475569;font-weight:650}
-  .logwrap summary em{font-style:normal;color:#94a3b8;font-size:10.5px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
-  .console{background:#0b1220;color:#cbd5e1;border-radius:9px;padding:9px 10px;height:150px;
-    overflow:auto;font:11.5px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all;margin-top:4px}
-  .console .t{color:#64748b}
-  .console .err{color:#fca5a5}
+  /* 新手引导 / 术语说明 */
+  .guide{font-size:11.5px;line-height:1.65;background:#f8fafc;border:1px solid var(--line);
+    border-left:3px solid var(--accent);border-radius:8px;padding:8px 10px;
+    margin-bottom:11px;color:var(--text-2)}
+  .guide b{display:block;font-size:11.5px;color:var(--accent-2);margin-bottom:2px}
+  .guide .term{display:block;margin-top:5px;font-size:10.8px;color:var(--muted)}
+  .guide .steps-line{margin-top:5px;font-size:10.8px;color:var(--muted)}
+  /* 侧栏固定在底部：字段区独立滚动，「开始」按钮永远可见 */
+  .side-actions{flex:none;padding:9px 0 2px;margin-top:6px;border-top:1px solid var(--line);
+    background:#fff}
+  .side-actions .hint{margin-top:7px}
+  .lockbanner{margin:0 0 10px;padding:8px 10px;border-radius:8px;background:var(--warn-bg);
+    border:1px solid var(--warn-line);color:#92400e;font-size:11px;line-height:1.55}
+  .lockbanner a{color:#b45309;font-weight:700;text-decoration:none;cursor:pointer}
+  .adv{margin:0 0 11px;border:1px solid var(--line);border-radius:8px;background:#fbfcfe}
+  .adv summary{cursor:pointer;padding:7px 9px;font-size:11px;color:var(--muted);
+    list-style:none;font-weight:650;user-select:none}
+  .adv summary::-webkit-details-marker{display:none}
+  .adv summary::before{content:"›";display:inline-block;margin-right:6px;transition:.15s}
+  .adv[open] summary::before{transform:rotate(90deg)}
+  .adv .abody{padding:2px 9px 6px;border-top:1px solid var(--line)}
+
+  /* ---------------- 报告 / 设置 视图 ---------------- */
+  .viewintro{font-size:12px;color:var(--muted);line-height:1.7;margin:0 0 12px}
+  .reportrow{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);
+    border-radius:9px;margin-bottom:7px;background:#fbfcfe;flex-wrap:wrap}
+  .reportrow .rn{font-family:var(--mono);font-size:11.5px;color:var(--text);min-width:0;
+    word-break:break-all}
+  .reportrow .rm{font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap}
+  .reportrow .ra{display:flex;gap:6px;flex:none}
+  .reportrow .ra a{font-size:11px;text-decoration:none;border:1px solid var(--line-2);
+    border-radius:6px;padding:2px 8px;background:#fff}
+  .infogrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:9px}
+  .infocard{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fbfcfe;
+    min-width:0}
+  .infocard span{display:block;font-size:10.5px;color:var(--muted);line-height:1.3}
+  .infocard b{display:block;font-size:13px;margin-top:3px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+  .infocard b.ok{color:#047857}
+  .infocard b.bad{color:#b91c1c}
+
+  /* ---------------- 采集控制台（2.0：右侧主区下方） ---------------- */
+  .consolepanel{flex:none;border-top:1px solid var(--line);background:#fff;
+    padding:7px 18px 11px;min-width:0}
+  .conhead{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--muted);
+    margin-bottom:6px;min-width:0}
+  .contoggle{border:0;background:transparent;padding:3px 5px;border-radius:6px;
+    font:inherit;font-size:11.5px;font-weight:700;color:#475569;cursor:pointer;
+    display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .contoggle:hover{background:#f7f9fc}
+  .contoggle .chev{color:#94a3b8;font-size:13px;line-height:1;transition:.15s;
+    display:inline-block;transform:rotate(90deg)}
+  .consolepanel.collapsed .contoggle .chev{transform:rotate(0)}
+  .contoggle .en{font-weight:400;color:#94a3b8;font-size:10px;letter-spacing:.3px}
+  .conlast{color:#94a3b8;font-size:10.5px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:min(42vw,420px)}
+  .conbtn{border:1px solid var(--line-2);background:#fff;color:#475569;border-radius:6px;
+    font:inherit;font-size:10.5px;padding:2px 8px;cursor:pointer;white-space:nowrap}
+  .conbtn:hover{background:#f8fafc;border-color:#c3ccdb}
+  .console{background:#0b1220;color:#cbd5e1;border-radius:9px;padding:8px 10px;height:168px;
+    overflow:auto;font:11.5px/1.62 var(--mono);margin-top:2px;scrollbar-color:#334155 transparent}
+  .consolepanel.collapsed .console{display:none}
+  .console .l{display:flex;gap:8px;white-space:pre-wrap;word-break:break-word}
+  .console .l::before{content:"›";color:#475569;flex:none;line-height:1.62}
+  .console .l time{color:#64748b;flex:none;line-height:1.62}
+  .console .l.i span{color:#cbd5e1}
+  .console .l.s span{color:#67e8f9}
+  .console .l.w span{color:#fcd34d}
+  .console .l.e span{color:#fca5a5}
+  .console .l.e{background:rgba(248,113,113,.07);border-radius:4px}
+  .console .hintline{color:#64748b}
+
+  /* ---------------- 运行态：进度条 + 倒计时 ---------------- */
+  .runpanel{border:1px solid #dbeafe;border-radius:12px;
+    background:linear-gradient(180deg,#f8fbff,#fff);padding:12px 14px;margin-bottom:14px;
+    box-shadow:var(--sh)}
+  .run-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    flex-wrap:wrap}
+  .run-phase{font-size:12.5px;font-weight:700;color:var(--text)}
+  .run-phase .pill{display:inline-block;background:#dbeafe;color:var(--accent-2);
+    border-radius:999px;padding:1px 9px;margin-right:7px;font-size:11px}
+  .run-retry{display:inline-block;margin-left:7px;color:#92400e;background:var(--warn-bg);
+    border:1px solid var(--warn-line);border-radius:999px;padding:1px 8px;font-size:10.5px;
+    font-weight:650;white-space:nowrap}
+  .run-count{font-family:var(--mono);font-size:12px;color:#475569;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .pbar{height:8px;background:#e8eef7;border-radius:999px;overflow:hidden;margin-top:10px}
+  .pbar i{display:block;height:100%;width:0;border-radius:999px;
+    background:linear-gradient(90deg,#2563eb,#38bdf8);transition:width .35s}
+  .pbar.indeterminate i{width:35%!important;animation:indet 1.2s ease-in-out infinite}
+  @keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
+  .run-stages{display:flex;gap:16px;margin-top:9px;font-size:10.8px;color:#94a3b8;
+    flex-wrap:wrap}
+  .run-stages span{display:inline-flex;align-items:center;gap:6px}
+  .run-stages span::before{content:"";width:6px;height:6px;border-radius:50%;
+    background:#cbd5e1;flex:none}
+  .run-stages span.on{color:var(--accent-2);font-weight:700}
+  .run-stages span.on::before{background:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+  .run-stages span.done{color:#047857}
+  .run-stages span.done::before{background:#10b981}
+
+  /* ---------------- 采集概况卡片（11 项，auto-fill 防裁切） ---------------- */
+  .statgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+    gap:10px;padding-right:6px;margin-bottom:12px}
+  .statgrid .stat{min-width:0}
+  .statgrid .stat span{display:block;white-space:normal;line-height:1.25;
+    overflow-wrap:anywhere}
+  .statgrid .stat b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ---------------- 失败错误卡 ---------------- */
+  .errcard{border:1px solid var(--crit-line);border-radius:var(--r);padding:16px 18px;
+    background:linear-gradient(180deg,#fffafa,#fff);box-shadow:var(--sh)}
+  .errcard h3{margin:0 0 10px;font-size:16px;color:#991b1b}
+  .errcard .why,.errcard .how{font-size:12.8px;line-height:1.75;color:var(--text-2);
+    margin:7px 0}
+  .errcard .why b{color:#b91c1c}
+  .errcard .how b{color:var(--accent-2)}
+  .errcard .raw{font-size:11px;color:var(--muted);margin-top:9px;line-height:1.6;
+    word-break:break-word}
+  .errcard .acts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .errcard .acts .btn{width:auto;padding:6px 13px;font-size:12px}
 
   /* ---------------- 主区头 ---------------- */
   .resultbar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;
@@ -381,45 +521,101 @@
 
 <div class="shell">
   <aside class="side">
+    <div class="side-scroll">
     <div class="sidehead">工作区</div>
-    <div class="nav" id="modes">
-      <button data-mode="live" class="active">
-        <span class="ic">◉</span>
-        <span><span class="t">定向抓包</span><span class="d">只盯目标 IP / 网段</span></span>
-      </button>
-      <button data-mode="scan">
-        <span class="ic">◎</span>
-        <span><span class="t">全网扫描</span><span class="d">抓本机全部流量</span></span>
-      </button>
-      <button data-mode="passive">
-        <span class="ic">≋</span>
-        <span><span class="t">被动监听</span><span class="d">不发包，看谁在连谁</span></span>
-      </button>
-      <button data-mode="offline">
-        <span class="ic">▤</span>
-        <span><span class="t">离线分析</span><span class="d">分析已有 pcap</span></span>
-      </button>
-      <button data-mode="probe">
-        <span class="ic">↗</span>
-        <span><span class="t">链路体检</span><span class="d">不发包，测慢在哪一段</span></span>
-      </button>
+    <nav class="nav" id="nav">
+      <div class="navgroup open" data-group="realtime">
+        <button class="navhead" data-group-toggle="realtime" aria-expanded="true">
+          <span class="ic">①</span>
+          <span><span class="t">实时诊断</span><span class="d">从网卡现抓现分析</span></span>
+          <span class="chev">›</span>
+        </button>
+        <div class="navsub">
+          <button class="navitem" data-mode="scan" title="抓本机全部流量，不设目标过滤">
+            <span class="t">全网扫描</span><span class="d">抓本机全部流量，不填目标</span>
+          </button>
+          <button class="navitem" data-mode="live" title="只盯目标 IP / 网段 / 域名">
+            <span class="t">定向抓包</span><span class="d">只盯目标 IP / 网段 / 域名</span>
+          </button>
+          <button class="navitem" data-mode="passive" title="不发包，只旁听谁在跟谁通信">
+            <span class="t">被动监听</span><span class="d">不发包，看谁在连谁</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="navgroup" data-group="probe">
+        <button class="navhead single" data-mode="probe" title="不抓包，测一条链路通不通、慢在哪一段">
+          <span class="ic">②</span>
+          <span><span class="t">链路体检</span><span class="d">不抓包，测慢在哪一段</span></span>
+          <span class="chev" style="visibility:hidden">›</span>
+        </button>
+      </div>
+
+      <div class="navgroup" data-group="offline">
+        <button class="navhead single" data-mode="offline" title="分析已有 pcap 文件，不碰网卡">
+          <span class="ic">③</span>
+          <span><span class="t">离线分析</span><span class="d">分析已有 pcap，不碰网卡</span></span>
+          <span class="chev" style="visibility:hidden">›</span>
+        </button>
+      </div>
+
+      <div class="navgroup" data-group="reports">
+        <button class="navhead" data-group-toggle="reports" aria-expanded="false">
+          <span class="ic">④</span>
+          <span><span class="t">报告与导出</span><span class="d">历史报告 / 导出诊断包</span></span>
+          <span class="chev">›</span>
+        </button>
+        <div class="navsub">
+          <button class="navitem" data-view="reports" title="查看 reports 目录里的历史报告">
+            <span class="t">历史报告</span><span class="d">打开已生成的 .md / .json</span>
+          </button>
+          <button class="navitem" data-view="export" title="把日志脱敏打包发给维护者">
+            <span class="t">导出诊断包</span><span class="d">脱敏 zip，不含原始 IP</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="navgroup" data-group="settings">
+        <button class="navhead" data-group-toggle="settings" aria-expanded="false">
+          <span class="ic">⑤</span>
+          <span><span class="t">设置</span><span class="d">AI 模型 / 网卡与运行信息</span></span>
+          <span class="chev">›</span>
+        </button>
+        <div class="navsub">
+          <button class="navitem" data-view="ai" title="配置用于生成结论的大模型接口">
+            <span class="t">AI 模型配置</span><span class="d">Base URL / Key / 模型名</span>
+          </button>
+          <button class="navitem" data-view="sysinfo" title="查看网卡、tshark、Npcap、权限与端口">
+            <span class="t">网卡与运行信息</span><span class="d">网卡列表 / 版本 / 权限</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="lockbanner hidden" id="lock-banner">
+      当前是非管理员：实时抓包与被动监听已置灰，<b>离线分析 / 链路体检照常可用</b>。
+      <a id="lock-elevate">以管理员身份重启</a>
     </div>
 
     <div class="pane" id="pane-capture">
+      <div class="guide" id="mode-guide"></div>
+
       <div class="field" id="field-target">
-        <label id="target-label">目标 IP / 网段（留空 = 全网）</label>
-        <input type="text" id="target" placeholder="例如 192.168.1.10 或 192.168.1.0/24" />
+        <label id="target-label">目标 IP / 网段 / 域名</label>
+        <input type="text" id="target" spellcheck="false"
+               placeholder="例：192.168.1.1 或 www.baidu.com" />
       </div>
 
-      <div class="row">
-        <div class="field" id="field-duration">
-          <label id="duration-label">抓包时长（秒）</label>
-          <input type="number" id="duration" value="30" min="5" max="180" step="5" />
-        </div>
-        <div class="field">
-          <label>网卡</label>
-          <select id="iface"><option value="">自动选择</option></select>
-        </div>
+      <div class="field" id="field-duration">
+        <label id="duration-label">抓包时长（秒）</label>
+        <input type="number" id="duration" value="30" min="5" max="180" step="5" />
+        <div class="hint">抓包窗口越短越容易只看到零星流量；排查建议 30~60 秒。</div>
+      </div>
+
+      <div class="field" id="field-iface">
+        <label>网卡</label>
+        <select id="iface"><option value="">自动选择（推荐）</option></select>
+        <div class="hint">自动选择会先探测哪块网卡真有流量，再开始抓包。</div>
       </div>
 
       <div class="field hidden" id="field-engine">
@@ -439,69 +635,88 @@
         <input type="file" id="file" class="hidden" accept=".pcap,.pcapng,.cap" />
       </div>
 
-      <button class="btn" id="run">开始诊断</button>
-      <button class="btn ghost hidden" id="pstop" style="margin-top:7px">停止监听</button>
-      <div class="hint" id="hint">实时抓包需要管理员权限与 Npcap 驱动；权限不足时会提示改用离线分析。</div>
     </div>
 
     <div class="pane hidden" id="pane-probe">
+      <div class="guide">
+        <b>什么时候用这个</b>
+        不想抓包、只想确认一条链路通不通、慢在哪一段时用它。会依次测 DNS → TCP → 协议首包。
+        <span class="term">术语：链路体检 = 主动发少量探测报文，不产生 pcap，不需要管理员权限。</span>
+      </div>
       <div class="field">
         <label>目标域名 / IP</label>
         <input type="text" id="probe-target" spellcheck="false"
-               placeholder="example.com 或 10.0.0.5:8080" />
-      </div>
-      <div class="row">
-        <div class="field">
-          <label>端口（留空自动）</label>
-          <input type="number" id="probe-port" min="1" max="65535" placeholder="443" />
-        </div>
-        <div class="field">
-          <label>探测次数</label>
-          <input type="number" id="probe-count" min="1" max="10" value="4" />
-        </div>
+               placeholder="例：www.baidu.com 或 192.168.1.1" />
       </div>
       <div class="field">
-        <label>协议（默认自动识别）</label>
-        <select id="probe-proto">
-          <option value="">自动识别（先看首包再看端口）</option>
-          <option value="http">HTTP（明文）</option>
-          <option value="tls">HTTPS / TLS</option>
-          <option value="smb">SMB 文件共享（445/139）</option>
-          <option value="rdp">RDP 远程桌面（3389）</option>
-          <option value="ssh">SSH</option>
-          <option value="opaque">只测 TCP 连通性</option>
-        </select>
+        <label>端口（留空自动）</label>
+        <input type="number" id="probe-port" min="1" max="65535" placeholder="例：443" />
       </div>
+      <details class="adv">
+        <summary>高级选项（探测次数 / 协议）</summary>
+        <div class="abody">
+          <div class="field">
+            <label>探测次数</label>
+            <input type="number" id="probe-count" min="1" max="10" value="4" />
+          </div>
+          <div class="field">
+            <label>协议（默认自动识别）</label>
+            <select id="probe-proto">
+              <option value="">自动识别（先看首包再看端口）</option>
+              <option value="http">HTTP（明文）</option>
+              <option value="tls">HTTPS / TLS</option>
+              <option value="smb">SMB 文件共享（445/139）</option>
+              <option value="rdp">RDP 远程桌面（3389）</option>
+              <option value="ssh">SSH</option>
+              <option value="opaque">只测 TCP 连通性</option>
+            </select>
+          </div>
+        </div>
+      </details>
       <button class="btn" id="probe-run">开始体检</button>
       <div class="hint">建连后先不发声，读服务端首包判断协议，再只发该协议该发的报文。
         不需要管理员权限，也不产生抓包文件。</div>
     </div>
+    </div><!-- /side-scroll -->
 
-    <details class="logwrap" id="logwrap">
-      <summary><b>运行日志</b><em id="loglast">就绪</em></summary>
-      <div class="console" id="console"><span class="t">[就绪] 等待任务…</span></div>
-    </details>
+    <div class="side-actions" id="side-actions">
+      <button class="btn" id="run">开始扫描</button>
+      <button class="btn ghost hidden" id="pstop" style="margin-top:7px">停止监听</button>
+      <div class="hint" id="hint"></div>
+    </div>
+
   </aside>
 
   <main class="main">
+    <div class="main-scroll" id="main-scroll">
     <div class="resultbar">
       <div>
-        <h2 id="result-title">诊断结果</h2>
-        <p id="result-sub">选一个工作区开始，结果会按 L2 → L7 分层给出结论和处置步骤</p>
+        <h2 id="result-title">全网扫描</h2>
+        <p id="result-sub">不设目标，抓本机全部流量后统一分析</p>
       </div>
       <div class="searchchip" id="result-chip">就绪</div>
     </div>
+
+    <section class="runpanel hidden" id="runpanel" aria-live="polite">
+      <div class="run-top">
+        <div class="run-phase"><span class="pill" id="run-phase">探测网卡</span><span
+          class="run-retry hidden" id="run-retry"></span></div>
+        <div class="run-count" id="run-count">剩余 --s / 共 --s</div>
+      </div>
+      <div class="pbar" id="run-barwrap"><i id="run-bar"></i></div>
+      <div class="run-stages" id="run-stages"></div>
+    </section>
 
     <div id="result">
       <div class="empty">
         <div class="ic">◈</div>
         <b>还没有结果</b>
-        <p>抓一段流量、分析一个 pcap，或者直接测一条链路。结果会先给一句话结论，
+        <p>先选一个模式，填好左侧参数，再点「开始」。结果会先给一句话结论，
           再按 L2 链路 → L3 网络 → L4 传输 → L7 应用逐层说明，最后给可执行的处置步骤。</p>
         <div class="quick">
-          <button data-quick="live"><b>抓一段实时流量</b><span>选网卡和目标，30 秒出结论</span></button>
+          <button data-quick="scan"><b>全网扫描</b><span>不知道问题在哪，先抓全部流量</span></button>
           <button data-quick="offline"><b>分析已有 pcap</b><span>不需要管理员权限</span></button>
-          <button data-quick="probe"><b>测一条链路</b><span>不发包，只看慢在哪一段</span></button>
+          <button data-quick="probe"><b>测一条链路</b><span>不抓包，只看慢在哪一段</span></button>
         </div>
       </div>
     </div>
@@ -517,10 +732,94 @@
         </div>
       </div>
     </div>
+
+    <div id="view-reports" class="hidden">
+      <div class="card"><div class="body">
+        <p class="viewintro">这里列出 <span class="fname">reports/</span> 目录里已经生成的报告。
+          每次诊断都会同时写一份 Markdown（给人看）和 JSON（给工单 / 脚本用）。</p>
+        <div id="reports-list"><div class="empty" style="padding:20px"><b>正在读取…</b></div></div>
+      </div></div>
+    </div>
+
+    <div id="view-sysinfo" class="hidden">
+      <div class="card"><div class="body">
+        <p class="viewintro">网卡、tshark、Npcap、Scapy、权限与端口信息。抓包选错网卡是「0 包」最常见的原因，
+          可以在这里确认哪块网卡真的在线。</p>
+        <div id="sysinfo-grid" class="infogrid"></div>
+        <div class="sectitle" style="margin-top:16px">网卡列表</div>
+        <div id="sysinfo-ifaces"></div>
+        <div class="toolbar" style="margin-top:12px">
+          <button class="btn ghost" id="sysinfo-refresh">重新检测</button>
+        </div>
+      </div></div>
+    </div>
+
+    <div id="view-export" class="hidden">
+      <div class="card"><div class="body">
+        <p class="viewintro">把本机日志脱敏后打成一个 zip，发给维护者排障。
+          <b>工具不会自动上传任何数据</b>；包内 IP / 域名 / 用户名 / MAC 已替换成不可还原的伪名。</p>
+        <div class="toolbar">
+          <button class="btn" id="export-run" style="width:auto;padding:8px 16px">生成诊断包</button>
+        </div>
+        <div id="export-msg"></div>
+      </div></div>
+    </div>
+
+    <div id="view-ai" class="hidden">
+      <div class="card"><div class="body">
+        <p class="viewintro">配置一个 OpenAI 兼容的模型接口后，诊断结果里会出现「AI 解读」。
+          Key 只保存在本机 <span class="fname">config\ai-config.json</span>，不会上传。</p>
+        <div id="ai-panel-body"></div>
+        <div class="toolbar" style="margin-top:12px">
+          <button class="btn ghost" id="ai-panel-open">打开 AI 模型配置</button>
+        </div>
+      </div></div>
+    </div>
+    </div><!-- /main-scroll -->
+
+    <section class="consolepanel" id="consolepanel">
+      <div class="conhead">
+        <button class="contoggle" id="console-toggle" aria-expanded="true"
+                title="展开 / 折叠采集控制台">
+          <span class="chev">›</span>采集控制台
+          <span class="en">Packet Console</span>
+        </button>
+        <span class="conlast" id="loglast">就绪</span>
+        <span style="flex:1"></span>
+        <button class="conbtn" id="console-copy" title="复制全部控制台内容">复制</button>
+        <button class="conbtn" id="console-clear" title="清空控制台显示（不影响已落盘日志）">清空</button>
+      </div>
+      <div class="console" id="console" role="log" aria-live="polite">
+        <div class="l i"><time>--:--:--</time><span>等待任务…</span></div>
+      </div>
+    </section>
   </main>
 </div>
 
 
+
+<div class="mask hidden" id="perm-mask">
+  <div class="modal small" role="dialog" aria-modal="true" aria-label="需要管理员权限">
+    <div class="mhead">
+      <div>
+        <b>该功能需要管理员权限</b>
+        <em>实时抓包 / 被动监听要打开 Npcap 驱动，必须由管理员授权</em>
+      </div>
+      <button class="xbtn" id="perm-close" title="关闭">✕</button>
+    </div>
+    <div class="mbody">
+      <p style="margin:2px 0 10px;font-size:12.5px;line-height:1.75;color:var(--text-2)">
+        「以管理员身份重启」会弹一次 Windows 授权窗口，<b>当前填的模式 / 目标 / 时长会保留</b>。
+        如果选择取消，离线分析和链路体检仍然可用。
+      </p>
+      <div id="perm-msg"></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="perm-cancel">取消</button>
+      <button class="btn" id="perm-elevate">以管理员身份重启</button>
+    </div>
+  </div>
+</div>
 
 <div class="mask hidden" id="ai-mask">
   <div class="modal" role="dialog" aria-modal="true" aria-label="AI 模型配置">
@@ -570,76 +869,333 @@
   </div>
 </div>
 
+<script type="application/json" id="ui-config">
+{
+  "locked_modes": ["scan", "live", "passive"],
+  "modes": {
+    "scan": {
+      "label": "全网扫描",
+      "needs_admin": true,
+      "fields": ["duration", "iface"],
+      "btn": "开始扫描",
+      "title": "全网扫描",
+      "sub": "不设目标，抓本机全部流量后统一分析",
+      "guide": "不知道问题出在哪、想先看本机整体流量时用它：不设目标，抓全部流量再分层分析。",
+      "term": "术语：实时抓包 = 从网卡现抓；目标框在这里被有意隐藏，填了也会被后端忽略。",
+      "hint": "全网扫描不设目标过滤，建议 30~60 秒；运行中可以切到「链路体检」但建议等结果。",
+      "idle_desc": "不设目标，抓本机网卡上的全部流量，再从 L2 到 L7 分层分析。适合完全不知道问题在哪的第一步。"
+    },
+    "live": {
+      "label": "定向抓包",
+      "needs_admin": true,
+      "fields": ["target", "duration", "iface"],
+      "btn": "开始抓包",
+      "title": "定向抓包",
+      "sub": "只保留与目标相关的流量，过滤器自动构造",
+      "guide": "已经怀疑某个 IP / 网段 / 域名，想只盯它时用它：过滤器只保留目标相关流量。",
+      "term": "术语：实时抓包 = 从网卡现抓；私网 IP / 私网网段不会下抓包过滤（抓全网后在分析阶段筛），避免漏抓。",
+      "hint": "私网 IP / 私网网段不下抓包过滤（先抓全网，分析阶段再筛）；域名解析到 fake-ip 时也会自动抓全网。",
+      "idle_desc": "只盯一个目标 IP / 网段 / 域名。域名会先解析；解析到 fake-ip / 私网时自动改为抓全网，避免 0 包。"
+    },
+    "passive": {
+      "label": "被动监听",
+      "needs_admin": true,
+      "fields": ["duration", "iface", "engine"],
+      "btn": "开始监听",
+      "title": "被动监听",
+      "sub": "不发包，把流量按会话聚合后看谁在连谁",
+      "guide": "想知道谁在跟谁通信、又不希望自己发包时用它：只旁听，把流量按会话聚合。",
+      "term": "术语：被动监听 = 只读网卡，不发任何探测报文；目标框被隐藏，默认看全部会话。",
+      "hint": "被动监听不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。",
+      "idle_desc": "不发包，只旁听本机网卡流量，按「源 IP:端口 → 目标 IP:端口」聚合成会话表。"
+    },
+    "probe": {
+      "label": "链路体检",
+      "needs_admin": false,
+      "fields": [],
+      "btn": "开始体检",
+      "title": "链路体检",
+      "sub": "先识别协议，再分段计时，直接看出慢在哪一段",
+      "guide": "不想抓包、只想确认一条链路通不通、慢在哪一段时用它。会依次测 DNS → TCP → 协议首包。",
+      "term": "术语：链路体检 = 主动发少量探测报文，不产生 pcap，不需要管理员权限。",
+      "hint": "",
+      "idle_desc": ""
+    },
+    "offline": {
+      "label": "离线分析",
+      "needs_admin": false,
+      "fields": ["offline"],
+      "btn": "开始分析",
+      "title": "离线分析",
+      "sub": "分析已有 pcap 文件，不访问网卡、不需要管理员权限",
+      "guide": "手上已经有一个 pcap 文件（别人给的，或之前抓的）时用它：只分析文件，不碰网卡。",
+      "term": "术语：离线分析 = 分析已有的 pcap 文件，不访问网卡、不需要管理员权限；和上面的「实时抓包」是两回事。",
+      "hint": "离线分析只读取 pcap 文件，不需要管理员权限，适合权限受限的目标机器。",
+      "idle_desc": "选择或拖入一个已有 pcap / pcapng 文件，直接离线分析；不会碰网卡。"
+    }
+  }
+}
+</script>
 <script>
 const $ = (s) => document.querySelector(s);
-let MODE = "live";
+const UI = JSON.parse(document.getElementById("ui-config").textContent);
+let MODE = "scan";
+let VIEW = null;
+let RUN_MODE = null;
 let timer = null;
 let timerP = null;
 let lastLogCount = 0;
 let LAST_RESULT = null;
 let AI_CFG = null;
 let APP_INFO = null;
+let IS_ADMIN = null;
+let SYS_IFACES = [];
+let RUN_DURATION = 0;
+const LOCKED = new Set(UI.locked_modes || []);
+const FIELD_IDS = ["field-target", "field-duration", "field-iface", "field-engine", "field-offline"];
 
-/* ---------- 模式切换 ---------- */
-function runLabel(){ return MODE === "passive" ? "开始监听" : "开始诊断"; }
+/* ---------- 导航 / 模式 ---------- */
+function isLocked(mode) { return LOCKED.has(mode) && IS_ADMIN === false; }
 
-$("#modes").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-mode]");
-  if (!b) return;
-  setMode(b.dataset.mode);
+function paintLocks() {
+  document.querySelectorAll("[data-mode]").forEach((b) => {
+    const cfg = UI.modes[b.dataset.mode] || {};
+    const lock = isLocked(b.dataset.mode);
+    b.classList.toggle("locked", lock);
+    b.setAttribute("aria-disabled", lock ? "true" : "false");
+    b.title = lock
+      ? `该功能需要管理员权限：${cfg.label || b.dataset.mode}。点击查看「以管理员身份重启」`
+      : (cfg.label || "") + (cfg.needs_admin ? "（需要管理员权限）" : "");
+  });
+  $("#lock-banner").classList.toggle("hidden", IS_ADMIN !== false);
+  if (MODE && UI.modes[MODE]) {
+    $("#run").classList.toggle("locked", isLocked(MODE));
+    $("#run").title = isLocked(MODE) ? "该功能需要管理员权限，点击查看如何提权" : "";
+  }
+}
+
+$("#nav").addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-group-toggle]");
+  if (toggle) {
+    const group = toggle.closest(".navgroup");
+    const open = !group.classList.contains("open");
+    group.classList.toggle("open", open);
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    return;
+  }
+  const modeBtn = e.target.closest("[data-mode]");
+  if (modeBtn) {
+    const mode = modeBtn.dataset.mode;
+    if (isLocked(mode)) { showPermModal(); return; }
+    setMode(mode);
+    return;
+  }
+  const viewBtn = e.target.closest("[data-view]");
+  if (viewBtn) setView(viewBtn.dataset.view);
 });
 
+function markActive(mode, view) {
+  document.querySelectorAll("[data-mode]").forEach((b) =>
+    b.classList.toggle("active", !!mode && b.dataset.mode === mode));
+  document.querySelectorAll("[data-view]").forEach((b) =>
+    b.classList.toggle("active", !!view && b.dataset.view === view));
+  document.querySelectorAll(".navgroup").forEach((g) => {
+    const hit = (mode && g.querySelector(`[data-mode="${mode}"]`))
+      || (view && g.querySelector(`[data-view="${view}"]`));
+    g.classList.toggle("active", !!hit);
+    if (hit) {
+      g.classList.add("open");
+      const head = g.querySelector("[data-group-toggle]");
+      if (head) head.setAttribute("aria-expanded", "true");
+    }
+  });
+}
+
+function hideViews() {
+  ["view-reports", "view-sysinfo", "view-export", "view-ai"].forEach((id) =>
+    document.getElementById(id).classList.add("hidden"));
+}
+
 function setMode(mode) {
+  const cfg = UI.modes[mode];
+  if (!cfg) return;
+  if (!timer && !timerP) $("#runpanel").classList.add("hidden");
   MODE = mode;
-  [...$("#modes").children].forEach((x) =>
-    x.classList.toggle("active", x.dataset.mode === mode));
+  VIEW = null;
+  markActive(mode, null);
+  hideViews();
 
   const isProbe = mode === "probe";
   $("#pane-capture").classList.toggle("hidden", isProbe);
   $("#pane-probe").classList.toggle("hidden", !isProbe);
+  $("#side-actions").classList.toggle("hidden", isProbe);
   $("#result").classList.toggle("hidden", isProbe);
   $("#probe-panel").classList.toggle("hidden", !isProbe);
 
+  for (const id of FIELD_IDS) {
+    const key = id.replace("field-", "");
+    $("#" + id).classList.toggle("hidden", !(cfg.fields || []).includes(key));
+  }
+  $("#duration-label").textContent = mode === "passive" ? "监听时长（秒）" : "抓包时长（秒）";
+  $("#run").textContent = cfg.btn;
+  $("#hint").textContent = cfg.hint || "";
+  $("#mode-guide").innerHTML = '<b>什么时候用这个</b>' + esc(cfg.guide || "")
+    + '<span class="steps-line">三步：选模式 → 填参数 → 点「' + esc(cfg.btn) + '」；完成后结果自动出现在右侧。</span>'
+    + (cfg.term ? '<span class="term">' + esc(cfg.term) + '</span>' : "");
+  $("#result-title").textContent = cfg.title;
+  $("#result-sub").textContent = cfg.sub;
+  $("#result-chip").textContent = isProbe ? "待体检" : "就绪";
+  paintLocks();
+
   if (isProbe) {
-    $("#result-title").textContent = "链路体检";
-    $("#result-sub").textContent = "先识别协议，再分段计时，直接看出慢在哪一段";
-    $("#result-chip").textContent = "待体检";
     setTimeout(() => $("#probe-target").focus(), 60);
     return;
   }
+  if (mode === "offline") loadCaptures();
+  showIdle(mode);
+  if (mode === "live") setTimeout(() => $("#target").focus(), 60);
+}
 
-  $("#result-title").textContent = "诊断结果";
-  $("#result-sub").textContent = "结果按 L2 → L7 分层给出结论和处置步骤";
-  $("#result-chip").textContent = "就绪";
-
-  $("#field-target").classList.toggle("hidden", MODE === "offline");
-  $("#field-duration").classList.toggle("hidden", MODE === "offline");
-  $("#field-offline").classList.toggle("hidden", MODE !== "offline");
-  $("#field-engine").classList.toggle("hidden", MODE !== "passive");
-  $("#target-label").textContent = MODE === "passive"
-    ? "目标 IP / 网段（留空 = 全部流量）" : "目标 IP / 网段（留空 = 全网）";
-  $("#duration-label").textContent = MODE === "passive" ? "监听时长（秒）" : "抓包时长（秒）";
-  $("#run").textContent = runLabel();
-  $("#hint").textContent = MODE === "offline"
-    ? "离线分析不需要管理员权限，适合权限受限的目标机器。"
-    : MODE === "scan"
-      ? "全网扫描不设目标过滤，抓取本机网卡全部流量后统一分析，建议 60 秒以上。"
-      : MODE === "passive"
-        ? "被动监听不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。"
-        : "定向抓包只保留与目标 IP 相关的流量，过滤器自动构造为 host <IP>。";
-  if (MODE === "offline") loadCaptures();
+function showIdle(mode) {
+  const cfg = UI.modes[mode] || {};
+  $("#result").innerHTML = '<div class="empty"><div class="ic">◈</div><b>'
+    + esc(cfg.label || "诊断结果") + ' · 还没有结果</b><p>' + esc(cfg.idle_desc || "")
+    + '</p><div class="quick">'
+    + '<button data-quick="scan"><b>全网扫描</b><span>不知道问题在哪，先抓全部流量</span></button>'
+    + '<button data-quick="offline"><b>分析已有 pcap</b><span>不需要管理员权限</span></button>'
+    + '<button data-quick="probe"><b>测一条链路</b><span>不抓包，只看慢在哪一段</span></button>'
+    + '</div></div>';
 }
 
 /* 空状态里的快捷入口 */
 document.addEventListener("click", (e) => {
   const q = e.target.closest("[data-quick]");
-  if (q) setMode(q.dataset.quick);
+  if (!q) return;
+  if (isLocked(q.dataset.quick)) { showPermModal(); return; }
+  setMode(q.dataset.quick);
 });
+
+/* ---------- 二级页：历史报告 / 导出 / 设置 ---------- */
+function setView(view) {
+  VIEW = view;
+  MODE = null;
+  markActive(null, view);
+  hideViews();
+  $("#pane-capture").classList.add("hidden");
+  $("#pane-probe").classList.add("hidden");
+  $("#side-actions").classList.add("hidden");
+  $("#result").classList.add("hidden");
+  $("#probe-panel").classList.add("hidden");
+  const box = document.getElementById("view-" + view);
+  if (box) box.classList.remove("hidden");
+  const meta = {
+    reports: ["历史报告", "打开 reports/ 里已经生成的 Markdown / JSON 报告", "只读"],
+    export: ["导出诊断包", "把本机日志脱敏后打包，方便发给维护者排障", "等你操作"],
+    ai: ["AI 模型配置", "配置 OpenAI 兼容接口后，可在结果页生成 AI 解读", "本机保存"],
+    sysinfo: ["网卡与运行信息", "网卡、tshark、Npcap、Scapy、权限与端口", "实时检测"],
+  }[view] || ["设置", "", ""];
+  $("#result-title").textContent = meta[0];
+  $("#result-sub").textContent = meta[1];
+  $("#result-chip").textContent = meta[2];
+  if (view === "reports") loadReports();
+  if (view === "sysinfo") loadSysInfo();
+  if (view === "ai") { loadAI().then(paintAIPanel); }
+}
+
+async function loadReports() {
+  const box = $("#reports-list");
+  box.innerHTML = '<div class="empty" style="padding:20px"><b>正在读取…</b></div>';
+  let r;
+  try {
+    r = await fetch("/api/reports").then((x) => x.json());
+  } catch (e) {
+    box.innerHTML = '<div class="msg bad">读取报告列表失败：' + esc(e) + '</div>';
+    return;
+  }
+  const files = (r && r.files) || [];
+  if (!files.length) {
+    box.innerHTML = '<div class="empty" style="padding:20px"><b>还没有历史报告</b>'
+      + '<p>先做一次全网扫描、定向抓包或离线分析，报告会自动出现在这里。</p></div>';
+    return;
+  }
+  box.innerHTML = files.map((f) => {
+    const md = `/api/report?path=${encodeURIComponent(f.name)}`;
+    const js = `/api/report?path=${encodeURIComponent(f.json || "")}`;
+    return '<div class="reportrow"><span class="rn">' + esc(f.name) + '</span>'
+      + '<span class="rm">' + esc(f.mtime || "") + ' · ' + (f.size / 1024).toFixed(1) + ' KB</span>'
+      + '<span class="ra"><a href="' + md + '" target="_blank" rel="noopener">Markdown</a>'
+      + (f.json ? '<a href="' + js + '" target="_blank" rel="noopener">JSON</a>' : "")
+      + '</span></div>';
+  }).join("");
+}
+
+async function loadSysInfo() {
+  const grid = $("#sysinfo-grid");
+  const ifaces = $("#sysinfo-ifaces");
+  grid.innerHTML = '<div class="hint">检测中…</div>';
+  ifaces.innerHTML = "";
+  let app, r, d, p;
+  try {
+    [app, r, d, p] = await Promise.all([
+      fetch("/api/app").then((x) => x.json()),
+      fetch("/api/interfaces").then((x) => x.json()),
+      fetch("/api/doctor").then((x) => x.json()),
+      fetch("/api/passive").then((x) => x.json()).catch(() => null),
+    ]);
+  } catch (e) {
+    grid.innerHTML = '<div class="msg bad">检测失败：' + esc(e) + '</div>';
+    return;
+  }
+  SYS_IFACES = (r && r.interfaces) || [];
+  const ei = (p && p.engine_info) || {};
+  const vm = ((d && d.tshark_version) || "").match(/\d+\.\d+\.\d+/);
+  const card = (name, value, cls) =>
+    '<div class="infocard"><span>' + esc(name) + '</span><b class="' + (cls || "") + '">'
+    + esc(value) + '</b></div>';
+  grid.innerHTML = [
+    card("产品版本", "v" + ((app && app.version) || "-")),
+    card("本地端口", app && app.port ? "127.0.0.1:" + app.port : "-"),
+    card("进程 PID", (app && app.pid) || "-"),
+    card("管理员权限", app && app.admin ? "是" : "否", app && app.admin ? "ok" : "bad"),
+    card("Npcap", r && r.npcap ? "已安装" : "未安装", r && r.npcap ? "ok" : "bad"),
+    card("tshark", vm ? vm[0] : "未找到", vm ? "ok" : "bad"),
+    card("Scapy", ei.scapy ? (ei.scapy_version || "已加载") : "未加载", ei.scapy ? "ok" : "bad"),
+    card("网卡数量", SYS_IFACES.length + " 块"),
+  ].join("");
+  ifaces.innerHTML = SYS_IFACES.length
+    ? '<div class="tscroll"><table class="ftab"><thead><tr><th>序号</th><th>网卡</th>'
+      + '<th>原始设备</th></tr></thead><tbody>'
+      + SYS_IFACES.map((i) => '<tr><td class="mono">' + esc(i.index) + '</td><td>'
+        + esc(i.short || i.name) + '</td><td class="mono">' + esc(i.name) + '</td></tr>').join("")
+      + '</tbody></table></div>'
+    : '<div class="msg bad">没有枚举到网卡（Npcap 未安装或 tshark 不可用）</div>';
+}
+
+function paintAIPanel() {
+  const box = $("#ai-panel-body");
+  if (!AI_CFG) {
+    box.innerHTML = '<div class="msg bad">读取 AI 配置失败（后端未响应）。'
+      + '可点右下角「打开 AI 模型配置」重试。</div>';
+    return;
+  }
+  const ready = !!AI_CFG.ready;
+  box.innerHTML = '<div class="msg ' + (ready ? "ok" : "wait") + '">'
+    + (ready ? '<b>已启用：' + esc(AI_CFG.model) + '</b><br>' + esc(AI_CFG.base_url)
+      : '<b>尚未启用 AI 解读</b><br>点右下角「打开 AI 模型配置」填 Base URL、API Key 与模型名。')
+    + '</div>';
+}
 
 /* ---------- 环境信息 ---------- */
 async function boot() {
   try {
-    const r = await fetch("/api/interfaces").then((x) => x.json());
+    const [r, d, pe, app] = await Promise.all([
+      fetch("/api/interfaces").then((x) => x.json()),
+      fetch("/api/doctor").then((x) => x.json()).catch(() => ({})),
+      fetch("/api/passive").then((x) => x.json()).catch(() => null),
+      fetch("/api/app").then((x) => x.json()).catch(() => null),
+    ]);
+    APP_INFO = app;
+    IS_ADMIN = app && typeof app.admin === "boolean" ? app.admin : !!r.admin;
     const sel = $("#iface");
     (r.interfaces || []).forEach((i) => {
       const o = document.createElement("option");
@@ -648,27 +1204,32 @@ async function boot() {
       sel.appendChild(o);
     });
     const badges = [];
-    if (!r.npcap) badges.push('<span class="badge bad">Npcap 未就绪</span>');
-    else badges.push('<span class="badge good">Npcap 就绪</span>');
-    badges.push(r.admin
-      ? '<span class="badge good">管理员权限</span>'
-      : '<span class="badge bad">非管理员（实时抓包受限）</span>');
-    const d = await fetch("/api/doctor").then((x) => x.json());
+    badges.push(r.npcap
+      ? '<span class="badge good" title="Npcap 驱动已就绪">Npcap ✓</span>'
+      : '<span class="badge bad" title="Npcap 未就绪：实时抓包不可用">Npcap ✗</span>');
+    badges.push(IS_ADMIN
+      ? '<span class="badge good" title="当前进程有管理员权限">管理员 ✓</span>'
+      : '<span class="badge bad" title="非管理员：实时抓包 / 被动监听已置灰">非管理员</span>');
     const vm = (d.tshark_version || "").match(/\d+\.\d+\.\d+/);
-    badges.push(`<span class="badge">${vm ? "tshark " + vm[0] : "tshark 未找到"}</span>`);
-    const pe = await fetch("/api/passive").then((x) => x.json()).catch(() => null);
+    badges.push('<span class="badge" title="离线分析依赖 tshark">'
+      + (vm ? "tshark " + vm[0] : "tshark 未找到") + '</span>');
     const ei = pe && pe.engine_info;
     if (ei && ei.scapy) {
-      badges.push(`<span class="badge good">Scapy ${esc(ei.scapy_version)}</span>`);
+      badges.push('<span class="badge good" title="Scapy 引擎已加载">Scapy '
+        + esc(ei.scapy_version) + '</span>');
       $("#engine-hint").textContent = "Scapy " + ei.scapy_version + " 已就绪"
         + (ei.pcap ? "（Npcap 驱动可用）" : "（未检测到 pcap 驱动）")
         + "；出错时自动回落 tshark。";
     } else {
-      badges.push('<span class="badge bad">Scapy 未加载</span>');
+      badges.push('<span class="badge bad" title="Scapy 未加载，将回落 tshark">Scapy ✗</span>');
       $("#engine-hint").textContent = "未检测到 Scapy，将使用 tshark 采集（功能一致）。";
     }
     $("#badges").innerHTML = badges.join("");
-    if (!r.admin) $("#hint").textContent = "当前非管理员，实时抓包大概率失败，建议使用离线分析或右键以管理员身份运行 start.bat。";
+    paintLocks();
+    setMode(MODE);
+    if (APP_INFO && APP_INFO.port) {
+      document.title = `NetDiag · 网络矩阵 · 端口 ${APP_INFO.port}`;
+    }
   } catch (e) {
     $("#badges").innerHTML = '<span class="badge bad">后端未响应</span>';
   }
@@ -713,22 +1274,148 @@ async function upload(file) {
   }
 }
 
-/* ---------- 启动 ---------- */
-$("#run").addEventListener("click", async () => {
-  if (MODE === "passive") { startPassive(); return; }
-  const payload = { mode: MODE, target: $("#target").value.trim() };
-  if (MODE !== "offline") {
+/* ---------- 权限弹窗（非管理员强行触发） ---------- */
+function showPermModal() {
+  $("#perm-mask").classList.remove("hidden");
+  $("#perm-msg").innerHTML = "";
+  const b = $("#perm-elevate");
+  b.disabled = false;
+  b.textContent = "以管理员身份重启";
+}
+function closePerm() { $("#perm-mask").classList.add("hidden"); }
+function checkAdmin() {
+  if (!isLocked(MODE)) return true;
+  showPermModal();
+  return false;
+}
+$("#perm-close").onclick = closePerm;
+$("#perm-cancel").onclick = closePerm;
+$("#lock-elevate").onclick = showPermModal;
+$("#perm-mask").addEventListener("mousedown", (e) => {
+  if (e.target.id === "perm-mask") closePerm();
+});
+$("#perm-elevate").onclick = async () => {
+  const b = $("#perm-elevate");
+  b.disabled = true;
+  b.textContent = "正在请求…";
+  $("#perm-msg").innerHTML = '<div class="msg wait">正在请求 Windows 管理员授权，'
+    + '请在系统弹窗中点「是」；授权后服务会重启并保留当前表单。</div>';
+  let r;
+  try {
+    r = await fetch("/api/elevate", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }).then((x) => x.json());
+  } catch (e) {
+    r = { ok: false, error: String(e) };
+  }
+  if (r.ok) {
+    $("#perm-msg").innerHTML = '<div class="msg ok">已请求管理员权限。'
+      + '<br>如果 Windows 弹出了授权窗口，请点「是」；随后页面会自动重新打开。</div>';
+    return;
+  }
+  $("#perm-msg").innerHTML = '<div class="msg bad">' + esc(r.error || "未获得管理员权限")
+    + '<br>仍可继续使用离线分析与链路体检。</div>';
+  b.disabled = false;
+  b.textContent = "以管理员身份重启";
+};
+
+/* ---------- 运行态：阶段 / 进度条 / 倒计时 ---------- */
+const STAGE_SETS = {
+  scan: ["探测网卡", "抓包中", "分析中"],
+  live: ["探测网卡", "抓包中", "分析中"],
+  offline: ["读取文件", "分析中", "生成报告"],
+  passive: ["准备网卡", "监听中", "汇总会话"],
+};
+
+function paintStages() {
+  const stages = STAGE_SETS[RUN_MODE] || STAGE_SETS.live;
+  $("#run-stages").innerHTML = stages.map((name, i) =>
+    '<span data-i="' + i + '">' + esc(name) + '</span>').join("");
+}
+
+function phaseIndex(phase) {
+  const text = String(phase || "");
+  if (/完成/.test(text)) return 3;
+  if (/分析|汇总/.test(text)) return 2;
+  if (/抓包|监听/.test(text)) return 1;
+  if (/探测|准备|读取|准备中/.test(text)) return 0;
+  return 0;
+}
+
+function updateProgress(info) {
+  const elapsed = Number((info && info.elapsed) || 0);
+  const duration = Number((info && info.duration) || RUN_DURATION || 0);
+  const phase = (info && info.phase) || "运行中";
+  $("#run-phase").textContent = phase;
+
+  const attempt = Number((info && info.attempt) || 0);
+  const attempts = Number((info && info.attempts) || 0);
+  const retry = $("#run-retry");
+  if (attempts > 1 && attempt > 0) {
+    retry.textContent = "第 " + attempt + "/" + attempts + " 块网卡";
+    retry.classList.remove("hidden");
+  } else {
+    retry.textContent = "";
+    retry.classList.add("hidden");
+  }
+
+  const bar = $("#run-bar");
+  const wrap = $("#run-barwrap");
+  if (duration > 0) {
+    wrap.classList.remove("indeterminate");
+    const pct = Math.max(0, Math.min(99, (elapsed / duration) * 100));
+    bar.style.width = pct.toFixed(1) + "%";
+    const remain = Math.max(0, Math.ceil(duration - elapsed));
+    $("#run-count").textContent = "剩余 " + remain + "s / 共 " + duration + "s";
+  } else {
+    wrap.classList.add("indeterminate");
+    $("#run-count").textContent = "已用 " + Math.round(elapsed) + "s";
+  }
+
+  const idx = phaseIndex(phase);
+  [...$("#run-stages").children].forEach((el) => {
+    const i = Number(el.dataset.i);
+    el.classList.toggle("on", i === idx && idx < 3);
+    el.classList.toggle("done", i < idx || idx >= 3);
+  });
+}
+
+/* ---------- 启动采集 ---------- */
+$("#run").addEventListener("click", startCapture);
+$("#target").addEventListener("keydown", (e) => { if (e.key === "Enter") startCapture(); });
+
+async function startCapture() {
+  if (!MODE || VIEW) return;
+  if (MODE === "passive") {
+    if (!checkAdmin()) return;
+    startPassive();
+    return;
+  }
+  const cfg = UI.modes[MODE] || {};
+  if (cfg.needs_admin && !checkAdmin()) return;
+
+  const payload = { mode: MODE };
+  if (MODE === "offline") {
+    payload.pcap = $("#pcap-select").value;
+    if (!payload.pcap) {
+      $("#hint").textContent = "请先选择或上传一个抓包文件";
+      $("#pcap-select").focus();
+      return;
+    }
+  } else {
     payload.duration = parseInt($("#duration").value || "30", 10);
     payload.interface = $("#iface").value || null;
-  } else {
-    payload.pcap = $("#pcap-select").value;
-    if (!payload.pcap) { $("#hint").textContent = "请先选择或上传一个抓包文件"; return; }
+    // 全网扫描不传目标：后端也会再兜底忽略，避免历史上 target 被当过滤条件。
+    if (MODE !== "scan") payload.target = $("#target").value.trim();
   }
+
+  RUN_MODE = MODE;
+  RUN_DURATION = MODE === "offline" ? 0 : Number(payload.duration || 0);
   lastLogCount = 0;
   $("#console").innerHTML = "";
   $("#run").disabled = true;
-  $("#run").innerHTML = '<span class="spin"></span>诊断中…';
-  runningResult("正在采集并分析报文", "抓包结束后会自动给出分层结论，通常几十秒内完成。");
+  $("#run").innerHTML = '<span class="spin"></span>' + esc(cfg.btn || "运行") + '中…';
+  runningResult();
   let r;
   try {
     r = await fetch("/api/scan", {
@@ -741,59 +1428,197 @@ $("#run").addEventListener("click", async () => {
   if (!r.ok) {
     const why = r.error || "启动失败";
     appendLog("错误：" + why, true);
-    failedResult("诊断未能启动", why);
+    failedResult("任务未能启动", why);
     stopRun();
     return;
   }
-  timer = setInterval(poll, 1200);
+  timer = setInterval(poll, 500);
   poll();
-});
+}
 
 function stopRun() {
   if (timer) clearInterval(timer);
   timer = null;
   $("#run").disabled = false;
-  $("#run").textContent = "开始诊断";
+  $("#run").textContent = (UI.modes[RUN_MODE] || {}).btn || "开始";
+  $("#pstop").classList.add("hidden");
+  $("#runpanel").classList.add("hidden");
+  paintLocks();
 }
 
-function runningResult(title, sub) {
+function runningResult() {
+  const cfg = UI.modes[RUN_MODE] || {};
+  $("#result-title").textContent = cfg.title || "诊断结果";
+  $("#result-sub").textContent = "正在采集并分析报文，完成后结果会自动出现在这里";
   $("#result-chip").textContent = "运行中";
-  $("#result").innerHTML = '<div class="empty"><div class="ic">◌</div><b>' + esc(title)
-    + '</b><p>' + esc(sub) + '</p></div>';
+  $("#result").innerHTML = '<div class="empty"><div class="ic">◌</div><b>'
+    + esc(cfg.label || "正在运行") + '</b><p>抓包结束后会自动给出分层结论；'
+    + '运行过程在下方「采集控制台」，进度和倒计时在上方。</p></div>';
+  $("#runpanel").classList.remove("hidden");
+  paintStages();
+  updateProgress({ elapsed: 0, duration: RUN_DURATION,
+                   phase: STAGE_SETS[RUN_MODE] ? STAGE_SETS[RUN_MODE][0] : "准备中" });
+  const sc = $("#main-scroll");
+  if (sc) sc.scrollTop = 0;
 }
 
 /* 失败也必须离开「运行中」：状态章复位、错误进结果区（日志仍保留）。 */
+function adviceFor(why) {
+  const text = String(why || "");
+  if (/pcap|抓包文件|文件不存在|解析失败|isn't a capture file|couldn't be read|读取|不完整/i.test(text)) {
+    return "换一个完整的 pcap / pcapng 文件（或重新抓一份）；文件损坏或格式不支持时 tshark 无法解析。";
+  }
+  if (/Npcap/i.test(text)) {
+    return "安装 Npcap 后重启工具；临时也可以用「离线分析」打开已有的 pcap 文件。";
+  }
+  if (/tshark/i.test(text)) {
+    return "确认 tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe 存在；便携包不完整时重新解压。";
+  }
+  if (/管理员|权限|permission|access is denied/i.test(text)) {
+    return "右键 NetDiag.vbs / start.bat 选「以管理员身份运行」；或改用离线分析、链路体检。";
+  }
+  if (/网卡|0 包|报文|抓包/.test(text)) {
+    return "换一块有流量的网卡，或保持「自动选择」；也可以先用「全网扫描」确认本机有没有业务流量。";
+  }
+  return "按上面的原因逐项排查；也可以点「查看日志」看完整过程，或导出诊断包发给维护者。";
+}
+
+function scrollMainTop() {
+  const sc = $("#main-scroll");
+  if (sc) sc.scrollTop = 0;
+}
+
 function failedResult(title, detail) {
   const why = detail || "未知错误";
   $("#result-chip").textContent = "失败";
-  $("#result").innerHTML = '<div class="empty"><div class="ic">!</div><b>' + esc(title)
-    + '</b><p>' + esc(why) + '</p></div>';
+  $("#result").innerHTML = '<div class="errcard"><h3>' + esc(title || "诊断失败")
+    + '</h3><p class="why"><b>为什么：</b>' + esc(why) + '</p>'
+    + '<p class="how"><b>怎么办：</b>' + esc(adviceFor(why)) + '</p>'
+    + '<div class="raw">如果以上步骤仍无法解决，点「查看日志」看完整过程，'
+    + '或到「报告与导出 → 导出诊断包」把脱敏日志发回给维护者。</div>'
+    + '<div class="acts"><button class="btn" id="err-log">查看日志</button>'
+    + '<button class="btn ghost" id="err-retry">重试</button></div></div>';
+  const logBtn = $("#err-log");
+  if (logBtn) logBtn.onclick = () => {
+    $("#consolepanel").classList.remove("collapsed");
+    $("#console-toggle").setAttribute("aria-expanded", "true");
+    $("#console").scrollTop = $("#console").scrollHeight;
+  };
+  const retry = $("#err-retry");
+  if (retry) retry.onclick = () => {
+    if (!MODE) return;
+    if (isLocked(MODE)) { showPermModal(); return; }
+    startCapture();
+  };
+  scrollMainTop();
 }
 
-function appendLog(m, err) {
+function classifyLog(message) {
+  const text = String(message || "");
+  if (/\[错误\]|错误[:：]|失败[:：]|诊断失败|监听失败|权限不足|未找到 tshark|Npcap 未安装|Npcap 未就绪|无法启动|异常[:：]/.test(text)) {
+    return "e";
+  }
+  if (/\[警告\]|\[提示\]|重试|换卡|忽略目标|降级|未捕获|0 包|解析失败|不可用|失败|警告/.test(text)) {
+    return "w";
+  }
+  if (/完成|已生成|已保存|已导出|就绪|成功|已启用/.test(text)) {
+    return "s";
+  }
+  return "i";
+}
+
+function appendLog(message, level) {
+  const text0 = String(message == null ? "" : message);
+  let stamp = new Date().toTimeString().slice(0, 8);
+  let text = text0;
+  const match = text0.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$/);
+  if (match) { stamp = match[1]; text = match[2]; }
+  let cls = typeof level === "string" ? level
+    : (level === true ? "e" : classifyLog(text));
+  if (!/^[iswe]$/.test(cls)) cls = classifyLog(text);
+
   const c = $("#console");
-  const d = document.createElement("div");
-  d.className = err ? "err" : "";
-  d.textContent = m;
-  c.appendChild(d);
+  if (c.children.length === 1 && /等待任务/.test(c.textContent)) c.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = "l " + cls;
+  const time = document.createElement("time");
+  time.textContent = stamp;
+  const body = document.createElement("span");
+  body.textContent = text;
+  row.appendChild(time);
+  row.appendChild(body);
+  c.appendChild(row);
   while (c.children.length > 400) c.removeChild(c.firstChild);
   c.scrollTop = c.scrollHeight;
   const last = $("#loglast");
-  if (last) last.textContent = String(m).replace(/^\[[^\]]*\]\s*/, "").slice(0, 42);
-  if (err) $("#logwrap").open = true;
+  if (last) last.textContent = text.slice(0, 48);
+  if (cls === "e") {
+    $("#consolepanel").classList.remove("collapsed");
+    $("#console-toggle").setAttribute("aria-expanded", "true");
+  }
 }
 
+$("#console-toggle").onclick = () => {
+  const panel = $("#consolepanel");
+  panel.classList.toggle("collapsed");
+  $("#console-toggle").setAttribute(
+    "aria-expanded", panel.classList.contains("collapsed") ? "false" : "true");
+};
+$("#console-copy").onclick = async () => {
+  const btn = $("#console-copy");
+  try {
+    await navigator.clipboard.writeText($("#console").innerText);
+    btn.textContent = "已复制 ✓";
+  } catch (e) {
+    btn.textContent = "复制失败";
+  }
+  setTimeout(() => (btn.textContent = "复制"), 1500);
+};
+$("#console-clear").onclick = () => {
+  $("#console").innerHTML = '<div class="l i"><time>--:--:--</time>'
+    + '<span>已清空显示（已落盘日志不受影响）</span></div>';
+  $("#loglast").textContent = "已清空";
+};
+
+let polling = false;
 async function poll() {
-  const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
-  if (!s) return;
-  (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
-  lastLogCount = (s.logs || []).length;
-  if (s.state === "done") { stopRun(); render(s.result); }
-  else if (s.state === "error") {
-    const why = s.error || "未知错误";
-    stopRun();
-    appendLog("诊断失败：" + why, true);
-    failedResult("诊断失败", why);
+  if (polling) return;
+  polling = true;
+  try {
+    const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
+    if (!s) return;
+    if ((s.logs || []).length < lastLogCount) lastLogCount = 0;
+    (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
+    lastLogCount = (s.logs || []).length;
+
+    if (s.state === "done") {
+      RUN_MODE = s.mode || RUN_MODE;
+      const res = s.result || {};
+      stopRun();
+      if (RUN_MODE) setMode(RUN_MODE);
+      if (res.degraded) renderDegraded(res);
+      else render(res);
+      appendLog("任务完成：结果已渲染到右侧", "s");
+    } else if (s.state === "error") {
+      const why = s.error || "未知错误";
+      RUN_MODE = s.mode || RUN_MODE;
+      stopRun();
+      appendLog("诊断失败：" + why, "e");
+      if (RUN_MODE) setMode(RUN_MODE);
+      failedResult("诊断失败", why);
+    } else if (s.state === "running") {
+      RUN_MODE = s.mode || RUN_MODE;
+      RUN_DURATION = Number(s.duration || RUN_DURATION || 0);
+      if (!timer) {
+        // 页面是中途打开/刷新的：把运行态补画出来，再接上轮询。
+        setMode(RUN_MODE);
+        runningResult();
+      }
+      updateProgress(s);
+      if (!timer) timer = setInterval(poll, 500);
+    }
+  } finally {
+    polling = false;
   }
 }
 
@@ -808,18 +1633,19 @@ function fmtBytes(n){
 async function startPassive(){
   const dur = Math.max(5, Math.min(300, parseInt($("#duration").value || "20", 10)));
   $("#duration").value = dur;
+  RUN_MODE = "passive";
+  RUN_DURATION = dur;
   $("#run").disabled = true;
   $("#run").innerHTML = '<span class="spin"></span>监听中…';
   $("#pstop").classList.remove("hidden");
   $("#hint").textContent = "正在监听网卡，期间不要关闭本窗口…";
-  $("#result-title").textContent = "被动监听结果";
-  runningResult("正在监听网卡", "只读不发包；结束后会把流量按会话聚合成表。");
+  runningResult();
+  $("#result-title").textContent = "被动监听";
   lastLogCount = 0;
   $("#console").innerHTML = "";
   const r = await fetch("/api/passive", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      target: $("#target").value.trim(),
       duration: dur,
       interface: $("#iface").value || null,
       engine: $("#engine").value,
@@ -827,12 +1653,14 @@ async function startPassive(){
   }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
   if (!r.ok) {
     const why = r.error || "未知错误";
-    appendLog("监听启动失败：" + why, true);
+    appendLog("监听启动失败：" + why, "e");
     failedResult("监听未能启动", why);
+    $("#hint").textContent = "监听没能启动：" + why
+      + "。可改用离线分析（不需要管理员）或先做链路体检。";
     stopPassiveUI();
     return;
   }
-  timerP = setInterval(pollPassive, 1000);
+  timerP = setInterval(pollPassive, 500);
   pollPassive();
 }
 
@@ -840,30 +1668,39 @@ function stopPassiveUI(){
   if (timerP) clearInterval(timerP);
   timerP = null;
   $("#run").disabled = false;
-  $("#run").textContent = runLabel();
+  $("#run").textContent = (UI.modes.passive || {}).btn || "开始监听";
   $("#pstop").classList.add("hidden");
+  $("#runpanel").classList.add("hidden");
 }
 
 async function pollPassive(){
   const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
   if (s) {
+    if ((s.logs || []).length < lastLogCount) lastLogCount = 0;
     (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
     lastLogCount = (s.logs || []).length;
   }
   const p = await fetch("/api/passive").then((x) => x.json()).catch(() => null);
   if (!p) return;
   if (p.state === "running") {
-    $("#hint").textContent = "已监听 " + Math.round(p.elapsed || 0) + " 秒…";
+    const elapsed = Math.round(p.elapsed || 0);
+    const total = Number(p.duration || RUN_DURATION || 0);
+    $("#hint").textContent = "已监听 " + elapsed + " 秒"
+      + (total > 0 ? " / 共 " + total + " 秒" : "") + "…";
+    updateProgress({ elapsed: p.elapsed || 0, duration: total,
+                     phase: p.phase || "监听中" });
     return;
   }
   stopPassiveUI();
   if (p.state === "done") {
     $("#hint").textContent = "监听完成，可继续分析或再抓一次。";
     renderPassive(p.result);
+    appendLog("监听完成：会话表已渲染到右侧", "s");
   } else if (p.state === "error") {
     const why = p.error || "未知错误";
-    appendLog("监听失败：" + why, true);
-    $("#hint").textContent = "监听失败：" + why;
+    appendLog("监听失败：" + why, "e");
+    $("#hint").textContent = "监听失败：" + why
+      + "。可先检查网卡/引擎设置，或改用离线分析。";
     failedResult("监听失败", why);
   }
 }
@@ -920,6 +1757,7 @@ function renderPassive(res){
     + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
     + '<div class="hint" style="margin-top:10px">Unknown TCP / Unknown UDP 表示既没有首包特征、'
       + '端口也不在常见画像里，不代表故障；可对可疑 IP 用上面的「链路体检」指定协议再探一次。</div>';
+  scrollMainTop();
 }
 
 /* ---------- 结果渲染 ---------- */
@@ -969,7 +1807,7 @@ function render(res) {
     + '<div class="vproof">依据：' + esc(p.proof) + '</div></div>').join("");
 
   const steps = (vd.next_steps || []).length
-    ? '<div class="sectitle">处置步骤（按顺序执行）</div><ol class="steps">'
+    ? '<div class="sectitle">接下来怎么做（按顺序执行）</div><ol class="steps">'
       + vd.next_steps.map(s => '<li>' + esc(s) + '</li>').join("") + '</ol>'
     : "";
 
@@ -1018,16 +1856,19 @@ function render(res) {
       + '</div></details>'
     : "";
 
-  /* ---- 技术明细：专业数据一条不删，默认折叠 ---- */
-  const kv = [
+  /* ---- 采集概况：11 张卡片，auto-fill 160px 防裁切（需求 #5） ---- */
+  const statGrid = [
     ["报文总数", m.packets], ["TCP 报文", m.tcp_packets], ["TCP 会话", m.streams_total],
-    ["抓包时长", m.duration + "s"], ["SYN / SYN-ACK", (m.syn || 0) + " / " + (m.synack || 0)],
+    ["抓包时长", (m.duration == null ? 0 : m.duration) + "s"],
+    ["SYN / SYN-ACK", (m.syn || 0) + " / " + (m.synack || 0)],
     ["重传 / 乱序", (m.retrans || 0) + " / " + (m.ooo || 0)],
     ["RST / 零窗口", (m.rst || 0) + " / " + (m.zero_win || 0)],
     ["DNS 查询 / 响应", (m.dns_total || 0) + " / " + (m.dns_resp || 0)],
-    ["NXDOMAIN", m.nxdomain], ["HTTP 请求 / 5xx", (m.http_req || 0) + " / " + (m.http_err5 || 0)],
-    ["外部目标 IP", m.external_ips], ["抓包文件", m.pcap_name],
-  ].map(([k, v]) => '<div>' + esc(k) + '<b>' + esc(v == null ? "-" : v) + '</b></div>').join("");
+    ["NXDOMAIN", m.nxdomain],
+    ["HTTP 请求 / 5xx", (m.http_req || 0) + " / " + (m.http_err5 || 0)],
+    ["外部目标 IP", m.external_ips],
+  ].map(([k, v]) => '<div class="stat"><span>' + esc(k) + '</span><b>'
+    + esc(v == null ? "-" : v) + '</b></div>').join("");
 
   const protoRows = (m.proto_mix || []).map(x => [esc(x.proto), x.count]);
   const extRows = (m.ext_detail || []).map(e => [
@@ -1035,9 +1876,8 @@ function render(res) {
     (e.risk_ports || []).length ? '<span style="color:#b91c1c">' + e.risk_ports.join(", ") + '</span>' : "-",
   ]);
 
-  const techBlock = '<details class="tech"><summary>技术明细（采集概况 / 协议分布 / 外部目标）</summary><div class="tbody">'
-    + '<h5>采集概况</h5><div class="kv">' + kv + '</div>'
-    + (protoRows.length ? '<h5 style="margin-top:14px">协议分布</h5>' + miniTable(["协议", "报文数"], protoRows) : "")
+  const techBlock = '<details class="tech"><summary>技术明细（协议分布 / 外部目标）</summary><div class="tbody">'
+    + (protoRows.length ? '<h5>协议分布</h5>' + miniTable(["协议", "报文数"], protoRows) : "")
     + (extRows.length ? '<h5 style="margin-top:14px">外部目标与端口</h5>' + miniTable(["外部 IP", "报文数", "涉及端口", "高危端口"], extRows) : "")
     + '</div></details>';
 
@@ -1061,6 +1901,9 @@ function render(res) {
       <p class="vplain">${esc(vd.plain || "")}</p>
       <div class="chips">${chips}</div>
     </div>
+
+    <div class="sectitle">采集概况</div>
+    <div class="statgrid">${statGrid}</div>
 
     <div class="sectitle">分层定位（自下而上，哪一层红了就先查哪一层）</div>
     <div class="layerbar">${layerbar}</div>
@@ -1106,6 +1949,60 @@ function render(res) {
     URL.revokeObjectURL(a.href);
   };
   $("#ai-explain").onclick = runAI;
+  scrollMainTop();
+}
+
+/* ---------- 0 包降级结果页（中性，不报红） ---------- */
+function renderDegraded(res) {
+  LAST_RESULT = res;
+  const link = res.link || {};
+  const cap = res.capture || {};
+  const fmt = (v) => (v == null || v === "" ? "-" : (Number(v) < 1 ? "<1 ms" : v + " ms"));
+  const via = link.via === "target" ? "目标" : "默认网关";
+  $("#result-title").textContent = "诊断结果 · 降级";
+  $("#result-sub").textContent = "抓包窗口没有业务报文，已自动用链路体检给出可达性结论";
+  $("#result-chip").textContent = "降级 · 链路可达";
+  const reasons = (res.reasons || []).map((r) => '<li>' + esc(r) + '</li>').join("");
+  const steps = (res.next_steps || []).map((s) => '<li>' + esc(s) + '</li>').join("");
+  $("#result").innerHTML =
+    '<div class="vcard 警告">'
+    + '<div class="vtop"><span class="vt">降级</span>'
+    + '<span class="vlay">采集有效性</span><h3>' + esc(res.headline || "未捕获业务报文，但链路可达")
+    + '</h3></div>'
+    + '<p class="vplain">' + esc(res.plain || "") + '</p>'
+    + '<div class="chips">'
+    + '<span class="chip">RTT 平均 <b>' + esc(fmt(link.avg_ms)) + '</b></span>'
+    + '<span class="chip">抖动 <b>' + esc(fmt(link.jitter_ms)) + '</b></span>'
+    + '<span class="chip">丢包 <b>' + esc((link.loss_pct == null ? "-" : link.loss_pct) + "%") + '</b></span>'
+    + '<span class="chip">' + esc(via) + ' <b>' + esc(link.host || "-") + '</b></span>'
+    + '<span class="chip">网卡 <b>' + esc(cap.interface || "-") + '</b></span>'
+    + '<span class="chip">过滤器 <b>' + esc(cap.bpf || "-") + '</b></span>'
+    + '</div></div>'
+    + '<div class="sectitle">为什么没抓到业务报文</div>'
+    + '<div class="point"><div class="vl"><ol class="steps">' + reasons + '</ol></div></div>'
+    + '<div class="sectitle">接下来怎么做</div>'
+    + '<ol class="steps">' + steps + '</ol>'
+    + '<div class="hint">本次抓包：' + esc(cap.duration || 0) + ' 秒 · 目标 '
+    + esc(cap.target || "全网") + ' · 原始提示：<span class="fname">'
+    + esc(cap.error || "-") + '</span></div>'
+    + '<div class="toolbar" style="margin-top:12px">'
+    + '<button class="btn ghost" id="deg-retry">再抓一次</button>'
+    + '<button class="btn ghost" id="deg-probe">去链路体检</button>'
+    + '</div>';
+  const retry = $("#deg-retry");
+  if (retry) retry.onclick = () => {
+    const mode = cap.target && cap.target !== "全网" ? "live" : "scan";
+    setMode(isLocked(mode) ? MODE : mode);
+    if (mode === "live") $("#target").value = cap.target === "全网" ? "" : cap.target;
+    if (isLocked(mode)) { showPermModal(); return; }
+    startCapture();
+  };
+  const probe = $("#deg-probe");
+  if (probe) probe.onclick = () => {
+    setMode("probe");
+    if (cap.target && cap.target !== "全网") $("#probe-target").value = cap.target;
+  };
+  scrollMainTop();
 }
 
 /* ---------- 链路体检 ---------- */
@@ -1178,6 +2075,7 @@ async function runProbe(){
     + (r.tcp && r.tcp.ok ? '<br>建连 ' + r.tcp.tried + ' 次，失败 ' + r.tcp.fail + ' 次，抖动 '
        + ms(r.tcp.stats.jitter) : "")
     + (detail.length ? '<br>' + detail.map(esc).join('　·　') : "") + '</div>';
+  scrollMainTop();
 }
 
 $("#probe-run").onclick = runProbe;
@@ -1430,7 +2328,9 @@ async function loadAppInfo() {
   const r = await fetch("/api/app").then((x) => x.json()).catch(() => null);
   if (r && r.ok) {
     APP_INFO = r;
-    document.title = `${document.title} · 端口 ${r.port}`;
+    if (!document.title.includes("端口")) {
+      document.title = `${document.title} · 端口 ${r.port}`;
+    }
     if (r.auto_quit) {
       $("#quit-app").title =
         `停止本机后台服务；${r.idle_exit_min} 分钟无人使用会自动退出`;
@@ -1440,10 +2340,16 @@ async function loadAppInfo() {
 
 /* ---------------- 导出诊断包（M2） ---------------- */
 async function exportDiagPack() {
-  const btn = $("#diagpack");
-  const label = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "正在打包…";
+  // 顶部「导出诊断包」也切到导出页，否则结果只在控制台里，用户看不到路径。
+  if (VIEW !== "export") setView("export");
+  const top = $("#diagpack");
+  const local = $("#export-run");
+  const topLabel = top.textContent;
+  top.disabled = true;
+  top.textContent = "正在打包…";
+  if (local) { local.disabled = true; local.textContent = "正在打包…"; }
+  const msg = $("#export-msg");
+  if (msg) msg.innerHTML = '<div class="msg wait">正在收集日志并脱敏，通常 2~5 秒…</div>';
   try {
     const r = await fetch("/api/diagpack", {
       method: "POST",
@@ -1451,21 +2357,31 @@ async function exportDiagPack() {
       body: JSON.stringify({}),
     }).then((x) => x.json());
     if (!r.ok) throw new Error(r.error || "导出失败");
-    alert(
-      `诊断包已生成：\n${r.path}\n\n` +
-      `大小：${(r.size / 1024).toFixed(0)} KB，共 ${r.entries} 个文件。\n` +
-      `已自动脱敏（内网 IP / 域名 / 用户名 / MAC）。\n\n` +
-      `请把这个文件原样发回给维护者。工具不会自动上传任何数据。`
-    );
+    const text = `诊断包已生成：${r.path}\n大小：${(r.size / 1024).toFixed(0)} KB，`
+      + `共 ${r.entries} 个文件。已自动脱敏（内网 IP / 域名 / 用户名 / MAC）。`;
+    if (msg) {
+      msg.innerHTML = '<div class="msg ok"><b>诊断包已生成</b><br>'
+        + '路径：<span class="fname">' + esc(r.path) + '</span><br>'
+        + '大小：' + (r.size / 1024).toFixed(0) + ' KB，共 ' + r.entries + ' 个文件。'
+        + '<br>已自动脱敏（内网 IP / 域名 / 用户名 / MAC）。'
+        + '<br>请把这个文件原样发回给维护者；工具不会自动上传任何数据。</div>';
+    }
+    appendLog(text, false);
   } catch (e) {
-    alert("导出诊断包失败：" + e + "\n可改用工具目录下的「导出诊断包.bat」。");
+    if (msg) msg.innerHTML = '<div class="msg bad">导出失败：' + esc(e)
+      + '<br>可改用工具目录下的「导出诊断包.bat」。</div>';
+    appendLog("导出诊断包失败：" + e, true);
   } finally {
-    btn.disabled = false;
-    btn.textContent = label;
+    top.disabled = false;
+    top.textContent = topLabel;
+    if (local) { local.disabled = false; local.textContent = "生成诊断包"; }
   }
 }
 
 $("#diagpack").onclick = exportDiagPack;
+$("#export-run").onclick = exportDiagPack;
+$("#ai-panel-open").onclick = openAI;
+$("#sysinfo-refresh").onclick = loadSysInfo;
 
 $("#quit-app").onclick = quitApp;
 

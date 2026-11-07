@@ -19,6 +19,9 @@ from pathlib import Path
 CORE = Path(__file__).resolve().parent
 ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
+sys.path.insert(0, str(ROOT))
+
+from core.platform import winapi  # noqa: E402
 
 import analyzer  # noqa: E402
 import diagpack  # noqa: E402
@@ -167,6 +170,26 @@ def _non_public_reason(ip: str) -> str:
     return ""
 
 
+def _network_non_public_reason(
+        net: ipaddress.IPv4Network | ipaddress.IPv6Network) -> str:
+    """判断一个网段为什么不能整段作为抓包过滤器。
+
+    抓包阶段的 ``net`` 过滤只对**公网 CIDR** 有意义；私网 / fake-ip / 回环等
+    网段一旦下过滤，很可能只抓到噪声（甚至 0 包）。这类目标改为抓全网，分析
+    阶段再按用户目标筛选 —— 与「尽量抓到东西」的目标一致。
+
+    Args:
+        net: :mod:`ipaddress` 的网络对象（IPv4 或 IPv6）。
+
+    Returns:
+        str: 非公网原因（如 ``私网地址`` / ``代理假 IP 段``）；整段都是公网时返回空串。
+    """
+    for bad, label in _NON_PUBLIC_NETS:
+        if net.version == bad.version and net.overlaps(bad):
+            return label
+    return ""
+
+
 def _resolve_ips(host: str) -> list[str]:
     """把域名解析成去重后的 IP 列表（IPv4 在前）。
 
@@ -208,7 +231,8 @@ def capture_filter_for(target: str, logger=None) -> dict:
     Returns:
         dict: 键 ``bpf``（最终过滤器，空串=无过滤）/ ``kind``（``none`` /
             ``ip`` / ``cidr`` / ``domain``）/ ``resolved``（域名解析出的 IP 列表）/
-            ``reason``（决策原因）。
+            ``reason``（决策原因）。只有**公网** IP、域名、CIDR 才会下过滤器；
+            私网 / fake-ip / 回环等目标一律抓全网，分析阶段再按目标筛。
     """
     log = logger or (lambda _message: None)
     t = (target or "").strip()
@@ -219,17 +243,24 @@ def capture_filter_for(target: str, logger=None) -> dict:
     if not all(c.isalnum() or c in ".:/-_" for c in t):
         raise ValueError("目标只能是 IP、网段(CIDR) 或域名，不要带空格与特殊符号")
 
-    # 1) 纯 IP：用户已经指定到地址，直接按 IP 过滤（包括内网网关，这是常见用法）。
+    # 1) 纯 IP：只有公网地址才下 host 过滤。私网 / fake-ip / 回环等目标在代理或
+    #    TUN 环境里经常对不上真实流量，下了过滤反而 0 包 —— 抓全网，分析阶段筛。
     try:
         addr = ipaddress.ip_address(t)
     except ValueError:
         addr = None
     if addr is not None:
+        non_public = _non_public_reason(str(addr))
+        if non_public:
+            log(f"[提示] 目标 {t} 是{non_public}，抓包阶段不做 host 过滤（抓全网），"
+                "分析阶段再按目标筛选")
+            return {"bpf": "", "kind": "ip", "resolved": [str(addr)],
+                    "reason": f"{non_public}，抓全网分析阶段筛选"}
         bpf = f"host {addr}"
-        log(f"[提示] 目标 {t} 是 IP 地址，抓包阶段使用 {bpf}")
-        return {"bpf": bpf, "kind": "ip", "resolved": [str(addr)], "reason": "目标为 IP"}
+        log(f"[提示] 目标 {t} 是公网 IP 地址，抓包阶段使用 {bpf}")
+        return {"bpf": bpf, "kind": "ip", "resolved": [str(addr)], "reason": "公网 IP"}
 
-    # 2) CIDR：pcap 的 net 支持 192.168.1.0/24；带主机位时先规范成网络地址。
+    # 2) CIDR：只有公网网段才用 net 过滤；私网 / fake-ip 网段抓全网再筛。
     if "/" in t:
         try:
             net = ipaddress.ip_network(t, strict=False)
@@ -237,10 +268,16 @@ def capture_filter_for(target: str, logger=None) -> dict:
             log(f"[提示] 目标 {t} 的网段写法无法解析（{exc}），抓包阶段不做过滤，"
                 "分析阶段再按目标筛选")
             return {"bpf": "", "kind": "cidr", "resolved": [], "reason": "网段无法解析"}
+        non_public = _network_non_public_reason(net)
+        if non_public:
+            log(f"[提示] 目标 {t} 是{non_public}网段，抓包阶段不做 net 过滤（抓全网），"
+                "分析阶段再按目标筛选")
+            return {"bpf": "", "kind": "cidr", "resolved": [],
+                    "reason": f"{non_public}网段，抓全网分析阶段筛选"}
         bpf = f"net {net.with_prefixlen}"
         note = "（已按网络地址规范化）" if t != net.with_prefixlen else ""
-        log(f"[提示] 目标 {t} 是网段，抓包阶段使用 {bpf}{note}")
-        return {"bpf": bpf, "kind": "cidr", "resolved": [], "reason": "目标为网段"}
+        log(f"[提示] 目标 {t} 是公网网段，抓包阶段使用 {bpf}{note}")
+        return {"bpf": bpf, "kind": "cidr", "resolved": [], "reason": "公网网段"}
 
     # 3) 域名：解析 → 只接受全公网结果；其余情况明确降级为「抓全网」。
     ips = _resolve_ips(t)
@@ -274,7 +311,8 @@ def bpf_for(target: str) -> str:
         target: 用户输入的目标，如 ``192.168.1.10`` / ``10.0.0.0/24`` / ``example.com``。
 
     Returns:
-        str: BPF 串；空串表示抓全网（空目标、解析失败、fake-ip/私网域名等）。
+        str: BPF 串；空串表示抓全网（空目标、解析失败、fake-ip/私网域名、
+            私网 IP / 私网 CIDR 等）。
 
     Raises:
         ValueError: 目标含非法字符，或长度超过 200 个字符（由调用方转成可展示的错误）。
@@ -333,23 +371,26 @@ def _pcap_has_packets(ts: Path, pcap: Path) -> bool:
     return rc == 0 and bool((out or "").strip())
 
 
-def _capture_empty_error(plan: list[dict], duration: int, bpf: str) -> str:
+def _capture_empty_error(plan: list[dict], durations: list[int], bpf: str) -> str:
     """构造「候选网卡全都没抓到包」的错误文案（可直接照着操作）。
 
     Args:
         plan: 本轮实际尝试过的网卡列表。
-        duration: 每块网卡抓了多少秒。
+        durations: 与 ``plan`` 一一对应的实际抓包秒数。换卡重试会把后几块缩短到
+            ``min(用户时长, 10)``，文案必须写真实序列（如 ``30s→10s→10s``），
+            不能只写用户请求的 30s。
         bpf: 本次使用的 BPF 过滤器；空串表示全网。
 
     Returns:
-        str: 中文错误说明，含 ``--interfaces`` / ``--interface`` 自助命令，
-            以及「网卡未连接」和「流量走了 VPN 虚拟网卡」两类常见原因。
+        str: 中文错误说明，含实际时长序列、``--interfaces`` / ``--interface``
+            自助命令，以及「网卡未连接」和「流量走了 VPN 虚拟网卡」两类常见原因。
     """
     names = "、".join(f"{tshark.short_name(i['name'])}[{i['index']}]" for i in plan)
     if len(plan) == 1:
-        lead = f"网卡 {names} 在 {duration} 秒内没有捕获到任何报文"
+        lead = f"网卡 {names} 在 {durations[0] if durations else 0} 秒内没有捕获到任何报文"
     else:
-        lead = (f"连续 {len(plan)} 块候选网卡（{names}）在 {duration} 秒内都没有"
+        seq = "→".join(f"{d}s" for d in durations)
+        lead = (f"连续 {len(plan)} 块候选网卡（{names}）在 {seq} 内都没有"
                 "捕获到任何报文")
     reasons = ("常见原因：1) 选中的网卡未连接或没有业务流量（例如已断开的以太网口）；"
                "2) 流量走了 VPN / 代理的虚拟网卡（如 mihomo(Clash Meta) 的 Meta/TUN 网卡），"
@@ -436,14 +477,16 @@ def _explicit_empty_result(ts: Path, iface: dict, ordered: list[dict], duration:
         logger: 日志回调。
 
     Returns:
-        dict: ``{"ok": False, "degraded": True, "error": 可操作错误文案}``；
+        dict: ``{"ok": False, "degraded": True, "empty": True,
+            "interface": 网卡名, "bpf": 过滤器, "error": 可操作错误文案}``；
             错误里列出本次探测发现有流量的候选网卡（不会用它们继续抓包）。
     """
     others = [i for i in ordered if i["index"] != iface["index"]]
     logger(f"[提示] 显式指定网卡[{iface['index']}] 抓包为空，按指定不换卡；"
            "正在探测其它候选网卡是否有流量（仅用于提示）...")
     traffic = _probe_traffic_candidates(ts, others)
-    return {"ok": False, "degraded": True,
+    return {"ok": False, "degraded": True, "empty": True,
+            "interface": tshark.short_name(iface["name"]), "bpf": bpf,
             "error": _explicit_empty_error(iface, duration, bpf, traffic)}
 
 
@@ -466,7 +509,8 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
             "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
-            "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
+            "degraded": bool, "empty": bool}``，``empty=True`` 表示抓包窗口内
+            0 包（可走 0 包降级），``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
             环境问题，前端据此提示改用离线分析。自动选择模式下抓满 0 包/0 字节时不
             直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
             ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
@@ -590,10 +634,154 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
                 "interface_index": cand["index"], "bpf": bpf or "无（全网）",
                 "duration": attempt_duration}
 
-    error = _capture_empty_error(plan, duration, bpf)
+    durations = [duration if attempt == 1 else min(duration, 10)
+                 for attempt, _cand in enumerate(plan, 1)]
+    error = _capture_empty_error(plan, durations, bpf)
     if failures:
         error += f"（各网卡结果：{'；'.join(failures)}）"
-    return {"ok": False, "degraded": True, "error": error}
+    return {"ok": False, "degraded": True, "empty": True, "error": error}
+
+
+def _fmt_ms(value: float) -> str:
+    """把毫秒数写成给人看的短串：不足 1ms 写 ``<1``，其余去掉多余的 0。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if number < 1:
+        return "<1"
+    return f"{number:g}"
+
+
+def _link_stats(host: str) -> dict:
+    """对单个地址做一次轻量 ICMP 体检（薄包装，测试可替换）。
+
+    Args:
+        host: IPv4 字面量。
+
+    Returns:
+        dict: :func:`core.platform.winapi.icmp_stats` 的结果；调用异常时退回
+            ``{"ok": False, ...}``，绝不让降级路径因探测失败而崩。
+    """
+    try:
+        return winapi.icmp_stats(host, count=4, timeout_ms=800)
+    except Exception as exc:  # noqa: BLE001  探测失败只表示「拿不到降级信息」
+        return {"ok": False, "host": host, "sent": 4, "recv": 0, "loss_pct": 100.0,
+                "avg_ms": 0.0, "jitter_ms": 0.0,
+                "error": f"{type(exc).__name__}: {exc}"}
+
+
+def degraded_empty_capture_result(target: str = "", duration: int = 0,
+                                  interface: str | None = None,
+                                  capture_error: str = "", bpf: str = "",
+                                  logger=log) -> dict | None:
+    """0 包优雅降级：抓包窗口没有业务报文时，用链路可达性代替「红色失败」。
+
+    路测反馈：网卡选错、流量走 VPN/TUN、或目标本来就没流量时，三块网卡 0 包直接
+    判「诊断失败」会让人以为工具坏了。这里自动对「目标 → 默认网关」做一次 ICMP
+    体检，只要拿到时延/抖动/丢包就返回中性降级结论；只有连这组信息都拿不到
+    （如 Npcap 不可用、网卡打不开）时才让调用方报错。
+
+    Args:
+        target: 用户填的目标；空表示全网扫描。
+        duration: 本次抓包时长（秒），写进结论。
+        interface: 用户显式选择的网卡；空表示自动选择。
+        capture_error: 抓包阶段的原始错误文案（放进「为什么」供排障）。
+        bpf: 本次实际使用的 BPF 过滤器；空串表示全网。
+        logger: 日志回调。
+
+    Returns:
+        dict | None: 成功时 ``{"ok": True, "degraded": True, "headline",
+            "plain", "link": {...}, "reasons": [...], "next_steps": [...],
+            "capture": {...}}``；目标与默认网关都测不到时返回 ``None``
+            （调用方应按真正的失败处理）。
+    """
+    link: dict | None = None
+    via = ""
+    host = ""
+    probe_host = ""
+    if target:
+        # 域名先解析成 IP 再探测；10.255.255.1 这类 IP 直接探。
+        probe_host = target
+        try:
+            ipaddress.ip_address(target)
+        except ValueError:
+            resolved = _resolve_ips(target)
+            probe_host = resolved[0] if resolved else ""
+        if probe_host:
+            stats = _link_stats(probe_host)
+            if stats.get("ok"):
+                link, via, host = stats, "target", target
+    gateway = ""
+    if link is None:
+        gateway = winapi.default_gateway()
+        if gateway:
+            stats = _link_stats(gateway)
+            if stats.get("ok"):
+                link, via, host = stats, "gateway", gateway
+    if link is None:
+        return None
+    if via == "gateway":
+        probe_host = host
+
+    avg = _fmt_ms(link.get("avg_ms", 0))
+    jitter = _fmt_ms(link.get("jitter_ms", 0))
+    loss = link.get("loss_pct", 100.0)
+    metrics = (f"RTT 平均 {avg} ms / 抖动 {jitter} ms / 丢包 {loss:g}%")
+    if via == "target":
+        headline = "未捕获业务报文，但链路可达"
+        plain = (f"抓包窗口内没有业务报文；对目标 {target} 的探测显示链路可达："
+                 f"{metrics}。")
+    else:
+        headline = "未捕获业务报文，但本地链路可达"
+        if target:
+            plain = (f"抓包窗口内没有业务报文；目标 {target} 当前没有响应，"
+                     f"但本机到默认网关 {host} 的链路可达：{metrics}。")
+        else:
+            plain = (f"抓包窗口内没有业务报文；本机到默认网关 {host} 的链路可达："
+                     f"{metrics}。")
+
+    reasons = [
+        "抓包点可能看不到业务流量：VPN / 代理 / TUN 虚拟网卡（如 mihomo 的 Meta）"
+        "会改写路由，物理网卡上可能没有业务报文。",
+        "该目标在抓包窗口内本来就没有流量（例如只发了一次请求，或目标不在线）。",
+    ]
+    if via == "gateway":
+        reasons.append("目标本身可能不可达：先用「链路体检」测目标与网关，"
+                       "确认是本地链路问题还是对端问题。")
+    next_steps = [
+        "换一块有流量的网卡（或保持「自动选择」）再抓一次。",
+        "把抓包时长调到 30~60 秒；仍为空可先用「全网扫描」确认本机有没有业务流量。",
+        "如果走代理 / VPN，优先在 TUN 虚拟网卡（如 Meta）上抓包。",
+    ]
+    if via == "gateway" and target:
+        next_steps.insert(0, f"目标 {target} 当前不可达：先查路由 / 防火墙，"
+                             "或用「链路体检」确认目标端口是否在监听。")
+
+    logger(f"[提示] 未捕获业务报文，已自动做链路体检：{metrics}"
+           f"（{'目标' if via == 'target' else '默认网关'} {host}），不判为失败")
+    return {
+        "ok": True,
+        "degraded": True,
+        "degraded_reason": "empty_capture",
+        "headline": headline,
+        "plain": plain,
+        "link": {"via": via, "host": host, "probe_host": probe_host or host,
+                 "avg_ms": link.get("avg_ms", 0.0),
+                 "jitter_ms": link.get("jitter_ms", 0.0),
+                 "loss_pct": link.get("loss_pct", 100.0),
+                 "recv": link.get("recv", 0), "sent": link.get("sent", 0)},
+        "reasons": reasons,
+        "next_steps": next_steps,
+        "capture": {
+            "target": target or "全网",
+            "interface": interface or "自动选择",
+            "duration": int(duration or 0),
+            "bpf": bpf or "无（全网）",
+            "error": capture_error,
+        },
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
@@ -746,7 +934,11 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
     else:
         cap = capture_live(target, duration, interface, logger=logger)
         if not cap.get("ok"):
-            return {"ok": False, "error": cap.get("error", "抓包失败"), "degraded": cap.get("degraded", False)}
+            return {"ok": False, "error": cap.get("error", "抓包失败"),
+                    "degraded": cap.get("degraded", False),
+                    "empty_capture": bool(cap.get("empty")),
+                    "bpf": cap.get("bpf", ""),
+                    "interface": cap.get("interface", "")}
 
     logger("开始分析报文 ...")
     result = analyzer.analyze(cap["pcap"], target=target, ti_key=cfg.get("threat_intel_key", ""), log=logger)

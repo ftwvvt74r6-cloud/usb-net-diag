@@ -5,7 +5,9 @@ API:
   GET  /api/status          任务状态 / 日志 / 结果
   GET  /api/interfaces      可用网卡
   GET  /api/captures        已有抓包文件
+  GET  /api/reports         历史报告列表（报告与导出 → 历史报告）
   POST /api/scan            启动诊断 {mode,target,duration,interface,pcap}
+  POST /api/elevate         非管理员一键请求 UAC 提权重启
   POST /api/upload?name=x   上传 pcap 后离线分析
   GET  /api/report?path=    读取报告文件
   GET  /api/doctor          环境自检
@@ -26,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -64,6 +67,7 @@ JOB = {
     "state": "idle",      # idle | running | done | error
     "mode": "",
     "target": "",
+    "duration": 0,        # 用户请求的抓包秒数（离线分析为 0，进度条据此算倒计时）
     "started_at": 0.0,
     "finished_at": 0.0,
     "logs": [],
@@ -74,6 +78,7 @@ JOB = {
 # 被动监听单独一个任务槽，避免和诊断任务互相覆盖
 PJOB = {
     "state": "idle",      # idle | running | done | error
+    "duration": 0,
     "started_at": 0.0,
     "finished_at": 0.0,
     "result": None,
@@ -202,6 +207,58 @@ def _to_float(v, default: float, lo: float, hi: float) -> float:
     return max(lo, min(n, hi))
 
 
+_ATTEMPT_RE = re.compile(r"第\s*(\d+)\s*/\s*(\d+)\s*块")
+
+
+def _job_phase(state: str, logs: list[dict]) -> str:
+    """从任务状态与日志关键字推断当前阶段（给进度条显示）。
+
+    日志是采集层写的唯一事实来源；与其在抓包线程里到处埋状态，不如由查询接口
+    统一解析 —— 这样老的 ``/api/status`` 字段完全不变，只做加法。
+
+    Args:
+        state: :data:`JOB` 的 ``state``。
+        logs: :data:`JOB` 的日志列表（每项含 ``t`` / ``m``）。
+
+    Returns:
+        str: ``空闲`` / ``准备中`` / ``探测网卡`` / ``抓包中`` / ``分析中`` /
+            ``完成`` / ``失败`` 之一。
+    """
+    if state == "idle":
+        return "空闲"
+    if state == "done":
+        return "完成"
+    if state == "error":
+        return "失败"
+    messages = [str(row.get("m") or "") for row in (logs or [])]
+    if any("报告已生成" in m for m in messages):
+        return "完成"
+    if any("开始分析报文" in m or "链路体检" in m for m in messages):
+        return "分析中"
+    if any("开始抓包" in m for m in messages):
+        return "抓包中"
+    if any("探测网卡" in m for m in messages):
+        return "探测网卡"
+    return "准备中"
+
+
+def _job_attempt(logs: list[dict]) -> tuple[int, int]:
+    """从「第 2/3 块」日志里取最近一次换卡重试的进度。
+
+    Args:
+        logs: :data:`JOB` 的日志列表。
+
+    Returns:
+        tuple[int, int]: ``(当前块, 总块数)``；没有换卡日志时返回 ``(0, 0)``。
+    """
+    attempt = total = 0
+    for row in logs or []:
+        match = _ATTEMPT_RE.search(str(row.get("m") or ""))
+        if match:
+            attempt, total = int(match.group(1)), int(match.group(2))
+    return attempt, total
+
+
 def doctor_cached(ttl: int = 60) -> dict:
     """环境自检（带缓存）。
 
@@ -312,7 +369,18 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
         if mode == "offline":
             res = diagnose.run_scan(target=target, pcap=pcap, logger=log)
         else:
-            res = diagnose.run_scan(target=target, duration=duration, interface=interface, logger=log)
+            res = diagnose.run_scan(target=target, duration=duration,
+                                    interface=interface, logger=log)
+            if not res.get("ok") and res.get("empty_capture"):
+                # 0 包不直接判失败：自动做一次链路体检（目标 → 默认网关），
+                # 拿到时延/抖动/丢包就降级成中性结论；拿不到才走红色失败。
+                fallback = diagnose.degraded_empty_capture_result(
+                    target=target, duration=duration,
+                    interface=res.get("interface") or interface,
+                    capture_error=res.get("error", ""),
+                    bpf=res.get("bpf", ""), logger=log)
+                if fallback is not None:
+                    res = fallback
         with LOCK:
             if res.get("ok"):
                 JOB["state"] = "done"
@@ -353,6 +421,11 @@ def start_job(payload: dict) -> dict:
         if mode not in ("live", "scan", "offline"):
             mode = "live"
         target = (payload.get("target") or "").strip()[:300]
+        ignored_target = ""
+        if mode == "scan" and target:
+            # 全网扫描的语义是「不设过滤、抓本机全部流量」。历史上前端仍显示目标框，
+            # 用户填了就被当成 host 过滤导致 0 包；这里做后端兜底：忽略并记日志。
+            ignored_target, target = target, ""
         duration = _to_int(payload.get("duration"), int(cfg.get("default_duration", 30)),
                            3, int(cfg.get("max_duration", 180)))
         interface = payload.get("interface") or None
@@ -369,11 +442,80 @@ def start_job(payload: dict) -> dict:
             pcap = str(cand)
 
         JOB.update({"state": "running", "mode": mode, "target": target or "全网",
+                    "duration": duration if mode != "offline" else 0,
                     "started_at": time.time(), "finished_at": 0, "logs": [],
                     "result": None, "error": ""})
+    if ignored_target:
+        log(f"[提示] 全网扫描模式忽略目标 {ignored_target}，抓取全部流量")
     log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s")
     threading.Thread(target=_worker, args=(mode, target, duration, interface, pcap), daemon=True).start()
     return {"ok": True}
+
+
+def report_index(limit: int = 50) -> list[dict]:
+    """列出 ``reports/`` 下的历史报告（界面「报告与导出 → 历史报告」用）。
+
+    只读目录，不生成、不修改任何报告；按修改时间倒序，最多 ``limit`` 条。
+
+    Args:
+        limit: 最多返回多少条（正数；调用方负责上限）。
+
+    Returns:
+        list[dict]: 每项键 ``name``（.md 文件名）/ ``size``（字节）/
+            ``mtime``（``YYYY-MM-DD HH:MM``）/ ``json``（同名 .json 存在时为文件名，
+            否则空串）。目录不可读时返回空列表，不抛异常。
+    """
+    try:
+        paths = sorted(REPORTS.glob("*.md"), key=lambda p: p.stat().st_mtime,
+                       reverse=True)
+    except OSError:
+        return []
+    out: list[dict] = []
+    for path in paths[:max(0, int(limit))]:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        sidecar = path.with_suffix(".json")
+        out.append({
+            "name": path.name,
+            "size": stat.st_size,
+            "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
+            "json": sidecar.name if sidecar.is_file() else "",
+        })
+    return out
+
+
+def request_elevation() -> dict:
+    """UI「以管理员身份重启」：调用启动器已有的 UAC 提权路径。
+
+    提权本身是 Windows 的安全桌面确认，做不到静默；这里只负责发起请求：
+
+    * 已是管理员 → 直接返回 ``already_admin``，不重复弹 UAC；
+    * 用户点「是」→ 新进程以管理员权限启动（``core/app.py --elevated`` 会等旧实例
+      释放端口后再监听，避免两个实例抢同一个端口），随后旧服务退出；
+    * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
+      离线分析与链路体检不受影响。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
+            失败 ``{"ok": False, "error": "..."}``。
+    """
+    if tshark.is_admin():
+        return {"ok": True, "already_admin": True, "message": "当前已是管理员权限"}
+    try:
+        import app  # noqa: PLC0415  延迟导入：只有提权时才需要启动器模块
+        started = app.relaunch_as_admin()
+    except Exception as exc:  # noqa: BLE001  提权失败只回可读错误，不影响服务
+        return {"ok": False, "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
+    if not started:
+        return {"ok": False,
+                "error": "未获得管理员权限（已取消，或被系统策略禁止）。"
+                         "仍可继续使用离线分析与链路体检。"}
+    log("[提示] 已请求以管理员身份重启，等待 Windows 授权…")
+    threading.Timer(0.8, lambda: request_quit("正在以管理员权限重启，服务即将退出…")
+                    ).start()
+    return {"ok": True, "message": "已请求管理员权限，服务将重启"}
 
 
 # ---------------------------------------------------------------- 被动监听
@@ -446,7 +588,8 @@ def passive_start(payload: dict) -> dict:
         engine = "auto"
     with LOCK:
         PJOB.update({"state": "running", "error": "", "result": None, "engine": engine,
-                     "started_at": time.time(), "finished_at": 0, "stop": False})
+                     "duration": duration, "started_at": time.time(),
+                     "finished_at": 0, "stop": False})
     log(f"被动监听启动：网卡 {interface or '自动选择'}，{duration}s，"
         f"目标 {target or '全部流量'}，引擎 {engine}")
     threading.Thread(target=_passive_worker,
@@ -464,11 +607,16 @@ def passive_status() -> dict:
     """
     with LOCK:
         snap = {k: PJOB[k] for k in ("state", "result", "error", "engine",
-                                     "started_at", "finished_at")}
+                                     "started_at", "finished_at", "duration")}
         running = PJOB["state"] == "running"
     snap["ok"] = True
     snap["engine_info"] = engine_info()
     snap["elapsed"] = round(time.time() - snap["started_at"], 1) if running and snap["started_at"] else 0
+    if running:
+        # 监听中 → 汇总中：最后 1 秒留给会话汇总，别让用户以为卡在 0 秒不动。
+        snap["phase"] = "监听中" if snap["elapsed"] < max(1, snap["duration"] - 1) else "汇总中"
+    else:
+        snap["phase"] = {"done": "完成", "error": "失败"}.get(snap["state"], "空闲")
     return snap
 
 
@@ -723,6 +871,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = dict(JOB)
             data["elapsed"] = round((data["finished_at"] or time.time()) - data["started_at"], 1) \
                 if data["state"] in ("running", "done", "error") and data["started_at"] else 0
+            # 加法字段：老前端不读也不受影响；新前端据此画进度条 / 倒计时 / 阶段。
+            data["phase"] = _job_phase(data["state"], data.get("logs") or [])
+            attempt, attempts = _job_attempt(data.get("logs") or [])
+            data["attempt"] = attempt
+            data["attempts"] = attempts
             return self._json(data)
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]
@@ -733,6 +886,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"files": [{"name": p.name, "size": p.stat().st_size,
                                           "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))}
                                          for p in files[:50]]})
+        if path == "/api/reports":
+            return self._json({"ok": True, "files": report_index()})
         if path == "/api/report":
             q = urllib.parse.parse_qs(parsed.query)
             name = (q.get("path") or [""])[0]
@@ -768,6 +923,9 @@ class Handler(BaseHTTPRequestHandler):
             self._discard_body()
             request_quit("收到界面退出指令，正在停止本地服务…")
             return self._json({"ok": True, "message": "服务已停止，可以关闭本页面了"})
+        if parsed.path == "/api/elevate":
+            self._discard_body()
+            return self._json(request_elevation())
 
         if parsed.path == "/api/ai":
             payload = self._read_json()
