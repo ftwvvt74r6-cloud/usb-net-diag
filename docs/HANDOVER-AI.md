@@ -24,8 +24,8 @@
 ```powershell
 <python> -m unittest discover -s tests          # 看 "Ran N tests" 与 "OK (skipped=N)"
 <python> scripts\gen_api_doc.py --check 0.95    # 看 "模块 N 个｜公开符号 N 个"
-git ls-files core\*.py                          # 核心模块清单
-git grep -n "if .*path == \"/api/" -- core\server.py
+git ls-files 'core/*.py'                        # 核心模块清单（注意用单引号，PowerShell 不吃双引号里的通配）
+git grep -nF "/api/" -- core/server.py          # 路由清单（-F 定长匹配，别用正则转义）
 ```
 
 > 仓库里有多份**历史文档**（`docs/START-HERE.md`、`docs/plan-review.md`、`docs/code-index.md`、
@@ -455,6 +455,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/tshark.py` | tshark/dumpcap 定位与执行封装（`TSHARK_PATH`、便携路径、网卡探测） |
 | `core/verdict.py` | 判定：`rows/meta/metrics/summary` → level/四层状态/问题明细/证据充分性 |
 | `core/version.py` | 产品版本号唯一读取点：`VERSION`，剥 BOM 与空白，缺失回退 `0.0.0` |
+| `core/ai.py` | AI 结论生成：构造 prompt、调用外部模型接口；**无 Key 时不可用，且不参与任何判定** |
 
 ### 8.3 外围
 
@@ -504,8 +505,10 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `<owner>` | `docs/git-setup.md`（7 处 URL） | 你的 GitHub 账号/组织 |
 | `<repo>` | 同上 | 你的仓库名 |
 
-文档里另有 `<你的工作目录>`（本机路径，10 处），按自己的目录替换即可；
+文档里另有 `<你的工作目录>`（本机路径示例，12 处），按自己的目录替换即可；
 它不影响代码运行。**没有别的写死用户名/盘符/邮箱。**
+（核对方法：`git grep -nF "<你的工作目录>"`、`git grep -nF "<工作区目录>"`；
+另用 `-F` 搜自己的账号名/用户目录确认为 0 —— **必须 `-F`**，正则转义写错会得到假 0。）
 
 ### 10.2 步骤
 
@@ -531,7 +534,9 @@ python -m unittest discover -s tests        # 期望 235 条，OK (skipped=19)
 ### 10.3 fork 后自检
 
 - [ ] 干净目录（无 `tools/`、无 `config/app-config.json`）跑测试 → `OK (skipped=19)`
-- [ ] `python core/diagnose.py --pcap captures/faults_demo.pcap --report-out <tmp>` 能出报告
+- [ ] **有 tshark 时**（系统安装或 `tools/` + `TSHARK_PATH`）：
+      `python core/diagnose.py --pcap captures/faults_demo.pcap --report-out <tmp>` 能出报告
+      （**没有 tshark 时这条会以「未找到 tshark」退出，属预期，不是 bug**）
 - [ ] `python core/diagnose.py --export-diag --out <tmp>` 能出 zip，README 写「已脱敏」
 - [ ] 全仓搜索自己的**私有标记**（原仓库所有者账号、本机盘符路径、`C:\Users\<你的名字>`）在自己的改动里为 0
 - [ ] CI 两个 job 绿（fork 的 Actions 默认可能关闭，需要手动启用）
@@ -604,18 +609,24 @@ python -m unittest discover -s tests        # 期望 235 条，OK (skipped=19)
 ## 12. 交接成功判定（10 分钟 checklist）
 
 > 在**空目录/fork 的干净 checkout**里做（没有 `tools/`、没有 `config/app-config.json`）。
-> `<python>` 用仓库自带 `tools\python\python.exe`，或系统 Python 3.11。
+> `<python>` 用仓库自带 `tools\python\python.exe`，或系统 Python 3.11+。
+>
+> **前置条件**：只有 **第 2 步（出 demo 报告）需要 tshark**；其余步骤（测试 / 日志 / 诊断包 / UI）都不需要。
+> 没有 tshark 时第 2 步会以「未找到 tshark」退出（exit 2）—— **这是预期行为，不是 bug**，跳过它继续。
 
 ### 12.1 五分钟内必须绿
 
 ```powershell
-# 1) 全套测试（干净环境）
+# 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
 # 期望：Ran 235 tests ... OK (skipped=19)
 
-# 2) demo 报告（用临时目录，别写仓库 reports/）
+# 2) demo 报告（需要 tshark；没有就跳过这一步）
+#    有 tools\ 时先指路：
+$env:TSHARK_PATH = "$PWD\tools\WiresharkPortable\App\Wireshark\tshark.exe"
 <python> core\diagnose.py --pcap captures\faults_demo.pcap --report-out "$env:TEMP\netdiag-demo"
 # 期望：故障层 L4 传输层｜TCP；严重 3 / 警告 5；报告写到临时目录
+# 没有 tshark 时的实际表现：exit 2 + 「未找到 tshark」，不产生报告
 
 # 3) 日志现场
 Get-Content logs\env.json | Select-String '"version"|"tshark_version"|"admin"'
