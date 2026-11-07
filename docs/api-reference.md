@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**26** 个（有模块说明 26 个）
-- 公开符号：**198** 个（有 docstring 198 个，合格 198 个）
+- 扫描模块：**28** 个（有模块说明 28 个）
+- 公开符号：**202** 个（有 docstring 202 个，合格 202 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -1571,12 +1571,12 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 43 | ✅ |
-| `log` | function | 75 | ✅ |
-| `bpf_for` | function | 88 | ✅ |
-| `capture_live` | function | 116 | ✅ |
-| `run_scan` | function | 234 | ✅ |
-| `main` | function | 390 | ✅ |
+| `load_config` | function | 44 | ✅ |
+| `log` | function | 76 | ✅ |
+| `bpf_for` | function | 89 | ✅ |
+| `capture_live` | function | 117 | ✅ |
+| `run_scan` | function | 235 | ✅ |
+| `main` | function | 421 | ✅ |
 
 ### `load_config`
 
@@ -1699,10 +1699,44 @@ Args:
     argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
         ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
         ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
-        省略时仍写 ``reports/``）。
+        省略时仍写 ``reports/``）/ ``--export-diag``（导出脱敏诊断包后退出，
+        可配 ``--include-reports`` / ``--raw`` / ``--out``）。
 
 Returns:
     int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
+```
+
+## `core/diagpack.py`
+
+**职责**：诊断包导出：把 ``logs/`` 里能回答「出了什么问题」的现场打成一个**已脱敏**的 zip。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `build` | function | 61 | ✅ |
+
+### `build`
+
+```python
+def build(out_dir=None, include_reports: bool=False, raw: bool=False) -> Path
+```
+
+```text
+收集现场 → 脱敏 → 写 zip，返回诊断包路径（唯一公开入口，SPEC V1）。
+
+Args:
+    out_dir: 输出目录；``None`` 表示默认的 ``<日志根目录>/exports/``。
+        相对路径按当前工作目录解析，不存在会自动创建。
+    include_reports: 是否附上 ``reports/`` 里最近 3 份报告（``.md`` / ``.json``）。
+    raw: ``True`` 表示**不脱敏**、保留原始 IP/域名/用户名/MAC；默认 ``False``。
+        控制台警告由调用方（CLI / 服务端）打印，包内 README 也会写醒目警告。
+
+Returns:
+    Path: 新生成的 zip 的绝对路径。同名文件已存在时会顺延 ``-2`` / ``-3``，
+        不会覆盖旧包。
+
+Raises:
+    OSError: 输出目录不可写、zip 写盘失败（半成品会被删除后重新抛出）。
+        单个源文件读不到或脱敏失败不算错误，只会跳过并写进 README。
 ```
 
 ## `core/errors.py`
@@ -3029,29 +3063,92 @@ Returns:
         返回空元组说明新引擎已吃下全部旧能力，本文件可以删了。
 ```
 
+## `core/sanitize.py`
+
+**职责**：诊断包脱敏：把日志里的 IP、域名、用户名、MAC 换成**不可还原**的伪名。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `pseudonym` | function | 90 | ✅ |
+| `mask_text` | function | 105 | ✅ |
+| `mask_obj` | function | 126 | ✅ |
+
+### `pseudonym`
+
+```python
+def pseudonym(s: str) -> str
+```
+
+```text
+返回稳定伪名：``sha1(小写原文)`` 的前 4 位十六进制。
+
+Args:
+    s: 原文（IP / 域名 / MAC）。空串返回空串。
+
+Returns:
+    str: 4 位小写十六进制。同一原文永远得到同一个值；不同原文可能碰撞，
+        这里只用于「看得出是不是同一个对象」，不作为身份凭据。
+```
+
+### `mask_text`
+
+```python
+def mask_text(s: str) -> str
+```
+
+```text
+把一段文本里的 IP / 域名 / 用户名 / MAC 全部替换成脱敏形态。
+
+Args:
+    s: 待脱敏文本（日志行、JSON 字段值、报告正文都可以）。
+
+Returns:
+    str: 脱敏后的文本。空串原样返回；已经脱敏过的文本再跑一遍结果不变（幂等）。
+        端口、版本号、文件名等诊断必需信息保持原样。
+```
+
+### `mask_obj`
+
+```python
+def mask_obj(o)
+```
+
+```text
+递归脱敏 ``dict`` / ``list`` / ``tuple`` / ``str``，其它类型原样返回。
+
+用于 ``env.json`` 与 ``runs/*.json``：先 ``json.loads`` 成对象，处理完再序列化。
+**不修改入参**（返回新对象），这样调用方还能拿原始对象做别的判断。
+
+Args:
+    o: 任意 JSON 兼容对象。
+
+Returns:
+    object: 与入参同构的新对象；字符串值已按 :func:`mask_text` 脱敏。
+```
+
 ## `core/server.py`
 
 **职责**：本地 Web UI + HTTP API（仅监听 127.0.0.1，不对外暴露）。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 93 | ✅ |
-| `request_quit` | function | 98 | ✅ |
-| `cleanup_pid` | function | 146 | ✅ |
-| `BodyTooLarge` | class | 156 | ✅ |
-| `doctor_cached` | function | 183 | ✅ |
-| `log` | function | 237 | ✅ |
-| `start_job` | function | 311 | ✅ |
-| `engine_info` | function | 358 | ✅ |
-| `passive_start` | function | 401 | ✅ |
-| `passive_status` | function | 435 | ✅ |
-| `Handler` | class | 453 | ✅ |
-| `Handler.log_message` | method | 499 | ✅ |
-| `Handler.do_GET` | method | 637 | ✅ |
-| `Handler.do_POST` | method | 654 | ✅ |
-| `DiagServer` | class | 831 | ✅ |
-| `create_server` | function | 843 | ✅ |
-| `main` | function | 890 | ✅ |
+| `touch` | function | 96 | ✅ |
+| `request_quit` | function | 101 | ✅ |
+| `cleanup_pid` | function | 149 | ✅ |
+| `BodyTooLarge` | class | 159 | ✅ |
+| `doctor_cached` | function | 186 | ✅ |
+| `log` | function | 240 | ✅ |
+| `start_job` | function | 314 | ✅ |
+| `engine_info` | function | 361 | ✅ |
+| `passive_start` | function | 404 | ✅ |
+| `passive_status` | function | 438 | ✅ |
+| `Handler` | class | 456 | ✅ |
+| `Handler.log_message` | method | 502 | ✅ |
+| `Handler.do_GET` | method | 640 | ✅ |
+| `Handler.do_POST` | method | 657 | ✅ |
+| `DiagServer` | class | 853 | ✅ |
+| `create_server` | function | 865 | ✅ |
+| `main` | function | 912 | ✅ |
 
 ### `touch`
 
