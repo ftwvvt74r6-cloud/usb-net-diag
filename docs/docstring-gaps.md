@@ -3,7 +3,7 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**100.0%**（210/210）
+- 合格率：**100.0%**（212/212）
 - 模块说明：29/29
 
 ## 按文件汇总
@@ -30,7 +30,7 @@
 | `core/platform/paths.py` | 16 | 16 | 16 | 100% |
 | `core/platform/winapi.py` | 8 | 8 | 8 | 100% |
 | `core/probe.py` | 1 | 1 | 1 | 100% |
-| `core/report.py` | 2 | 2 | 2 | 100% |
+| `core/report.py` | 4 | 4 | 4 | 100% |
 | `core/rules/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/rules/legacy_map.py` | 9 | 9 | 9 | 100% |
 | `core/sanitize.py` | 4 | 4 | 4 | 100% |

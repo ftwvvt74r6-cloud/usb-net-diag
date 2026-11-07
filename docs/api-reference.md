@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**29** 个（有模块说明 29 个）
-- 公开符号：**210** 个（有 docstring 210 个，合格 210 个）
+- 公开符号：**212** 个（有 docstring 212 个，合格 212 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -280,7 +280,7 @@ def analyze(pcap: Path | str, target: str='', ti_key: str='', log=None) -> dict
 ```
 
 ```text
-离线分析一个 pcap，产出完整结果字典。
+分析抓包文件（离线分析）：读取一个 pcap，产出完整结果字典。
 
 Args:
     pcap: 抓包文件路径（``Path`` 或字符串）。
@@ -367,7 +367,7 @@ def relaunch_as_admin() -> bool
 Returns:
     bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
         False 表示用户点了「否」或调用失败 —— 此时**不要**退出，
-        以普通权限继续跑，实时抓包不可用但离线分析照常。
+        以普通权限继续跑，实时抓包不可用但分析抓包文件照常。
 ```
 
 ### `find_running`
@@ -908,7 +908,7 @@ class CaptureMeta
 采集元信息 —— 回答「这份结论是从哪份数据、用什么参数算出来的」。
 
 字段：
-    mode: ``live``（实时抓）或 ``offline``（离线分析）。
+    mode: ``live``（实时抓）或 ``offline``（分析抓包文件）。
     pcap_file / pcap_name: 绝对路径与文件名；报告命名用后者。
     packets / bytes / duration_s: 规模与时间跨度，判断证据是否充分的第一步。
     interface / bpf: 网卡与过滤器，复现同一份抓包时必需。
@@ -1352,7 +1352,7 @@ class PassiveResult
 ```
 
 ```text
-``passive``（被动监听）的结果。
+``passive``（通信观察 / 被动监听）的结果。
 ```
 
 ### `PassiveResult.to_dict`  (method)
@@ -1376,7 +1376,7 @@ class Job
 ```
 
 ```text
-一个后台任务。抓包、离线分析、被动监听都走它。
+一个后台任务。抓包、分析抓包文件、通信观察都走它。
 
 字段：
     job_id: 短随机串，用作 API 路径参数。
@@ -1577,8 +1577,8 @@ Returns:
 | `bpf_for` | function | 304 | ✅ |
 | `capture_live` | function | 493 | ✅ |
 | `degraded_empty_capture_result` | function | 674 | ✅ |
-| `run_scan` | function | 815 | ✅ |
-| `main` | function | 1005 | ✅ |
+| `run_scan` | function | 851 | ✅ |
+| `main` | function | 1050 | ✅ |
 
 ### `load_config`
 
@@ -1617,7 +1617,7 @@ def capture_filter_for(target: str, logger=None) -> dict
 ```
 
 ```text
-决定「定向抓包」阶段到底用不用 BPF 过滤器。
+决定「单目标诊断（定向抓包）」阶段到底用不用 BPF 过滤器。
 
 路测根因：``-f "host baidu.com"`` 在 tshark 里会先把域名解析成 IP，而 mihomo
 的 fake-ip（198.18.0.0/15）并不是真实业务地址，过滤后 0 包。因此只有**解析
@@ -1685,7 +1685,7 @@ Returns:
         "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
         "degraded": bool, "empty": bool}``，``empty=True`` 表示抓包窗口内
         0 包（可走 0 包降级），``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-        环境问题，前端据此提示改用离线分析。自动选择模式下抓满 0 包/0 字节时不
+        环境问题，前端据此提示改用分析抓包文件。自动选择模式下抓满 0 包/0 字节时不
         直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
         ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
         不换卡，错误里列出本次探测发现有流量的候选网卡和两条自助命令。
@@ -1712,7 +1712,7 @@ def degraded_empty_capture_result(target: str='', duration: int=0, interface: st
 （如 Npcap 不可用、网卡打不开）时才让调用方报错。
 
 Args:
-    target: 用户填的目标；空表示全网扫描。
+    target: 用户填的目标；空表示全网体检（不设过滤，抓本机全部流量）。
     duration: 本次抓包时长（秒），写进结论。
     interface: 用户显式选择的网卡；空表示自动选择。
     capture_error: 抓包阶段的原始错误文案（放进「为什么」供排障）。
@@ -1739,7 +1739,7 @@ Args:
     target: 目标 IP/网段/域名；空表示全网。
     duration: 实时抓包秒数（仅无 ``pcap`` 时生效）。
     interface: 网卡序号或名称关键字。
-    pcap: 离线分析的抓包路径。只给文件名时会到 ``captures/`` 下找
+    pcap: 分析抓包文件的路径。只给文件名时会到 ``captures/`` 下找
         （兼容 U 盘盘符变化）。
     logger: 日志回调。
     report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
@@ -2900,7 +2900,7 @@ Raises:
 
 ## `core/probe.py`
 
-**职责**：链路体检：不抓包，直接分段测量一次真实访问，定位慢在哪一段。
+**职责**：连通与速度测试（链路体检）：不抓包，直接分段测量一次真实访问，定位慢在哪一段。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
@@ -2939,8 +2939,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 71 | ✅ |
-| `save` | function | 317 | ✅ |
+| `render_markdown` | function | 85 | ✅ |
+| `save` | function | 331 | ✅ |
+| `render_degraded` | function | 380 | ✅ |
+| `save_degraded` | function | 443 | ✅ |
 
 ### `render_markdown`
 
@@ -2984,6 +2986,47 @@ Note:
     落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，
     换机器重跑会让 ``git diff reports/`` 一直脏（``analyze()`` 的原值不动，
     只在落盘时替换）。
+```
+
+### `render_degraded`
+
+```python
+def render_degraded(result: dict) -> str
+```
+
+```text
+把 0 包降级结论渲染成 Markdown（结论 + 事实 + 原因 + 建议）。
+
+与正常诊断报告分开渲染：降级结果没有 ``rows`` / ``verdict``，强行套用
+:func:`render_markdown` 会出现空章节，反而又变成「结果区没有内容」。
+
+Args:
+    result: :func:`diagnose.degraded_empty_capture_result` 的返回值，键含
+        ``card_title`` / ``headline`` / ``plain`` / ``link`` / ``capture`` /
+        ``reasons`` / ``next_steps`` / ``at``。
+
+Returns:
+    str: Markdown 正文（UTF-8 文本，LF 换行）。
+```
+
+### `save_degraded`
+
+```python
+def save_degraded(result: dict, out_dir: Path) -> dict
+```
+
+```text
+把 0 包降级结论落盘成 ``.md`` + ``.json``（复审遗留 #7）。
+
+路测要求：降级卡不能只活在界面上，历史报告 / 导出诊断包里也要能查到这次
+结论。文件名带时间戳，不覆盖任何既有报告。
+
+Args:
+    result: :func:`diagnose.degraded_empty_capture_result` 的返回值。
+    out_dir: 输出目录（通常是 ``reports/``）。
+
+Returns:
+    dict: 键 ``markdown`` / ``json``（绝对路径字符串）。
 ```
 
 ## `core/rules/__init__.py`
@@ -3265,25 +3308,25 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 120 | ✅ |
-| `request_quit` | function | 125 | ✅ |
-| `cleanup_pid` | function | 173 | ✅ |
-| `BodyTooLarge` | class | 183 | ✅ |
-| `doctor_cached` | function | 262 | ✅ |
-| `log` | function | 316 | ✅ |
-| `start_job` | function | 401 | ✅ |
-| `report_index` | function | 455 | ✅ |
-| `request_elevation` | function | 489 | ✅ |
-| `engine_info` | function | 522 | ✅ |
-| `passive_start` | function | 565 | ✅ |
-| `passive_status` | function | 600 | ✅ |
-| `Handler` | class | 623 | ✅ |
-| `Handler.log_message` | method | 669 | ✅ |
-| `Handler.do_GET` | method | 807 | ✅ |
-| `Handler.do_POST` | method | 824 | ✅ |
-| `DiagServer` | class | 1030 | ✅ |
-| `create_server` | function | 1042 | ✅ |
-| `main` | function | 1089 | ✅ |
+| `touch` | function | 122 | ✅ |
+| `request_quit` | function | 127 | ✅ |
+| `cleanup_pid` | function | 175 | ✅ |
+| `BodyTooLarge` | class | 185 | ✅ |
+| `doctor_cached` | function | 264 | ✅ |
+| `log` | function | 318 | ✅ |
+| `start_job` | function | 414 | ✅ |
+| `report_index` | function | 468 | ✅ |
+| `request_elevation` | function | 502 | ✅ |
+| `engine_info` | function | 535 | ✅ |
+| `passive_start` | function | 578 | ✅ |
+| `passive_status` | function | 613 | ✅ |
+| `Handler` | class | 636 | ✅ |
+| `Handler.log_message` | method | 682 | ✅ |
+| `Handler.do_GET` | method | 820 | ✅ |
+| `Handler.do_POST` | method | 837 | ✅ |
+| `DiagServer` | class | 1043 | ✅ |
+| `create_server` | function | 1055 | ✅ |
+| `main` | function | 1102 | ✅ |
 
 ### `touch`
 
@@ -3378,7 +3421,7 @@ def start_job(payload: dict) -> dict
 ```
 
 ```text
-启动一次诊断任务（实时抓包 / 全网扫描 / 离线分析）。
+启动一次诊断任务（全网体检 / 单目标诊断 / 分析抓包文件）。
 
 Args:
     payload: 前端提交的原始 JSON，键：
@@ -3428,7 +3471,7 @@ UI「以管理员身份重启」：调用启动器已有的 UAC 提权路径。
 * 用户点「是」→ 新进程以管理员权限启动（``core/app.py --elevated`` 会等旧实例
   释放端口后再监听，避免两个实例抢同一个端口），随后旧服务退出；
 * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
-  离线分析与链路体检不受影响。
+  分析抓包文件与连通与速度测试不受影响。
 
 Returns:
     dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
@@ -3458,7 +3501,7 @@ def passive_start(payload: dict) -> dict
 ```
 
 ```text
-启动被动监听（只听不发）。
+启动通信观察（被动监听，只听不发）。
 
 Args:
     payload: 键 ``interface``（网卡序号，空=自动挑）、``duration``（秒，夹在 3~300）、
@@ -3477,7 +3520,7 @@ def passive_status() -> dict
 ```
 
 ```text
-被动监听的当前状态与结果（界面每秒轮询它）。
+通信观察的当前状态与结果（界面每秒轮询它）。
 
 Returns:
     dict: 键 ``ok`` / ``state``（``idle``/``running``/``done``/``error``）/
