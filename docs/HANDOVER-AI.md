@@ -533,7 +533,7 @@ python -m unittest discover -s tests        # 期望 235 条，OK (skipped=19)
 - [ ] 干净目录（无 `tools/`、无 `config/app-config.json`）跑测试 → `OK (skipped=19)`
 - [ ] `python core/diagnose.py --pcap captures/faults_demo.pcap --report-out <tmp>` 能出报告
 - [ ] `python core/diagnose.py --export-diag --out <tmp>` 能出 zip，README 写「已脱敏」
-- [ ] `git grep -nF "ftwvvt74r6"` / `ar121` / `D:\work` 在自己的改动里为 0
+- [ ] 全仓搜索自己的**私有标记**（原仓库所有者账号、本机盘符路径、`C:\Users\<你的名字>`）在自己的改动里为 0
 - [ ] CI 两个 job 绿（fork 的 Actions 默认可能关闭，需要手动启用）
 
 > 不要把 `tools/`、`harness/`、`config/ai-config.json`、抓包/日志提交进仓库；

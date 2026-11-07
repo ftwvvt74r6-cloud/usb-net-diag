@@ -56,7 +56,7 @@ logs/
   "admin": true,
   "npcap": true,
   "tshark_version": "TShark (Wireshark) 4.7.4 (v4.7.4-0-g3261ea7f570f).",
-  "tshark_path": "D:\\utest\\NetDiag\\tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe",
+  "tshark_path": "<你的工作目录>\\tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe",
   "python_version": "3.11.9",
   "console_encoding": "utf-8",
   "config_sha256": "…（app-config + 规则阈值的联合哈希，不含 AI Key）",
