@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- NetDiag（网络矩阵）品牌图标源文件：纯几何，不依赖任何字体。 -->
-<!-- 栅格版本由 tools/make_icon.py 生成（NetDiag.ico / logo-256.png）。 -->
+<!-- 栅格版本由 scripts/make_icon.py 生成（NetDiag.ico / logo-256.png）。 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"
      role="img" aria-labelledby="netdiag-title netdiag-desc">
   <title id="netdiag-title">NetDiag · 网络矩阵</title>

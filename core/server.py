@@ -86,7 +86,26 @@ PROBE_SEM = threading.Semaphore(MAX_CONCURRENT_PROBE)
 
 # ---- 应用生命周期：单实例、优雅退出、空闲自动释放 ----
 APP_NAME = "USBNetDiag"
-APP_VERSION = "1.2"
+
+
+def _read_version(root: Path = ROOT) -> str:
+    """从 ``root/VERSION`` 读产品版本号；文件缺失或内容为空时回退 ``0.0.0``。
+
+    Args:
+        root: 仓库根目录，默认即 ``core/`` 的上一级。
+
+    Returns:
+        str: 形如 ``0.2.0`` 的版本号；读不到时是 ``0.0.0``。
+    """
+    try:
+        version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.0.0"
+    return version or "0.0.0"
+
+
+#: 产品版本的唯一来源是仓库根 ``VERSION``（启动横幅 / ``/api/ping`` / ``/api/app`` 共用）。
+APP_VERSION = _read_version()
 QUIT = threading.Event()            # 置位后主循环退出
 SERVER: dict = {"httpd": None}      # 当前监听实例，供 /api/quit 关停
 LAST_HIT = {"t": time.time()}       # 最后一次有人访问界面的时间
