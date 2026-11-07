@@ -25,25 +25,29 @@ CORE = Path(__file__).resolve().parent
 ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
 
-LOG_FILE = ROOT / "logs" / "app.log"
+import logstore  # noqa: E402
+
 MB_ICONERROR = 0x10
 MB_ICONINFO = 0x40
 
 
 # ----------------------------------------------------------------- 基础工具
 def redirect_output() -> None:
-    """pythonw 下 sys.stdout/stderr 是 None，任何 print 都会炸，先兜住。"""
+    """pythonw 下 sys.stdout/stderr 是 None，任何 print 都会炸，先兜住。
+
+    实际落盘交给 :mod:`logstore`（写 ``logs/app-YYYYMMDD.log``）。日志句柄在
+    ``logstore`` 里进程内复用，不会每来一次 ``print`` 就打开一个文件。
+
+    Returns:
+        None: 目录不可写时静默降级（保持原来的 ``None`` 语义，不因日志失败而崩溃）。
+    """
     if sys.stdout is not None and sys.stderr is not None:
         return
-    try:
-        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
-    except OSError:
-        return
+    stream = logstore.open_stream()
     if sys.stdout is None:
-        sys.stdout = fh
+        sys.stdout = stream
     if sys.stderr is None:
-        sys.stderr = fh
+        sys.stderr = stream
 
 
 def msgbox(text: str, title: str = "网络诊断工具", flags: int = MB_ICONINFO) -> None:
@@ -123,12 +127,18 @@ def find_running() -> str:
 def main() -> int:
     """静默启动主流程。
 
-    顺序：重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
+    顺序：日志基建 → 重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
 
     Returns:
         int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」和
             「已拉起提权进程」两种提前返回）；1 = 端口全被占用。
     """
+    # 日志基建（每次启动一次）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
+    # 必须在 redirect_output 之前裁剪：此时当天的 app 日志还没被本进程打开。
+    logstore.ensure_dirs()
+    logstore.prune()
+    logstore.write_env_snapshot({"entry": "app"})
+    logstore.install_excepthooks()
     redirect_output()
     as_console = "--console" in sys.argv
     elevated = "--elevated" in sys.argv

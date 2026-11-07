@@ -19,13 +19,13 @@ ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
 
 import analyzer  # noqa: E402
+import logstore  # noqa: E402
 import report  # noqa: E402
 import tshark  # noqa: E402
 import verdict  # noqa: E402
 
 CAPTURES = ROOT / "captures"
 REPORTS = ROOT / "reports"
-LOGS = ROOT / "logs"
 CONFIG = ROOT / "config" / "app-config.json"
 
 DEFAULT_CONFIG = {
@@ -61,16 +61,19 @@ def _stamp() -> str:
 
 
 def _log_to_file(line: str) -> None:
-    try:
-        LOGS.mkdir(parents=True, exist_ok=True)
-        with (LOGS / f"diag_{dt.date.today():%Y%m%d}.log").open("a", encoding="utf-8") as fh:
-            fh.write(f"[{dt.datetime.now():%H:%M:%S}] {line}\n")
-    except OSError:
-        pass
+    """把一行日志交给 :mod:`logstore`（保留旧调用方，签名不变）。
+
+    Args:
+        line: 日志正文；多行（traceback）会逐行加时间前缀。
+
+    Returns:
+        None: 写盘失败只影响日志，不影响诊断。
+    """
+    logstore.diag_log(line)
 
 
 def log(msg: str) -> None:
-    """默认日志回调：打印到控制台，同时追加到 ``logs/diag_YYYYMMDD.log``。
+    """默认日志回调：打印到控制台，同时追加到 ``logs/diag-YYYYMMDD.log``。
 
     Args:
         msg: 日志正文。
@@ -231,7 +234,7 @@ def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
 def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
              pcap: str | None = None, logger=log,
              report_dir: str | Path | None = None) -> dict:
-    """完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告。
+    """完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告 → 记一条 run。
 
     Args:
         target: 目标 IP/网段/域名；空表示全网。
@@ -247,7 +250,96 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
     Returns:
         dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
             与 ``capture``（本次采集参数）。失败时 ``{"ok": False, "error": "..."}``。
+
+    Note:
+        无论成功、失败还是抛异常，都会调用一次 :func:`logstore.record_run`
+        （``mode`` 为 ``offline`` / ``live``）。UI 的 ``/api/scan`` 也走本函数，
+        所以两个入口共用同一个记录点，一次分析只有一条记录。
     """
+    started = time.monotonic()
+    mode = "offline" if pcap else "live"
+    params = _run_params(target, duration, interface, pcap)
+    try:
+        result = _run_scan(target=target, duration=duration, interface=interface,
+                           pcap=pcap, logger=logger, report_dir=report_dir)
+    except Exception:
+        _record_run(mode, params, started, {"ok": False}, error_code="E_INTERNAL")
+        raise
+    _record_run(mode, params, started, result)
+    return result
+
+
+def _run_params(target: str, duration: int, interface: str | None,
+                pcap: str | None) -> dict:
+    """组装 run 记录里的 ``params``：只留目标/时长/网卡与 pcap 文件名，不写绝对路径。"""
+    params = {
+        "target": (target or "")[:300],
+        "duration": int(duration or 0),
+        "interface": str(interface)[:120] if interface else "",
+    }
+    if pcap:
+        params["pcap"] = Path(str(pcap)).name
+    return params
+
+
+def _tshark_version() -> str:
+    """取本次运行使用的 tshark 版本串（找不到时返回提示语）。"""
+    try:
+        return tshark.version()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _error_code(result: dict) -> str:
+    """把失败结果归类成稳定错误码（写进 run 记录的 ``error_code``）。"""
+    message = str(result.get("error") or "")
+    lowered = message.lower()
+    if "未找到 tshark" in message:
+        return "E_NO_TSHARK"
+    if "npcap" in lowered:
+        return "E_NO_NPCAP"
+    if "权限不足" in message or "permission" in lowered or "access is denied" in lowered:
+        return "E_NO_ADMIN"
+    if "网卡" in message and result.get("degraded"):
+        return "E_NO_INTERFACE"
+    if "不存在" in message or "not found" in lowered:
+        return "E_BAD_PCAP"
+    return "E_INTERNAL"
+
+
+def _record_run(mode: str, params: dict, started: float, result: dict,
+                error_code: str | None = None) -> None:
+    """把一次分析的结果写成 ``runs/*.json``；任何失败都吞掉（日志不影响业务）。"""
+    try:
+        result = result or {}
+        ok = bool(result.get("ok"))
+        summary = result.get("summary") or {}
+        verdict_data = result.get("verdict") or {}
+        sufficiency = (verdict_data.get("sufficiency")
+                       if isinstance(verdict_data, dict) else None)
+        record = {
+            "mode": mode,
+            "params": dict(params or {}),
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "level": str(verdict_data.get("level") or "") if ok else "",
+            "critical": int(summary.get("critical_count") or 0),
+            "warning": int(summary.get("warning_count") or 0),
+            "sufficiency_ok": bool(sufficiency.get("ok"))
+            if isinstance(sufficiency, dict) else False,
+            "error_code": (error_code if error_code is not None
+                           else ("" if ok else _error_code(result))),
+            "tshark_version": _tshark_version(),
+            "ok": ok,
+        }
+        logstore.record_run(record)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _run_scan(target: str = "", duration: int = 30, interface: str | None = None,
+              pcap: str | None = None, logger=log,
+              report_dir: str | Path | None = None) -> dict:
+    """``run_scan`` 的实现体（拆出来是为了让记录逻辑只包一层、不散落在每个 return）。"""
     cfg = load_config()
     cap: dict = {"ok": True, "bpf": "离线分析", "interface": "-", "duration": 0}
     if pcap:
@@ -318,6 +410,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="只写该目录（不再写 reports/）：把完整报告 .md/.json "
                          "导出到指定目录；省略时仍写 reports/")
     args = ap.parse_args(argv)
+
+    # 日志基建（CLI 也是一次「启动」）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
+    # 放在 parse_args 之后：--help 不该在仓库里留下日志。
+    logstore.ensure_dirs()
+    logstore.prune()
+    logstore.write_env_snapshot({"entry": "diagnose"})
+    logstore.install_excepthooks()
 
     if args.interfaces:
         for i in tshark.list_interfaces():

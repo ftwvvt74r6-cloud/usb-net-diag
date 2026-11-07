@@ -3,8 +3,8 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**100.0%**（176/176）
-- 模块说明：25/25
+- 合格率：**100.0%**（198/198）
+- 模块说明：26/26
 
 ## 按文件汇总
 
@@ -23,6 +23,7 @@
 | `core/extract/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/extract/aggregate.py` | 2 | 2 | 2 | 100% |
 | `core/extract/fields.py` | 5 | 5 | 5 | 100% |
+| `core/logstore.py` | 22 | 22 | 22 | 100% |
 | `core/passive.py` | 3 | 3 | 3 | 100% |
 | `core/platform/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/platform/paths.py` | 16 | 16 | 16 | 100% |

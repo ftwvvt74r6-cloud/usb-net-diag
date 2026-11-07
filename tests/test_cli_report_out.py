@@ -6,7 +6,8 @@
 2. 不给 ``--report-out`` 时，``run_scan`` 仍然写 ``reports/``（老行为逐字节不变）。
 3. 给了 ``--report-out`` 时，完整 ``.md`` / ``.json`` 落到指定目录（含多级新目录），
    且**不碰**仓库里的 ``reports/``。
-4. 跑 CLI 的实测用例不往仓库 ``logs/`` 写 ``diag_*.log``（B3：mock ``_log_to_file``）。
+4. 跑 CLI 的实测用例不往仓库 ``logs/`` 写任何文件（``NETDIAG_LOG_DIR`` 指到临时目录；
+   ``run_scan`` 现在每次分析还会写一条 ``runs/*.json``，同样落临时目录）。
 
 第 3 条的真实分析用例需要 tshark，干净 checkout（CI）里自动 skip；
 不依赖 tshark 的路径选择逻辑用 mock 在 CI 里也能跑。
@@ -30,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
 
 import diagnose                                            # noqa: E402
+import logstore                                            # noqa: E402
 from tshark import find_tshark                             # noqa: E402
 
 DIAGNOSE = ROOT / "core" / "diagnose.py"
@@ -85,7 +87,23 @@ def _dir_state(path: Path) -> tuple:
     )
 
 
-class ReportOutArgTest(unittest.TestCase):
+class _TempLogDirMixin:
+    """把 ``NETDIAG_LOG_DIR`` 指到临时目录：run 记录与日文件都不写仓库 ``logs/``。"""
+
+    def setUp(self) -> None:
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self._log_env = mock.patch.dict(
+            os.environ, {logstore.ENV_LOG_DIR: str(Path(self._log_tmp.name) / "logs")})
+        self._log_env.start()
+        logstore.close_streams()
+
+    def tearDown(self) -> None:
+        logstore.close_streams()
+        self._log_env.stop()
+        self._log_tmp.cleanup()
+
+
+class ReportOutArgTest(_TempLogDirMixin, unittest.TestCase):
     """不需要 tshark：``--help`` 与输出目录选择。"""
 
     def test_help_lists_report_out(self):
@@ -156,7 +174,7 @@ class ReportOutArgTest(unittest.TestCase):
 
 
 @unittest.skipIf(NO_TSHARK, "没有 tshark，跳过 CLI 离线导出实测")
-class ReportOutLiveTest(unittest.TestCase):
+class ReportOutLiveTest(_TempLogDirMixin, unittest.TestCase):
     """装了 tshark 时真的跑一遍离线分析，确认两份文件落地且默认目录/日志不动。"""
 
     def test_offline_export_writes_md_and_json(self):
@@ -166,8 +184,8 @@ class ReportOutLiveTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "nested" / "report-out"
             stdout = io.StringIO()
-            # B3：进程内跑 CLI，才能 mock 掉 _log_to_file；否则子进程会写仓库
-            # logs/diag_YYYYMMDD.log（LOGS 是模块常量，没法通过环境变量改道）。
+            # B3：进程内跑 CLI，日志目录已由 setUp 的 NETDIAG_LOG_DIR 指到临时目录；
+            # 再 mock 掉 _log_to_file 是双保险（子进程不继承 mock，但继承环境变量）。
             with mock.patch.object(diagnose, "_log_to_file"), \
                     contextlib.redirect_stdout(stdout):
                 rc = diagnose.main(["--pcap", str(SAMPLE), "--report-out", str(out)])
@@ -190,7 +208,7 @@ class ReportOutLiveTest(unittest.TestCase):
         self.assertEqual(_report_hashes(), reports_before,
                          "指定了 --report-out 不应再写仓库 reports/")
         self.assertEqual(_dir_state(LOGS), logs_before,
-                         "跑 CLI 往仓库 logs/ 写了文件：应 mock diagnose._log_to_file")
+                         "跑 CLI 往仓库 logs/ 写了文件：应把 NETDIAG_LOG_DIR 指到临时目录")
 
 
 if __name__ == "__main__":

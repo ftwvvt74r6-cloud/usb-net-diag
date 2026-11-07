@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**25** 个（有模块说明 25 个）
-- 公开符号：**176** 个（有 docstring 176 个，合格 176 个）
+- 扫描模块：**26** 个（有模块说明 26 个）
+- 公开符号：**198** 个（有 docstring 198 个，合格 198 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -301,12 +301,12 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `redirect_output` | function | 34 | ✅ |
-| `msgbox` | function | 49 | ✅ |
-| `is_admin` | function | 66 | ✅ |
-| `relaunch_as_admin` | function | 78 | ✅ |
-| `find_running` | function | 96 | ✅ |
-| `main` | function | 123 | ✅ |
+| `redirect_output` | function | 35 | ✅ |
+| `msgbox` | function | 53 | ✅ |
+| `is_admin` | function | 70 | ✅ |
+| `relaunch_as_admin` | function | 82 | ✅ |
+| `find_running` | function | 100 | ✅ |
+| `main` | function | 127 | ✅ |
 
 ### `redirect_output`
 
@@ -316,6 +316,12 @@ def redirect_output() -> None
 
 ```text
 pythonw 下 sys.stdout/stderr 是 None，任何 print 都会炸，先兜住。
+
+实际落盘交给 :mod:`logstore`（写 ``logs/app-YYYYMMDD.log``）。日志句柄在
+``logstore`` 里进程内复用，不会每来一次 ``print`` 就打开一个文件。
+
+Returns:
+    None: 目录不可写时静默降级（保持原来的 ``None`` 语义，不因日志失败而崩溃）。
 ```
 
 ### `msgbox`
@@ -389,7 +395,7 @@ def main() -> int
 ```text
 静默启动主流程。
 
-顺序：重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
+顺序：日志基建 → 重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
 
 Returns:
     int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」和
@@ -1566,11 +1572,11 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `load_config` | function | 43 | ✅ |
-| `log` | function | 72 | ✅ |
-| `bpf_for` | function | 85 | ✅ |
-| `capture_live` | function | 113 | ✅ |
-| `run_scan` | function | 231 | ✅ |
-| `main` | function | 298 | ✅ |
+| `log` | function | 75 | ✅ |
+| `bpf_for` | function | 88 | ✅ |
+| `capture_live` | function | 116 | ✅ |
+| `run_scan` | function | 234 | ✅ |
+| `main` | function | 390 | ✅ |
 
 ### `load_config`
 
@@ -1593,7 +1599,7 @@ def log(msg: str) -> None
 ```
 
 ```text
-默认日志回调：打印到控制台，同时追加到 ``logs/diag_YYYYMMDD.log``。
+默认日志回调：打印到控制台，同时追加到 ``logs/diag-YYYYMMDD.log``。
 
 Args:
     msg: 日志正文。
@@ -1657,7 +1663,7 @@ def run_scan(target: str='', duration: int=30, interface: str | None=None, pcap:
 ```
 
 ```text
-完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告。
+完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告 → 记一条 run。
 
 Args:
     target: 目标 IP/网段/域名；空表示全网。
@@ -1673,6 +1679,11 @@ Args:
 Returns:
     dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
         与 ``capture``（本次采集参数）。失败时 ``{"ok": False, "error": "..."}``。
+
+Note:
+    无论成功、失败还是抛异常，都会调用一次 :func:`logstore.record_run`
+    （``mode`` 为 ``offline`` / ``live``）。UI 的 ``/api/scan`` 也走本函数，
+    所以两个入口共用同一个记录点，一次分析只有一条记录。
 ```
 
 ### `main`
@@ -1904,6 +1915,361 @@ Args:
 Returns:
     list[dict[str, str]]: 每个报文一行，键是字段名，值是**原始字符串**
         （不做类型转换，交给 :func:`parse_flag` 等函数按需解析）。
+```
+
+## `core/logstore.py`
+
+**职责**：唯一日志出口：目录、按日文件、裁剪、环境快照、分析记录、崩溃快照。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `log_root` | function | 64 | ✅ |
+| `ensure_dirs` | function | 87 | ✅ |
+| `_DailySink.close` | method | 184 | ✅ |
+| `_DailySink.write` | method | 205 | ✅ |
+| `_Stream.write` | method | 243 | ✅ |
+| `_Stream.writelines` | method | 257 | ✅ |
+| `_Stream.flush` | method | 269 | ✅ |
+| `_Stream.isatty` | method | 273 | ✅ |
+| `_Stream.writable` | method | 281 | ✅ |
+| `_Stream.readable` | method | 289 | ✅ |
+| `_Stream.fileno` | method | 297 | ✅ |
+| `_Stream.closed` | method | 309 | ✅ |
+| `_Stream.close` | method | 317 | ✅ |
+| `app_log` | function | 346 | ✅ |
+| `diag_log` | function | 358 | ✅ |
+| `open_stream` | function | 370 | ✅ |
+| `close_streams` | function | 380 | ✅ |
+| `write_env_snapshot` | function | 454 | ✅ |
+| `record_run` | function | 481 | ✅ |
+| `record_crash` | function | 527 | ✅ |
+| `install_excepthooks` | function | 610 | ✅ |
+| `prune` | function | 709 | ✅ |
+
+### `log_root`
+
+```python
+def log_root() -> Path
+```
+
+```text
+返回日志根目录。
+
+Returns:
+    Path: 环境变量 ``NETDIAG_LOG_DIR`` 非空时用它，否则 ``<仓库>/logs``。
+        每次调用都重新读环境变量，测试可以在同一进程里切换临时目录。
+```
+
+### `ensure_dirs`
+
+```python
+def ensure_dirs() -> Path
+```
+
+```text
+创建日志目录树（``logs/``、``runs/``、``crashes/``）与当天的两个日文件。
+
+当天的 ``app-YYYYMMDD.log`` / ``diag-YYYYMMDD.log`` 会以空文件形式先建出来，
+这样「跑一次分析后的目录树」是稳定的，不依赖先打印了哪条日志。
+
+Returns:
+    Path: 日志根目录（创建失败也返回路径，真正写盘时再静默失败）。
+```
+
+### `_DailySink.close`  (method)
+
+```python
+def close(self) -> None
+```
+
+```text
+关闭当前句柄；可重复调用。
+```
+
+### `_DailySink.write`  (method)
+
+```python
+def write(self, text: str) -> None
+```
+
+```text
+追加一段文本；失败时静默丢弃（下一行会重试打开）。
+
+Args:
+    text: 要写入的文本；空串直接忽略。
+
+Returns:
+    None: 写盘失败只关闭句柄，不抛异常。
+```
+
+### `_Stream.write`  (method)
+
+```python
+def write(self, text) -> int
+```
+
+```text
+写一段文本（兼容 ``print`` 的调用方式）。
+
+Args:
+    text: 字符串；非字符串按 0 长度处理。
+
+Returns:
+    int: 实际写入的字符数（``print`` 不看，但文件协议要求返回）。
+```
+
+### `_Stream.writelines`  (method)
+
+```python
+def writelines(self, lines) -> None
+```
+
+```text
+逐行写入。
+
+Args:
+    lines: 字符串序列。
+
+Returns:
+    None: 空序列直接返回。
+```
+
+### `_Stream.flush`  (method)
+
+```python
+def flush(self) -> None
+```
+
+```text
+空实现：底层每次写入已 flush，``print(..., flush=True)`` 不会报错。
+```
+
+### `_Stream.isatty`  (method)
+
+```python
+def isatty(self) -> bool
+```
+
+```text
+永远不是终端（日志流不交互）。
+
+Returns:
+    bool: 恒为 ``False``。
+```
+
+### `_Stream.writable`  (method)
+
+```python
+def writable(self) -> bool
+```
+
+```text
+可写：与真实 stdout 保持一致。
+
+Returns:
+    bool: 恒为 ``True``。
+```
+
+### `_Stream.readable`  (method)
+
+```python
+def readable(self) -> bool
+```
+
+```text
+不可读：日志流只写。
+
+Returns:
+    bool: 恒为 ``False``。
+```
+
+### `_Stream.fileno`  (method)
+
+```python
+def fileno(self) -> int
+```
+
+```text
+没有真实 fd；需要 fd 的库（如 faulthandler）必须用 ``logstore`` 的日文件。
+
+Returns:
+    int: 永不返回 —— 总是抛 ``OSError``，避免调用方拿到错误 fd。
+
+Raises:
+    OSError: 任何调用都会抛出（日志流不是真实文件）。
+```
+
+### `_Stream.closed`  (method)
+
+```python
+@property
+def closed(self) -> bool
+```
+
+```text
+永不关闭：句柄由 :func:`close_streams` 统一管理。
+
+Returns:
+    bool: 恒为 ``False``。
+```
+
+### `_Stream.close`  (method)
+
+```python
+def close(self) -> None
+```
+
+```text
+空实现：防止 ``print`` 的消费方误关共享句柄。
+```
+
+### `app_log`
+
+```python
+def app_log(msg: str) -> None
+```
+
+```text
+写一条启动器日志到 ``app-YYYYMMDD.log``，行格式 ``[HH:MM:SS] [INFO] msg``。
+
+Args:
+    msg: 日志正文；多行会逐行加前缀。
+
+Returns:
+    None: 写盘失败静默忽略。
+```
+
+### `diag_log`
+
+```python
+def diag_log(msg: str) -> None
+```
+
+```text
+写一条诊断/服务日志到 ``diag-YYYYMMDD.log``，行格式同 :func:`app_log`。
+
+Args:
+    msg: 日志正文；多行（如 traceback）会逐行加前缀。
+
+Returns:
+    None: 写盘失败静默忽略。
+```
+
+### `open_stream`
+
+```python
+def open_stream() -> '_Stream'
+```
+
+```text
+返回写往 ``app-YYYYMMDD.log`` 的文本流（供 ``app.redirect_output()`` 使用）。
+
+Returns:
+    _Stream: 具备 ``write`` / ``flush`` 的伪文件对象。底层句柄在进程内复用，
+        不会每来一次 ``print`` 就打开一个文件。
+```
+
+### `close_streams`
+
+```python
+def close_streams() -> None
+```
+
+```text
+关闭并清空进程内所有日志句柄（含 faulthandler 文件；测试与退出时用）。
+
+Returns:
+    None: 关闭失败静默忽略。
+```
+
+### `write_env_snapshot`
+
+```python
+def write_env_snapshot(extra: dict | None=None) -> dict
+```
+
+```text
+写 ``logs/env.json``（覆盖写）并返回快照内容。
+
+Args:
+    extra: 追加/覆盖的字段（如入口名 ``{"entry": "app"}``）；``None`` 表示不加。
+
+Returns:
+    dict: 环境快照。文件写不进去也返回内容，只是没有落盘。
+```
+
+### `record_run`
+
+```python
+def record_run(record: dict) -> Path | None
+```
+
+```text
+把一次分析写成 ``runs/<ts>-<8位随机>.json``。
+
+字段约定见 ``docs/logging.md``：``mode`` / ``params`` / ``duration_ms`` /
+``level`` / ``critical`` / ``warning`` / ``sufficiency_ok`` / ``error_code`` /
+``tshark_version``。文件名带随机后缀，避免并发同秒撞名（Windows 文件名里
+也不能出现 ``:``）。
+
+Args:
+    record: 记录内容（会被 JSON 序列化）。
+
+Returns:
+    Path | None: 写成功返回文件路径；目录不可写或内容不可序列化返回 ``None``
+        （日志失败不影响分析本身）。
+```
+
+### `record_crash`
+
+```python
+def record_crash(exc_type, exc, tb) -> Path | None
+```
+
+```text
+把一次未捕获异常写成 ``crashes/<ts>-<pid>-<tid>-<rand>.txt``（类型/消息/traceback/环境摘要）。
+
+Args:
+    exc_type: 异常类（``sys.excepthook`` 的第一个参数）。
+    exc: 异常实例。
+    tb: traceback 对象；为 ``None`` 时退化为「类型: 消息」。
+
+Returns:
+    Path | None: 写成功返回文件路径；写盘失败返回 ``None``。
+```
+
+### `install_excepthooks`
+
+```python
+def install_excepthooks() -> None
+```
+
+```text
+启用崩溃兜底：``sys.excepthook`` + ``threading.excepthook`` + ``faulthandler``。
+
+幂等：重复调用只补装缺失的部分。``faulthandler`` 的文件对象保存在模块级变量里，
+否则它会被 GC 回收，进程真崩时什么也写不出来（见 SPEC 陷阱 3）。
+
+Returns:
+    None: 钩子/文件装不上时静默降级，不影响程序运行。
+```
+
+### `prune`
+
+```python
+def prune() -> dict
+```
+
+```text
+执行保留策略（启动时调用一次，也可手动跑）。
+
+顺序：单文件截尾 → ``runs/`` 数量 → ``crashes/`` 数量 → ``logs/`` 总量。
+总量删除按「最旧优先」，并跳过 ``env.json`` / ``netdiag.pid`` / 当天的日志 ——
+**绝不删除正在写的文件**（SPEC V2 / 陷阱 4）。
+
+Returns:
+    dict: ``{"truncated", "removed", "freed_bytes", "total_bytes"}`` 计数摘要。
+        单个文件失败只跳过，不抛异常。
 ```
 
 ## `core/passive.py`
@@ -2669,23 +3035,23 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 92 | ✅ |
-| `request_quit` | function | 97 | ✅ |
-| `cleanup_pid` | function | 145 | ✅ |
-| `BodyTooLarge` | class | 155 | ✅ |
-| `doctor_cached` | function | 182 | ✅ |
-| `log` | function | 215 | ✅ |
-| `start_job` | function | 255 | ✅ |
-| `engine_info` | function | 302 | ✅ |
-| `passive_start` | function | 340 | ✅ |
-| `passive_status` | function | 374 | ✅ |
-| `Handler` | class | 392 | ✅ |
-| `Handler.log_message` | method | 434 | ✅ |
-| `Handler.do_GET` | method | 533 | ✅ |
-| `Handler.do_POST` | method | 548 | ✅ |
-| `DiagServer` | class | 711 | ✅ |
-| `create_server` | function | 723 | ✅ |
-| `main` | function | 770 | ✅ |
+| `touch` | function | 93 | ✅ |
+| `request_quit` | function | 98 | ✅ |
+| `cleanup_pid` | function | 146 | ✅ |
+| `BodyTooLarge` | class | 156 | ✅ |
+| `doctor_cached` | function | 183 | ✅ |
+| `log` | function | 237 | ✅ |
+| `start_job` | function | 311 | ✅ |
+| `engine_info` | function | 358 | ✅ |
+| `passive_start` | function | 401 | ✅ |
+| `passive_status` | function | 435 | ✅ |
+| `Handler` | class | 453 | ✅ |
+| `Handler.log_message` | method | 499 | ✅ |
+| `Handler.do_GET` | method | 637 | ✅ |
+| `Handler.do_POST` | method | 654 | ✅ |
+| `DiagServer` | class | 831 | ✅ |
+| `create_server` | function | 843 | ✅ |
+| `main` | function | 890 | ✅ |
 
 ### `touch`
 
@@ -2769,7 +3135,8 @@ Args:
 
 Returns:
     None: 内存里最多保留 400 条（超出丢最早的 100 条），界面靠轮询取增量；
-        磁盘那份由 ``diagnose._log_to_file`` 追加，供事后排障。
+        磁盘那份委托给 :func:`logstore.diag_log`（``logs/diag-YYYYMMDD.log``），
+        供事后排障。
 ```
 
 ### `start_job`
