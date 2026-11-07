@@ -43,8 +43,27 @@ def _source_refs() -> list[str]:
 
 
 class LauncherContract(unittest.TestCase):
-    def test_start_bat_exists(self):
+    def test_start_bat_python_fallback(self):
         self.assertTrue(START_BAT.is_file(), "start.bat 丢失，便携包入口没了")
+        text = START_BAT.read_text(encoding="utf-8", errors="replace")
+        markers = [
+            "tools\\python\\python.exe",
+            "where python",
+            "where py",
+            "https://www.python.org/downloads/windows/",
+        ]
+        positions = []
+        for marker in markers:
+            idx = text.find(marker)
+            with self.subTest(marker=marker):
+                self.assertGreaterEqual(idx, 0, f"start.bat 缺少 Python 回退契约：{marker}")
+            positions.append(idx)
+        self.assertEqual(positions, sorted(positions),
+                         "start.bat 的 Python 回退顺序不是 包内 -> python -> py -3")
+        self.assertIn('"%PY%" %PYARGS% "%ROOT%\\core\\bootstrap.py"', text,
+                      "start.bat 调用 bootstrap.py 时没有带上回退运行时的参数")
+        self.assertIn('"%PY%" %PYARGS% "%ROOT%\\core\\server.py"', text,
+                      "start.bat 调用 server.py 时没有带上回退运行时的参数")
 
     def test_launcher_referenced_files_exist(self):
         refs = _source_refs()
