@@ -31,7 +31,7 @@ import struct
 import time
 from urllib.parse import urlparse
 
-UA = "Mozilla/5.0 (compatible; USBNetDiag/1.0)"
+UA = "Mozilla/5.0 (compatible; NetDiag/1.0)"
 
 # 协议 id → (中文显示名, 所属层)
 PROTO_NAMES: dict[str, tuple[str, str]] = {

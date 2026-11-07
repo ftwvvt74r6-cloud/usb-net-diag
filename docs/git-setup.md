@@ -251,7 +251,7 @@ Test-Path harness                             # 期望 False
 
 ## 7. 把 U 盘上已有的改动并进来（**这一步最容易出错，逐条对账**）
 
-U 盘目录（`G:\USB-Net-Diag`）里除了源码，还有 `tools/`、`harness/`、`captures/`、
+U 盘目录（`G:\NetDiag`）里除了源码，还有 `tools/`、`harness/`、`captures/`、
 `logs/`、`reports/`、真实 `config/*.json`、以及我交付的 `docs/`、`scaffold/`、`dist/`。
 **只把该进库的东西拷过去**：
 

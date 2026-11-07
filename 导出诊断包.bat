@@ -2,7 +2,7 @@
 chcp 65001 >nul 2>&1
 set "PYTHONIOENCODING=utf-8"
 setlocal
-title USB-Net-Diag - 导出诊断包
+title NetDiag · 网络矩阵 - 导出诊断包
 set "ROOT=%~dp0"
 if not exist "%ROOT%core\diagnose.py" (
   echo [ERROR] 找不到 %ROOT%core\diagnose.py，请确认本 bat 放在工具根目录。

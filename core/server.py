@@ -902,7 +902,7 @@ def create_server(port: int = 8787, idle_exit_min: int = 0,
         threading.Thread(target=_idle_watchdog, args=(idle_exit_min,), daemon=True).start()
     if not quiet:
         print("=" * 62)
-        print(f"  USB-Net-Diag 已启动（v{APP_VERSION}）")
+        print(f"  NetDiag · 网络矩阵 已启动（v{APP_VERSION}）")
         print(f"  浏览器界面：{url}")
         print("  界面右上角「退出」可停止服务；关闭此窗口也会停止")
         print("=" * 62)

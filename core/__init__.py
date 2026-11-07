@@ -1,4 +1,4 @@
-"""USB-Net-Diag 核心包（目标架构骨架）。
+"""NetDiag（网络矩阵）核心包（目标架构骨架）。
 
 设计不变量（详见 docs/plan-review.md 第 4.1 节）：
 
@@ -9,4 +9,4 @@
 5. 可复现：任何结果都带 ``provenance``。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -414,7 +414,7 @@ def _render_readme(entries: list, skipped: list, raw: bool, include_reports: boo
     total = sum(len(data) for _, data in entries)
     lines = [
         "=" * 64,
-        "USB-Net-Diag 诊断包",
+        "NetDiag · 网络矩阵 诊断包",
         "=" * 64,
         "",
         f"生成时间: {stamp}",

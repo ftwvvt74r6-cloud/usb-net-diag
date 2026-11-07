@@ -113,7 +113,7 @@ def check(verbose: bool = True) -> dict:
     }
     if verbose:
         print("=" * 62)
-        print(" USB-Net-Diag 环境自检")
+        print(" NetDiag · 网络矩阵 环境自检")
         print("=" * 62)
         print(f" 运行目录  : {status['root']}")
         print(f" Python    : {status['python']}  ({status['python_exe']})")

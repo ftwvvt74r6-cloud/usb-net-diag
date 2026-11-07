@@ -50,7 +50,7 @@ def redirect_output() -> None:
         sys.stderr = stream
 
 
-def msgbox(text: str, title: str = "网络诊断工具", flags: int = MB_ICONINFO) -> None:
+def msgbox(text: str, title: str = "NetDiag · 网络矩阵", flags: int = MB_ICONINFO) -> None:
     """弹一个系统消息框 —— 静默启动（无控制台）时唯一的提示手段。
 
     Args:
