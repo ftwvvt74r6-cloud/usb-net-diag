@@ -67,7 +67,7 @@
 - `--with-npcap` 构建会在开始和结束各打印一次
   `Npcap free edition may NOT be externally redistributed` 警告；
   包内 `README.txt` 也写明「禁止上传公开仓库 / 网盘 / 外网」。
-- `自检.bat` 在缺少 Npcap 时只给 **WARN**（离线分析不需要它），并且：
+- `自检.bat` 在缺少 Npcap 时只给 **WARN**（分析抓包文件不需要它），并且：
   - lite / `--with-tools` 包：提示去 <https://npcap.com/#download> 安装；
   - `--with-npcap` 包：探测到 `tools\npcap-*.exe` 才提示运行包内安装器。
 - 本项目**不在 Python 代码里**做提权 / Npcap 静默安装；`start.bat` 的自动安装只对

@@ -68,7 +68,7 @@ JOB = {
     "state": "idle",      # idle | running | done | error
     "mode": "",
     "target": "",
-    "duration": 0,        # 用户请求的抓包秒数（离线分析为 0，进度条据此算倒计时）
+    "duration": 0,        # 用户请求的抓包秒数（分析抓包文件为 0，进度条据此算倒计时）
     "started_at": 0.0,
     "finished_at": 0.0,
     "logs": [],

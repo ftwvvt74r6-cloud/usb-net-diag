@@ -83,7 +83,7 @@ class Paths:
 
     @property
     def captures(self) -> Path:
-        """抓包落盘目录，也是离线分析唯一允许读取的位置。
+        """抓包落盘目录，也是分析抓包文件唯一允许读取的位置。
 
         Returns:
             Path: ``<root>/captures``。
