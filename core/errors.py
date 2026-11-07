@@ -45,8 +45,8 @@ class ErrorCode(str, Enum):
 #: 常见错误的默认提示语（可直接显示给用户）。
 HINTS: dict[ErrorCode, str] = {
     ErrorCode.NO_TSHARK: "请确认 tools/WiresharkPortable/App/Wireshark/tshark.exe 存在",
-    ErrorCode.NO_NPCAP: "以管理员身份运行 start.bat 完成 Npcap 安装，或改用「离线分析」上传 pcap",
-    ErrorCode.NO_ADMIN: "右键以管理员身份运行 start.bat；无提权时用离线分析",
+    ErrorCode.NO_NPCAP: "以管理员身份运行 start.bat 完成 Npcap 安装，或改用「分析抓包文件」打开 pcap",
+    ErrorCode.NO_ADMIN: "右键以管理员身份运行 start.bat；无提权时用分析抓包文件",
     ErrorCode.NOT_WRITABLE: "U 盘可能处于写保护或只读盘符，请检查物理写保护开关",
     ErrorCode.EMPTY_CAPTURE: "换一块网卡重抓 30 秒，或把目标留空后重试",
     ErrorCode.AI_NOT_CONFIGURED: "点右上角「AI 设置」填入 Key 并测试连接",

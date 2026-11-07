@@ -78,9 +78,9 @@ logs/
 | mode | 入口 | 说明 |
 |---|---|---|
 | `live` | `diagnose.run_scan()`（无 `pcap`） | CLI 实时抓包；UI 的 `/api/scan`（live/scan）也走它 |
-| `offline` | `diagnose.run_scan(pcap=...)` | CLI `--pcap` / UI 离线分析 / MCP `analyze_pcap` |
-| `passive` | `server._passive_worker()` | UI 被动监听 |
-| `probe` | `server._probe_guarded()` | UI 链路体检 |
+| `offline` | `diagnose.run_scan(pcap=...)` | CLI `--pcap` / UI 分析抓包文件 / MCP `analyze_pcap` |
+| `passive` | `server._passive_worker()` | UI 通信观察（被动监听） |
+| `probe` | `server._probe_guarded()` | UI 连通与速度测试（链路体检） |
 
 **一次分析只写一条记录**：UI 的 `/api/scan` 经 `server._worker → diagnose.run_scan`，
 记录在 `run_scan` 里统一产生，`_worker` 不再重复写。
@@ -115,8 +115,8 @@ logs/
 | `params` | 本次参数。**只留目标、时长、网卡、pcap 文件名**；不写绝对路径（防隐私泄漏，M2 还会再脱敏） |
 | `duration_ms` | 本次从开始到结束的毫秒数 |
 | `level` | `verdict.level`（严重/警告/提示/正常/证据不足）；失败时为空串 |
-| `critical` / `warning` | 报告里的严重/警告条数（被动监听与体检没有这两类计数，为 0） |
-| `sufficiency_ok` | 证据是否充分（`verdict.sufficiency.ok`）；被动监听/体检按「本次是否成功」记 |
+| `critical` / `warning` | 报告里的严重/警告条数（通信观察与连通与速度测试没有这两类计数，为 0） |
+| `sufficiency_ok` | 证据是否充分（`verdict.sufficiency.ok`）；通信观察/连通与速度测试按「本次是否成功」记 |
 | `error_code` | 失败时的稳定错误码（`E_NO_TSHARK` / `E_NO_NPCAP` / `E_NO_ADMIN` / `E_NO_INTERFACE` / `E_BAD_PCAP` / `E_INTERNAL`），成功为空串 |
 | `tshark_version` | 本次运行时的 tshark 版本首行 |
 | `ok` | 附加布尔：本次是否成功（便于脚本筛失败记录） |

@@ -3,7 +3,7 @@
 由 NetDiag.vbs 用 pythonw.exe 拉起（pythonw 无控制台），流程：
   1. 已有实例在跑 → 直接把浏览器指过去，退出（避免开第二份
   2. 非管理员 → 用 UAC 提权重启自己（抓包需要 Npcap 的驱动权限）；
-     用户点「否」就降级为普通权限继续跑，离线分析/体检仍可用
+     用户点「否」就降级为普通权限继续跑，分析抓包文件 / 连通与速度测试仍可用
   3. 生成配置 → 起本地服务（后台线程）→ 打开浏览器
   4. 界面点「退出」或长时间无人访问 → 自动收尾，不留后台进程
 
@@ -85,7 +85,7 @@ def relaunch_as_admin() -> bool:
     Returns:
         bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
             False 表示用户点了「否」或调用失败 —— 此时**不要**退出，
-            以普通权限继续跑，实时抓包不可用但离线分析照常。
+            以普通权限继续跑，实时抓包不可用但分析抓包文件照常。
     """
     try:
         exe = sys.executable
@@ -167,8 +167,8 @@ def main() -> int:
         if not elevated and relaunch_as_admin():
             return 0
         if not as_console:
-            msgbox("未获得管理员权限：实时抓包与被动监听将不可用"
-                   "（离线分析、链路体检仍可用）。\n\n"
+            msgbox("未获得管理员权限：全网体检 / 单目标诊断 / 通信观察将不可用"
+                   "（分析抓包文件、连通与速度测试仍可用）。\n\n"
                    "如需完整功能，请关闭后右键 NetDiag.vbs 选择"
                    "「以管理员身份运行」，或用 start.bat 启动。")
 
@@ -186,7 +186,7 @@ def main() -> int:
         return 1
 
     if not tshark.find_tshark():
-        msgbox("没找到 tshark，抓包与离线分析都不可用。\n\n"
+        msgbox("没找到 tshark，抓包与分析抓包文件都不可用。\n\n"
                "请把 Wireshark 便携版解压到：\n"
                f"{ROOT}\\tools\\WiresharkPortable\\App\\Wireshark\\",
                flags=MB_ICONERROR)

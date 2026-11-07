@@ -51,7 +51,7 @@ git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，
 | 入口 | 怎么进 | 前提 | 自动化覆盖 |
 |---|---|---|---|
 | **UI** | `NetDiag.vbs`（静默、自动提权）/ `start.bat`（带窗口）/ `core\server.py` | 便携 Python；实时抓包另需 Npcap + 管理员 | HTTP 路由有 `test_http_drain.py` 等；UI 本身无浏览器 E2E |
-| **CLI** | `core\diagnose.py --pcap ...` | tshark（离线分析也要） | `test_cli_report_out.py` 等 |
+| **CLI** | `core\diagnose.py --pcap ...` | tshark（分析抓包文件也要） | `test_cli_report_out.py` 等 |
 | **MCP** | `mcp\wireshark-mcp\server.py`（stdio）+ `config\mcp-wireshark.json` | 一个 MCP 客户端；实时能力同 UI | 只做「文件存在 + 可编译」契约检查，**无协议级测试** |
 | **诊断包** | 界面按钮 / `导出诊断包.bat` / `diagnose.py --export-diag` | 无（纯本地打包） | `test_diagpack.py`、`test_sanitize.py` |
 
@@ -68,7 +68,7 @@ MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`sca
 | L7 | DNS 失败率/耗时、HTTP 5xx/耗时、TLS alert | 严重/警告；按「服务端慢 vs 网络慢」区分 |
 | 观察 | 高危端口外联、明文凭证 | 只列事实，不抢主判定 |
 
-另有「被动监听」（Scapy/tshark 抓包 → 会话表）与「链路体检」（对单个 TCP 目标按协议
+另有「通信观察（被动监听）」（Scapy/tshark 抓包 → 会话表）与「连通与速度测试（链路体检）」（对单个 TCP 目标按协议
 自适应探测 DNS/TCP/TLS/HTTP/SMB/RDP/SSH/Opaque TCP 分段耗时）。
 
 ### 2.3 不能测什么（交接时必须说清楚）
@@ -76,8 +76,8 @@ MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`sca
 | 限制 | 事实 / 原因 |
 |---|---|
 | **UDP 丢包率** | UDP 无序号，单点抓包算不出丢包率；只有 DNS 超时等协议感知信号，或主动探测能间接判断（`docs/plan-review.md` §3.3） |
-| **实时抓包** | 依赖 Npcap 驱动 + 管理员权限；未提权只能离线分析（`start.bat` 会降级，不崩） |
-| **被动监听** | 同上，且要有真实流量；CI/沙箱环境会 skip |
+| **全网体检 / 单目标诊断** | 依赖 Npcap 驱动 + 管理员权限；未提权只能分析抓包文件（`start.bat` 会降级，不崩） |
+| **通信观察（被动监听）** | 同上，且要有真实流量；CI/沙箱环境会 skip |
 | **TLS 自检（selftest）** | 需要本机 `openssl` 生成自签证书；没有就 skip，不伪装通过 |
 | **非 Windows** | `core/platform/winapi.py`、VBS、Npcap 都是 Windows 专属；CI 的 Ubuntu job 只跑文档检查 |
 | **UDP / ICMP 体检** | `probe.py` 只建 TCP 连接（`SOCK_STREAM`），不能探 UDP 服务 |
@@ -213,9 +213,9 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/captures` | 已有抓包 | `files[{name,size,mtime}]`（最多 50） |
 | `GET /api/report?path=` | 读报告 | 文件原文；只取 `Path(name).name`，防目录穿越 |
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
-| `GET /api/passive` | 被动监听状态 | `state/result/error/engine/engine_info/elapsed` |
+| `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
-| `GET /api/probe?target=&port=&count=&proto=` | 链路体检（GET 便捷入口） | `probe.run()` 结果 |
+| `GET /api/probe?target=&port=&count=&proto=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果 |
 
 注意 `/api/probe` 同时有 GET 与 POST；两者都受并发闸门 `MAX_CONCURRENT_PROBE = 3` 限制。
 
@@ -403,7 +403,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | 缺失 | 影响 |
 |---|---|
 | tshark | 需要真 pcap 的用例 `skipUnless`；干净 checkout 共 19 skip |
-| 管理员 + Npcap + 真实流量 | `tests/selftest.py` §3 被动监听 → unittest 里只验证 skip 传播 |
+| 管理员 + Npcap + 真实流量 | `tests/selftest.py` §3 通信观察（被动监听） → unittest 里只验证 skip 传播 |
 | openssl | selftest §2b TLS 自检 → skip（Windows runner 可能自带 openssl，skip 数会少 1，以日志为准） |
 | Linux 换行 | 生成器固定写 LF；不要用 `os.linesep`/平台默认编码生成文档 |
 
@@ -439,18 +439,18 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/config.py` | 统一配置加载：app/ai/thresholds/copy + `config_sha256()` |
 | `core/contracts.py` | 唯一数据契约：Enum/dataclass、`SCHEMA_VERSION=2.1`、`to_jsonable`、envelope |
 | `core/copytext.py` | 文案表唯一读取入口：mtime/size 缓存、`reload()`、缺 key 回退 key |
-| `core/diagnose.py` | CLI 主流程：采集/离线分析、`run_scan()`、报告落盘、`--export-diag` |
+| `core/diagnose.py` | CLI 主流程：采集/分析抓包文件、`run_scan()`、报告落盘、`--export-diag` |
 | `core/diagpack.py` | 诊断包：收集 logs/runs/crashes/reports → 脱敏 → 泄漏自检 → zip |
 | `core/errors.py` | 稳定错误码 `ErrorCode`、可展示异常 `DiagError`、默认 `HINTS` |
 | `core/extract/__init__.py` | extract 包出口：`FIELDS` / `parse_rows` / `build_features` / 状态常量 |
 | `core/extract/fields.py` | tshark 字段清单 + 原始字符串 → Python 值（`"1,1"`、`True`、空串） |
 | `core/extract/aggregate.py` | 逐行聚合 → `Features`（纯函数，不 import analyzer） |
 | `core/logstore.py` | 唯一日志出口：日文件、裁剪、`env.json`、`runs/`、`crashes/`、异常钩子 |
-| `core/passive.py` | 被动监听：Scapy 优先/tshark 兜底，按会话聚合 + 端口/首包识别协议 |
+| `core/passive.py` | 通信观察（被动监听）：Scapy 优先/tshark 兜底，按会话聚合 + 端口/首包识别协议 |
 | `core/platform/__init__.py` | 平台适配层包标记（只做 OS 交互，不含业务判断） |
 | `core/platform/paths.py` | 目录约定与根目录探测（`Paths`） |
 | `core/platform/winapi.py` | Windows 能力：管理员、Npcap、网卡、默认网关、DNS |
-| `core/probe.py` | 链路体检：TCP 建连 + Banner 识别 + 按协议分段计时（HTTP/TLS/SMB/RDP/SSH/Opaque） |
+| `core/probe.py` | 连通与速度测试（链路体检）：TCP 建连 + Banner 识别 + 按协议分段计时（HTTP/TLS/SMB/RDP/SSH/Opaque） |
 | `core/report.py` | 报告渲染：Markdown + JSON 5 块；`tshark_path` 归一 |
 | `core/rules/__init__.py` | 规则包标记（渐进迁移中） |
 | `core/rules/legacy_map.py` | 旧 `rows[]` → `Finding` 的迁移桥（临时件；当前唯一规则相关实现） |

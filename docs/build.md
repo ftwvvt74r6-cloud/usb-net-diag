@@ -272,8 +272,8 @@ $section
 
 - 本 Release 只发 ``NetDiag-0.2.0-lite.zip``（源码 / 文档 / 测试），**不含** Python、Wireshark、Npcap。
 - 运行需要 **Python 3.11+**：https://www.python.org/downloads/windows/
-- 离线分析需要 **tshark**：安装 Wireshark https://www.wireshark.org/download.html ，或设置 ``TSHARK_PATH``。
-- 实时抓包 / 被动监听需要 **Npcap**：https://npcap.com/#download 和管理员权限。
+- 分析抓包文件需要 **tshark**：安装 Wireshark https://www.wireshark.org/download.html ，或设置 ``TSHARK_PATH``。
+- 全网体检 / 单目标诊断 / 通信观察需要 **Npcap**：https://npcap.com/#download 和管理员权限。
 - 解压后先双击 ``自检.bat``；lite 包用 ``python core\server.py`` 启动。
 "@ | Set-Content logs\dist\release\release-notes.md -Encoding UTF8
 ```

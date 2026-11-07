@@ -103,6 +103,7 @@
   .navitem:hover{background:#f7f9fc}
   .navitem .t{font-size:12.5px;font-weight:650;line-height:1.3;display:block}
   .navitem .d{font-size:10.5px;color:var(--muted);line-height:1.3;display:block}
+  .navitem .tech,.navhead .tech{font-size:10px;font-weight:500;color:#94a3b8;letter-spacing:0}
   .navitem.active{background:var(--accent-soft);border-color:#dbeafe}
   .navitem.active .t{color:var(--accent-2)}
   .navitem.locked{opacity:.5;cursor:not-allowed}
@@ -153,6 +154,16 @@
   .guide b{display:block;font-size:11.5px;color:var(--accent-2);margin-bottom:2px}
   .guide .term{display:block;margin-top:5px;font-size:10.8px;color:var(--muted)}
   .guide .steps-line{margin-top:5px;font-size:10.8px;color:var(--muted)}
+  /* 「它回答什么问题」卡片：每个模式首屏一张（命名改版 B2） */
+  .qcard{border:1px solid #dbeafe;border-radius:12px;padding:13px 16px 14px;margin-bottom:14px;
+    background:linear-gradient(135deg,#f8fbff,#fff 70%);box-shadow:var(--sh)}
+  .qcard .qk{font-size:10px;letter-spacing:1.1px;font-weight:800;color:var(--accent-2)}
+  .qcard h2{margin:5px 0 8px;font-size:17px;line-height:1.45;letter-spacing:.1px}
+  .qcard .qpoints{margin:0;padding-left:19px;font-size:12.5px;line-height:1.78;
+    color:var(--text-2)}
+  .qcard .qpoints li{margin:1px 0}
+  .qcard .qex{margin-top:9px;font-size:12px;line-height:1.68;color:#475569;
+    background:#eff6ff;border-left:3px solid #60a5fa;border-radius:6px;padding:7px 10px}
   /* 侧栏固定在底部：字段区独立滚动，「开始」按钮永远可见 */
   .side-actions{flex:none;padding:9px 0 2px;margin-top:6px;border-top:1px solid var(--line);
     background:#fff}
@@ -259,6 +270,14 @@
   .errcard{border:1px solid var(--crit-line);border-radius:var(--r);padding:16px 18px;
     background:linear-gradient(180deg,#fffafa,#fff);box-shadow:var(--sh)}
   .errcard h3{margin:0 0 10px;font-size:16px;color:#991b1b}
+  .errcard .vkind{font-size:10.5px;font-weight:800;color:#b45309;letter-spacing:.5px;
+    margin-bottom:6px}
+  .errcard .facts{margin:0 0 10px;padding-left:19px;font-size:12.6px;line-height:1.72;
+    color:var(--text-2)}
+  .errcard .facts li{margin:1px 0}
+  .errcard .note{margin-top:9px;font-size:12px;line-height:1.65;color:#92400e;
+    background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:7px;
+    padding:7px 10px}
   .errcard .why,.errcard .how{font-size:12.8px;line-height:1.75;color:var(--text-2);
     margin:7px 0}
   .errcard .why b{color:#b91c1c}
@@ -312,6 +331,8 @@
   .vcard.证据不足{background:linear-gradient(180deg,#f8fafc,#fff);border-color:#cbd5e1}
   .vcard.证据不足::before{background:#94a3b8}
   .vcard .vtop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .vcard .vkind{font-size:10.5px;font-weight:800;color:#64748b;letter-spacing:.5px;
+    margin-bottom:7px}
   .vcard .vt{flex:none;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;
     background:#fff;letter-spacing:.5px;border:1px solid}
   .vcard.严重 .vt{color:#b91c1c;border-color:var(--crit-line)}
@@ -531,30 +552,30 @@
           <span class="chev">›</span>
         </button>
         <div class="navsub">
-          <button class="navitem" data-mode="scan" title="抓本机全部流量，不设目标过滤">
-            <span class="t">全网扫描</span><span class="d">抓本机全部流量，不填目标</span>
+          <button class="navitem" data-mode="scan" title="全网体检（全网扫描）：抓本机所有流量，看整体状况">
+            <span class="t">全网体检<span class="tech">（全网扫描）</span></span><span class="d">抓本机所有流量，看整体状况</span>
           </button>
-          <button class="navitem" data-mode="live" title="只盯目标 IP / 网段 / 域名">
-            <span class="t">定向抓包</span><span class="d">只盯目标 IP / 网段 / 域名</span>
+          <button class="navitem" data-mode="live" title="单目标诊断（定向抓包）：只看我和某个 IP/网站的通信">
+            <span class="t">单目标诊断<span class="tech">（定向抓包）</span></span><span class="d">只看我和某个 IP/网站的通信，判断卡在哪一环</span>
           </button>
-          <button class="navitem" data-mode="passive" title="不发包，只旁听谁在跟谁通信">
-            <span class="t">被动监听</span><span class="d">不发包，看谁在连谁</span>
+          <button class="navitem" data-mode="passive" title="通信观察（被动监听）：不发包，只看谁在和谁通信">
+            <span class="t">通信观察<span class="tech">（被动监听）</span></span><span class="d">不发包，只看谁在和谁通信</span>
           </button>
         </div>
       </div>
 
       <div class="navgroup" data-group="probe">
-        <button class="navhead single" data-mode="probe" title="不抓包，测一条链路通不通、慢在哪一段">
+        <button class="navhead single" data-mode="probe" title="连通与速度测试（链路体检）：主动探测，10 秒给出通不通、多快">
           <span class="ic">②</span>
-          <span><span class="t">链路体检</span><span class="d">不抓包，测慢在哪一段</span></span>
+          <span><span class="t">连通与速度测试<span class="tech">（链路体检）</span></span><span class="d">主动探测，10 秒给出通不通、多快</span></span>
           <span class="chev" style="visibility:hidden">›</span>
         </button>
       </div>
 
       <div class="navgroup" data-group="offline">
-        <button class="navhead single" data-mode="offline" title="分析已有 pcap 文件，不碰网卡">
+        <button class="navhead single" data-mode="offline" title="分析抓包文件（离线分析）：别人抓的/之前存的 pcap，导入分析">
           <span class="ic">③</span>
-          <span><span class="t">离线分析</span><span class="d">分析已有 pcap，不碰网卡</span></span>
+          <span><span class="t">分析抓包文件<span class="tech">（离线分析）</span></span><span class="d">别人抓的/之前存的 pcap，导入分析</span></span>
           <span class="chev" style="visibility:hidden">›</span>
         </button>
       </div>
@@ -593,7 +614,7 @@
     </nav>
 
     <div class="lockbanner hidden" id="lock-banner">
-      当前是非管理员：实时抓包与被动监听已置灰，<b>离线分析 / 链路体检照常可用</b>。
+      当前是非管理员：全网体检 / 单目标诊断 / 通信观察已置灰，<b>连通与速度测试 / 分析抓包文件照常可用</b>。
       <a id="lock-elevate">以管理员身份重启</a>
     </div>
 
@@ -625,7 +646,7 @@
           <option value="scapy">Scapy（Python 逐包解析）</option>
           <option value="tshark">tshark（Wireshark 自带）</option>
         </select>
-        <div class="hint" id="engine-hint">被动监听只读不发包；会话表按「端口 + 首包特征」识别协议。</div>
+        <div class="hint" id="engine-hint">通信观察只读不发包；会话表按「端口 + 首包特征」识别协议。</div>
       </div>
 
       <div class="field hidden" id="field-offline">
@@ -640,8 +661,8 @@
     <div class="pane hidden" id="pane-probe">
       <div class="guide">
         <b>什么时候用这个</b>
-        不想抓包、只想确认一条链路通不通、慢在哪一段时用它。会依次测 DNS → TCP → 协议首包。
-        <span class="term">术语：链路体检 = 主动发少量探测报文，不产生 pcap，不需要管理员权限。</span>
+        想快速确认一个目标通不通、多快时用它：主动探测约 10 秒，会依次测 DNS → TCP → 协议首包。
+        <span class="term">术语：连通与速度测试（技术名：链路体检）= 主动发少量探测报文，不产生 pcap，不需要管理员权限。</span>
       </div>
       <div class="field">
         <label>目标域名 / IP</label>
@@ -673,7 +694,7 @@
           </div>
         </div>
       </details>
-      <button class="btn" id="probe-run">开始体检</button>
+      <button class="btn" id="probe-run">开始测试</button>
       <div class="hint">建连后先不发声，读服务端首包判断协议，再只发该协议该发的报文。
         不需要管理员权限，也不产生抓包文件。</div>
     </div>
@@ -691,11 +712,18 @@
     <div class="main-scroll" id="main-scroll">
     <div class="resultbar">
       <div>
-        <h2 id="result-title">全网扫描</h2>
-        <p id="result-sub">不设目标，抓本机全部流量后统一分析</p>
+        <h2 id="result-title">全网体检（全网扫描）</h2>
+        <p id="result-sub">抓本机所有流量，看整体状况</p>
       </div>
       <div class="searchchip" id="result-chip">就绪</div>
     </div>
+
+    <section class="qcard" id="qcard" aria-live="polite">
+      <div class="qk">这个模式回答什么问题</div>
+      <h2 id="q-question">这台电脑整体上网状况如何？问题出在哪一层？</h2>
+      <ul class="qpoints" id="q-points"></ul>
+      <div class="qex" id="q-example"></div>
+    </section>
 
     <section class="runpanel hidden" id="runpanel" aria-live="polite">
       <div class="run-top">
@@ -714,9 +742,9 @@
         <p>先选一个模式，填好左侧参数，再点「开始」。结果会先给一句话结论，
           再按 L2 链路 → L3 网络 → L4 传输 → L7 应用逐层说明，最后给可执行的处置步骤。</p>
         <div class="quick">
-          <button data-quick="scan"><b>全网扫描</b><span>不知道问题在哪，先抓全部流量</span></button>
-          <button data-quick="offline"><b>分析已有 pcap</b><span>不需要管理员权限</span></button>
-          <button data-quick="probe"><b>测一条链路</b><span>不抓包，只看慢在哪一段</span></button>
+          <button data-quick="scan"><b>全网体检</b><span>抓本机所有流量，看整体状况</span></button>
+          <button data-quick="offline"><b>分析抓包文件</b><span>不需要管理员权限</span></button>
+          <button data-quick="probe"><b>连通与速度测试</b><span>主动探测，10 秒给出通不通、多快</span></button>
         </div>
       </div>
     </div>
@@ -725,7 +753,7 @@
       <div class="card">
         <div class="body" id="probe-out">
           <div class="empty" style="padding:26px 12px">
-            <b>填好左侧目标，点「开始体检」</b>
+            <b>填好左侧目标，点「开始测试」</b>
             <p>会先识别协议（TLS / HTTP / SMB / SSH / 其它），再把一次访问拆成
               DNS → TCP → 协议识别 → 该协议自己的阶段，告诉你慢在哪一段。</p>
           </div>
@@ -803,14 +831,14 @@
     <div class="mhead">
       <div>
         <b>该功能需要管理员权限</b>
-        <em>实时抓包 / 被动监听要打开 Npcap 驱动，必须由管理员授权</em>
+        <em>全网体检 / 单目标诊断 / 通信观察要打开 Npcap 驱动，必须由管理员授权</em>
       </div>
       <button class="xbtn" id="perm-close" title="关闭">✕</button>
     </div>
     <div class="mbody">
       <p style="margin:2px 0 10px;font-size:12.5px;line-height:1.75;color:var(--text-2)">
-        「以管理员身份重启」会弹一次 Windows 授权窗口，<b>当前填的模式 / 目标 / 时长会保留</b>。
-        如果选择取消，离线分析和链路体检仍然可用。
+        「以管理员身份重启」会弹一次 Windows 授权窗口。重启后是新的页面实例，<b>请重新选择模式与目标</b>；
+        当前表单不会自动带过去。如果选择取消，分析抓包文件和连通与速度测试仍然可用。
       </p>
       <div id="perm-msg"></div>
     </div>
@@ -871,66 +899,171 @@
 
 <script type="application/json" id="ui-config">
 {
-  "locked_modes": ["scan", "live", "passive"],
+  "locked_modes": [
+    "scan",
+    "live",
+    "passive"
+  ],
+  "cards": {
+    "fault": {
+      "kicker": "结论",
+      "title": "发现问题：四层结论与问题清单"
+    },
+    "normal": {
+      "kicker": "结论",
+      "title": "四层均正常"
+    },
+    "empty_sessions": {
+      "kicker": "降级",
+      "title": "未观察到任何 TCP/IP 会话"
+    },
+    "target_unreachable": {
+      "kicker": "降级",
+      "title": "目标不可达"
+    },
+    "no_npcap": {
+      "kicker": "无法开始",
+      "title": "无法抓包：缺少抓包驱动"
+    },
+    "no_admin": {
+      "kicker": "无法开始",
+      "title": "权限不足"
+    },
+    "no_interface": {
+      "kicker": "无法开始",
+      "title": "网卡不可用"
+    },
+    "bad_file": {
+      "kicker": "无法分析",
+      "title": "无法解析该文件"
+    },
+    "internal": {
+      "kicker": "无法分析",
+      "title": "分析失败"
+    }
+  },
   "modes": {
     "scan": {
-      "label": "全网扫描",
+      "label": "全网体检",
+      "tech": "全网扫描",
+      "display": "全网体检（全网扫描）",
+      "nav_desc": "抓本机所有流量，看整体状况",
       "needs_admin": true,
-      "fields": ["duration", "iface"],
-      "btn": "开始扫描",
-      "title": "全网扫描",
-      "sub": "不设目标，抓本机全部流量后统一分析",
-      "guide": "不知道问题出在哪、想先看本机整体流量时用它：不设目标，抓全部流量再分层分析。",
-      "term": "术语：实时抓包 = 从网卡现抓；目标框在这里被有意隐藏，填了也会被后端忽略。",
-      "hint": "全网扫描不设目标过滤，建议 30~60 秒；运行中可以切到「链路体检」但建议等结果。",
+      "fields": [
+        "duration",
+        "iface"
+      ],
+      "btn": "开始体检",
+      "title": "全网体检（全网扫描）",
+      "sub": "抓本机所有流量，看整体状况",
+      "guide": "抓本机所有流量，看整体状况；完全不知道问题在哪时，先做一次全网体检。",
+      "question": "这台电脑整体上网状况如何？问题出在哪一层？",
+      "points": [
+        "抓本机全部流量，不设目标、不填过滤条件",
+        "按 L2 链路 → L3 网络 → L4 传输 → L7 应用四层给结论",
+        "适合「不知道问题在哪」时先做一次基线"
+      ],
+      "example": "例：同事说「整层楼都上不了网」→ 全网体检 → 报告会指出是本机网卡、网关，还是某个外部服务在拖慢。",
+      "term": "术语：实时抓包 = 从网卡现抓；这里不设目标，目标框被有意隐藏，填了也会被后端忽略。",
+      "hint": "全网体检不设目标过滤，建议 30~60 秒；运行中可以切到「连通与速度测试」但建议等结果。",
       "idle_desc": "不设目标，抓本机网卡上的全部流量，再从 L2 到 L7 分层分析。适合完全不知道问题在哪的第一步。"
     },
     "live": {
-      "label": "定向抓包",
+      "label": "单目标诊断",
+      "tech": "定向抓包",
+      "display": "单目标诊断（定向抓包）",
+      "nav_desc": "只看我和某个 IP/网站的通信，判断卡在哪一环",
       "needs_admin": true,
-      "fields": ["target", "duration", "iface"],
-      "btn": "开始抓包",
-      "title": "定向抓包",
-      "sub": "只保留与目标相关的流量，过滤器自动构造",
-      "guide": "已经怀疑某个 IP / 网段 / 域名，想只盯它时用它：过滤器只保留目标相关流量。",
-      "term": "术语：实时抓包 = 从网卡现抓；私网 IP / 私网网段不会下抓包过滤（抓全网后在分析阶段筛），避免漏抓。",
+      "fields": [
+        "target",
+        "duration",
+        "iface"
+      ],
+      "btn": "开始诊断",
+      "title": "单目标诊断（定向抓包）",
+      "sub": "只看我和某个 IP/网站的通信，判断卡在哪一环",
+      "guide": "已经怀疑某个 IP / 网段 / 域名，想看「我和它之间卡在哪一环」时用它。",
+      "question": "我和这个 IP/网站之间到底通不通？慢在哪一环（DNS/TCP/TLS/HTTP）？",
+      "points": [
+        "只保留与目标相关的流量，逐层判断卡在 DNS、TCP、TLS 还是 HTTP",
+        "域名会先解析；私网 / fake-ip 目标自动抓全网，再在分析阶段筛",
+        "适合「只有某个网站或系统打不开」的定向排查"
+      ],
+      "example": "例：同事说「打不开 OA」→ 单目标诊断 → 报告会指出卡在 DNS 解析、TCP 建连还是 TLS 握手。",
+      "term": "术语：定向抓包 = 只保留跟目标有关的报文；私网 IP / 私网网段不设抓包过滤（抓全网后在分析阶段筛），避免漏抓。",
       "hint": "私网 IP / 私网网段不下抓包过滤（先抓全网，分析阶段再筛）；域名解析到 fake-ip 时也会自动抓全网。",
       "idle_desc": "只盯一个目标 IP / 网段 / 域名。域名会先解析；解析到 fake-ip / 私网时自动改为抓全网，避免 0 包。"
     },
     "passive": {
-      "label": "被动监听",
+      "label": "通信观察",
+      "tech": "被动监听",
+      "display": "通信观察（被动监听）",
+      "nav_desc": "不发包，只看谁在和谁通信",
       "needs_admin": true,
-      "fields": ["duration", "iface", "engine"],
-      "btn": "开始监听",
-      "title": "被动监听",
-      "sub": "不发包，把流量按会话聚合后看谁在连谁",
-      "guide": "想知道谁在跟谁通信、又不希望自己发包时用它：只旁听，把流量按会话聚合。",
+      "fields": [
+        "duration",
+        "iface",
+        "engine"
+      ],
+      "btn": "开始观察",
+      "title": "通信观察（被动监听）",
+      "sub": "不发包，只看谁在和谁通信",
+      "guide": "想知道「现在谁在跟谁通信」、又不希望自己发包时用它：只旁听，把流量按会话聚合。",
+      "question": "现在谁在和谁通信？用什么协议？有没有可疑外联？",
+      "points": [
+        "不发任何报文，只读网卡旁听",
+        "把流量聚合成「源 IP:端口 → 目标 IP:端口」的会话表",
+        "适合查后台在连谁、有没有异常外联"
+      ],
+      "example": "例：怀疑电脑在偷偷上传 → 通信观察 → 会话表会列出目标 IP/端口、协议和识别依据。",
       "term": "术语：被动监听 = 只读网卡，不发任何探测报文；目标框被隐藏，默认看全部会话。",
-      "hint": "被动监听不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。",
+      "hint": "通信观察不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。",
       "idle_desc": "不发包，只旁听本机网卡流量，按「源 IP:端口 → 目标 IP:端口」聚合成会话表。"
     },
     "probe": {
-      "label": "链路体检",
+      "label": "连通与速度测试",
+      "tech": "链路体检",
+      "display": "连通与速度测试（链路体检）",
+      "nav_desc": "主动探测，10 秒给出通不通、多快",
       "needs_admin": false,
       "fields": [],
-      "btn": "开始体检",
-      "title": "链路体检",
-      "sub": "先识别协议，再分段计时，直接看出慢在哪一段",
+      "btn": "开始测试",
+      "title": "连通与速度测试（链路体检）",
+      "sub": "主动探测，10 秒给出通不通、多快",
       "guide": "不想抓包、只想确认一条链路通不通、慢在哪一段时用它。会依次测 DNS → TCP → 协议首包。",
+      "question": "到这个目标通不通？慢在哪一段（DNS/TCP/TLS/应用）？",
+      "points": [
+        "主动发少量探测报文，约 10 秒出结果",
+        "拆成 DNS → TCP → 协议首包（TLS/HTTP/SMB/SSH）分段计时",
+        "不需要管理员权限，也不产生 pcap"
+      ],
+      "example": "例：用户说「网页很慢」→ 连通与速度测试 → 报告会指出是 DNS 慢、建连慢，还是服务端响应慢。",
       "term": "术语：链路体检 = 主动发少量探测报文，不产生 pcap，不需要管理员权限。",
       "hint": "",
       "idle_desc": ""
     },
     "offline": {
-      "label": "离线分析",
+      "label": "分析抓包文件",
+      "tech": "离线分析",
+      "display": "分析抓包文件（离线分析）",
+      "nav_desc": "别人抓的/之前存的 pcap，导入分析",
       "needs_admin": false,
-      "fields": ["offline"],
+      "fields": [
+        "offline"
+      ],
       "btn": "开始分析",
-      "title": "离线分析",
-      "sub": "分析已有 pcap 文件，不访问网卡、不需要管理员权限",
+      "title": "分析抓包文件（离线分析）",
+      "sub": "别人抓的/之前存的 pcap，导入分析",
       "guide": "手上已经有一个 pcap 文件（别人给的，或之前抓的）时用它：只分析文件，不碰网卡。",
+      "question": "这个 pcap 里到底发生了什么？问题出在哪一层？",
+      "points": [
+        "只读文件，不访问网卡、不需要管理员权限",
+        "支持 .pcap / .pcapng / .cap 格式",
+        "适合现场没权限抓包，或复盘历史故障"
+      ],
+      "example": "例：网络同事发来一个 pcap → 分析抓包文件 → 直接得到四层结论、问题清单和处理建议。",
       "term": "术语：离线分析 = 分析已有的 pcap 文件，不访问网卡、不需要管理员权限；和上面的「实时抓包」是两回事。",
-      "hint": "离线分析只读取 pcap 文件，不需要管理员权限，适合权限受限的目标机器。",
+      "hint": "分析抓包文件只读取 pcap 文件，不需要管理员权限，适合权限受限的目标机器。",
       "idle_desc": "选择或拖入一个已有 pcap / pcapng 文件，直接离线分析；不会碰网卡。"
     }
   }
@@ -1044,7 +1177,8 @@ function setMode(mode) {
     + (cfg.term ? '<span class="term">' + esc(cfg.term) + '</span>' : "");
   $("#result-title").textContent = cfg.title;
   $("#result-sub").textContent = cfg.sub;
-  $("#result-chip").textContent = isProbe ? "待体检" : "就绪";
+  $("#result-chip").textContent = isProbe ? "待测试" : "就绪";
+  paintQuestion(mode);
   paintLocks();
 
   if (isProbe) {
@@ -1056,14 +1190,29 @@ function setMode(mode) {
   if (mode === "live") setTimeout(() => $("#target").focus(), 60);
 }
 
+/* 「它回答什么问题」卡片：一行大问题 + 2~3 条要点 + 一个具体例子（B2） */
+function paintQuestion(mode) {
+  const cfg = UI.modes[mode] || {};
+  $("#q-question").textContent = cfg.question || "";
+  $("#q-points").innerHTML = (cfg.points || []).map((p) => '<li>' + esc(p) + '</li>').join("");
+  $("#q-example").textContent = cfg.example || "";
+  $("#qcard").classList.remove("hidden");
+}
+
+function hideQuestion() {
+  const card = $("#qcard");
+  if (card) card.classList.add("hidden");
+}
+
 function showIdle(mode) {
   const cfg = UI.modes[mode] || {};
+  paintQuestion(mode);
   $("#result").innerHTML = '<div class="empty"><div class="ic">◈</div><b>'
     + esc(cfg.label || "诊断结果") + ' · 还没有结果</b><p>' + esc(cfg.idle_desc || "")
     + '</p><div class="quick">'
-    + '<button data-quick="scan"><b>全网扫描</b><span>不知道问题在哪，先抓全部流量</span></button>'
-    + '<button data-quick="offline"><b>分析已有 pcap</b><span>不需要管理员权限</span></button>'
-    + '<button data-quick="probe"><b>测一条链路</b><span>不抓包，只看慢在哪一段</span></button>'
+    + '<button data-quick="scan"><b>全网体检</b><span>抓本机所有流量，看整体状况</span></button>'
+    + '<button data-quick="offline"><b>分析抓包文件</b><span>不需要管理员权限</span></button>'
+    + '<button data-quick="probe"><b>连通与速度测试</b><span>主动探测，10 秒给出通不通、多快</span></button>'
     + '</div></div>';
 }
 
@@ -1115,7 +1264,7 @@ async function loadReports() {
   const files = (r && r.files) || [];
   if (!files.length) {
     box.innerHTML = '<div class="empty" style="padding:20px"><b>还没有历史报告</b>'
-      + '<p>先做一次全网扫描、定向抓包或离线分析，报告会自动出现在这里。</p></div>';
+      + '<p>先做一次全网体检、单目标诊断或分析抓包文件，报告会自动出现在这里。</p></div>';
     return;
   }
   box.innerHTML = files.map((f) => {
@@ -1209,9 +1358,9 @@ async function boot() {
       : '<span class="badge bad" title="Npcap 未就绪：实时抓包不可用">Npcap ✗</span>');
     badges.push(IS_ADMIN
       ? '<span class="badge good" title="当前进程有管理员权限">管理员 ✓</span>'
-      : '<span class="badge bad" title="非管理员：实时抓包 / 被动监听已置灰">非管理员</span>');
+      : '<span class="badge bad" title="非管理员：全网体检 / 单目标诊断 / 通信观察已置灰">非管理员</span>');
     const vm = (d.tshark_version || "").match(/\d+\.\d+\.\d+/);
-    badges.push('<span class="badge" title="离线分析依赖 tshark">'
+    badges.push('<span class="badge" title="分析抓包文件依赖 tshark">'
       + (vm ? "tshark " + vm[0] : "tshark 未找到") + '</span>');
     const ei = pe && pe.engine_info;
     if (ei && ei.scapy) {
@@ -1299,7 +1448,7 @@ $("#perm-elevate").onclick = async () => {
   b.disabled = true;
   b.textContent = "正在请求…";
   $("#perm-msg").innerHTML = '<div class="msg wait">正在请求 Windows 管理员授权，'
-    + '请在系统弹窗中点「是」；授权后服务会重启并保留当前表单。</div>';
+    + '请在系统弹窗中点「是」；授权后服务会重启，重启后请重新选择模式与目标。</div>';
   let r;
   try {
     r = await fetch("/api/elevate", {
@@ -1314,7 +1463,7 @@ $("#perm-elevate").onclick = async () => {
     return;
   }
   $("#perm-msg").innerHTML = '<div class="msg bad">' + esc(r.error || "未获得管理员权限")
-    + '<br>仍可继续使用离线分析与链路体检。</div>';
+    + '<br>仍可继续使用连通与速度测试和分析抓包文件。</div>';
   b.disabled = false;
   b.textContent = "以管理员身份重启";
 };
@@ -1428,7 +1577,7 @@ async function startCapture() {
   if (!r.ok) {
     const why = r.error || "启动失败";
     appendLog("错误：" + why, true);
-    failedResult("任务未能启动", why);
+    failedResult("任务未能启动", why, r.error_code);
     stopRun();
     return;
   }
@@ -1447,6 +1596,7 @@ function stopRun() {
 }
 
 function runningResult() {
+  hideQuestion();
   const cfg = UI.modes[RUN_MODE] || {};
   $("#result-title").textContent = cfg.title || "诊断结果";
   $("#result-sub").textContent = "正在采集并分析报文，完成后结果会自动出现在这里";
@@ -1469,16 +1619,16 @@ function adviceFor(why) {
     return "换一个完整的 pcap / pcapng 文件（或重新抓一份）；文件损坏或格式不支持时 tshark 无法解析。";
   }
   if (/Npcap/i.test(text)) {
-    return "安装 Npcap 后重启工具；临时也可以用「离线分析」打开已有的 pcap 文件。";
+    return "安装 Npcap 后重启工具；临时也可以用「分析抓包文件」打开已有的 pcap 文件。";
   }
   if (/tshark/i.test(text)) {
     return "确认 tools\\WiresharkPortable\\App\\Wireshark\\tshark.exe 存在；便携包不完整时重新解压。";
   }
   if (/管理员|权限|permission|access is denied/i.test(text)) {
-    return "右键 NetDiag.vbs / start.bat 选「以管理员身份运行」；或改用离线分析、链路体检。";
+    return "右键 NetDiag.vbs / start.bat 选「以管理员身份运行」；或改用分析抓包文件、连通与速度测试。";
   }
   if (/网卡|0 包|报文|抓包/.test(text)) {
-    return "换一块有流量的网卡，或保持「自动选择」；也可以先用「全网扫描」确认本机有没有业务流量。";
+    return "换一块有流量的网卡，或保持「自动选择」；也可以先用「全网体检」确认本机有没有业务流量。";
   }
   return "按上面的原因逐项排查；也可以点「查看日志」看完整过程，或导出诊断包发给维护者。";
 }
@@ -1488,16 +1638,23 @@ function scrollMainTop() {
   if (sc) sc.scrollTop = 0;
 }
 
-function failedResult(title, detail) {
-  const why = detail || "未知错误";
-  $("#result-chip").textContent = "失败";
-  $("#result").innerHTML = '<div class="errcard"><h3>' + esc(title || "诊断失败")
-    + '</h3><p class="why"><b>为什么：</b>' + esc(why) + '</p>'
-    + '<p class="how"><b>怎么办：</b>' + esc(adviceFor(why)) + '</p>'
-    + '<div class="raw">如果以上步骤仍无法解决，点「查看日志」看完整过程，'
-    + '或到「报告与导出 → 导出诊断包」把脱敏日志发回给维护者。</div>'
-    + '<div class="acts"><button class="btn" id="err-log">查看日志</button>'
-    + '<button class="btn ghost" id="err-retry">重试</button></div></div>';
+/* 失败也要离开「运行中」：按错误类型渲染「结论卡片」，不只给一行红字。 */
+function failureKind(code, why) {
+  const text = String(why || "");
+  if (code === "E_NO_NPCAP") return "no_npcap";
+  if (code === "E_NO_ADMIN") return "no_admin";
+  if (code === "E_NO_INTERFACE") return "no_interface";
+  if (code === "E_BAD_PCAP") return "bad_file";
+  if (code === "E_INTERNAL") return "internal";
+  if (/缺少抓包驱动|Npcap\s*未安装|Npcap\s*未就绪|未找到\s*Npcap/i.test(text)) return "no_npcap";
+  if (/未枚举到可用网卡|device is being used|could not be initiated|网卡.*(打不开|被占用)/i.test(text)) return "no_interface";
+  if (/权限不足|permission|access is denied|not permitted/i.test(text)) return "no_admin";
+  if (/解析失败|抓包文件不完整|cut short|不是\s*pcap|capture file|格式不支持|无法解析/i.test(text)) return "bad_file";
+  if (/Traceback|RuntimeError|\b[A-Z][A-Za-z]+Error\b|内部异常/i.test(text)) return "internal";
+  return "";
+}
+
+function wireFailureActions(kind) {
   const logBtn = $("#err-log");
   if (logBtn) logBtn.onclick = () => {
     $("#consolepanel").classList.remove("collapsed");
@@ -1510,6 +1667,132 @@ function failedResult(title, detail) {
     if (isLocked(MODE)) { showPermModal(); return; }
     startCapture();
   };
+  const elevate = $("#err-elevate");
+  if (elevate) elevate.onclick = showPermModal;
+  const probe = $("#err-probe");
+  if (probe) probe.onclick = () => setMode("probe");
+  const offline = $("#err-offline");
+  if (offline) offline.onclick = () => setMode("offline");
+  const diagpack = $("#err-diagpack");
+  if (diagpack) diagpack.onclick = exportDiagPack;
+  const refresh = $("#err-iface-refresh");
+  if (refresh) refresh.onclick = loadIfacesForError;
+  if (kind === "no_interface") loadIfacesForError();
+}
+
+async function loadIfacesForError() {
+  const box = $("#iface-list");
+  if (!box) return;
+  box.innerHTML = '<div class="hint">正在读取网卡列表…</div>';
+  let r;
+  try {
+    r = await fetch("/api/interfaces").then((x) => x.json());
+  } catch (e) {
+    box.innerHTML = '<div class="msg bad">读取网卡列表失败：' + esc(e) + '</div>';
+    return;
+  }
+  const all = (r && r.interfaces) || [];
+  const list = all.filter((i) => /npf_/i.test(String(i.name || "")));
+  const shown = list.length ? list : all;
+  if (!shown.length) {
+    box.innerHTML = '<div class="msg bad">没有枚举到任何网卡（Npcap 未安装或 tshark 不可用）。</div>';
+    return;
+  }
+  const status = r.npcap ? "可用（已枚举）" : "驱动缺失，暂不可抓包";
+  box.innerHTML = '<div class="sectitle">可用网卡与状态</div><ul class="facts">'
+    + shown.map((i) => '<li><span class="mono">#' + esc(i.index) + ' '
+      + esc(i.short || i.name) + '</span> · 状态：' + esc(status) + '</li>').join("")
+    + '</ul>';
+}
+
+function renderFailureCard(kind, why) {
+  const spec = UI.cards[kind] || {};
+  const title = spec.title || "诊断失败";
+  const whyText = why || "未知错误";
+  let facts = [];
+  let how = adviceFor(whyText);
+  let note = "";
+  let acts = "";
+  const btnLog = '<button class="btn ghost" id="err-log">查看日志</button>';
+  const btnRetry = '<button class="btn ghost" id="err-retry">重试</button>';
+  const btnProbe = '<button class="btn ghost" id="err-probe">去连通与速度测试</button>';
+  const btnOffline = '<button class="btn ghost" id="err-offline">去分析抓包文件</button>';
+  const btnElevate = '<button class="btn" id="err-elevate">以管理员身份重启</button>';
+  const btnDiagpack = '<button class="btn ghost" id="err-diagpack">导出诊断包</button>';
+
+  if (kind === "no_npcap") {
+    facts = [
+      "Npcap 抓包驱动未安装，或安装后没有生效。",
+      "所有需要打开网卡的模式都被阻止：全网体检 / 单目标诊断 / 通信观察。",
+    ];
+    how = "从 npcap.com 下载安装 Npcap（安装时勾选 WinPcap 兼容模式），装完重启工具。";
+    note = "连通与速度测试、分析抓包文件仍然可用，它们不需要抓包驱动。";
+    acts = '<a class="btn ghost" style="text-decoration:none;text-align:center" '
+      + 'href="https://npcap.com/#download" target="_blank" rel="noopener">下载 Npcap</a>'
+      + btnProbe + btnOffline + btnLog;
+  } else if (kind === "no_admin") {
+    facts = [
+      "当前进程没有管理员权限，无法打开 Npcap 驱动。",
+      "全网体检 / 单目标诊断 / 通信观察需要管理员授权。",
+    ];
+    how = "点「以管理员身份重启」并在 Windows 授权窗口点「是」；重启后请重新选择模式与目标。";
+    note = "取消提权也没关系：连通与速度测试、分析抓包文件仍可继续使用。";
+    acts = btnElevate + btnProbe + btnOffline + btnLog;
+  } else if (kind === "no_interface") {
+    facts = [
+      "没有枚举到可用网卡，或你指定的网卡正被其它程序占用。",
+      "下面是本次能枚举到的网卡与状态，可换一块在线网卡再试。",
+    ];
+    how = "先点「刷新网卡列表」，换一块在线网卡；如果全部打不开，优先检查 Npcap 驱动和网卡连接。";
+    note = "自动选择会先探测哪块网卡真有流量，通常比手选更稳。";
+    acts = '<button class="btn ghost" id="err-iface-refresh">刷新网卡列表</button>'
+      + btnProbe + btnRetry + btnLog;
+  } else if (kind === "bad_file") {
+    facts = [
+      "文件损坏、写盘不完整，或不是受支持的抓包格式。",
+      "支持的格式：.pcap / .pcapng / .cap（Wireshark / tshark 能读的版本）。",
+    ];
+    how = "换一个完整的 pcap / pcapng 文件，或重新抓一份；写盘还没结束时不要立即分析。";
+    note = "如果文件来自别人，先确认传输过程没有中断、文件大小不是 0。";
+    acts = btnOffline + btnRetry + btnLog;
+  } else if (kind === "internal") {
+    facts = [
+      "分析器在处理这个文件 / 这次抓包时抛出了未预期的异常。",
+      "错误摘要：" + whyText,
+    ];
+    how = "先重试一次；如果仍失败，点「导出诊断包」把脱敏日志发给维护者定位。";
+    note = "这是工具内部异常，不是你的网络一定有问题；原始文件不会被上传。";
+    acts = btnLog + btnDiagpack + btnRetry;
+  }
+
+  $("#result-chip").textContent = "失败";
+  $("#result").innerHTML = '<div class="errcard" data-card="' + esc(kind) + '">'
+    + '<div class="vkind">' + esc(spec.kicker || "无法完成") + '</div>'
+    + '<h3>' + esc(title) + '</h3>'
+    + '<ul class="facts">' + facts.map((f) => '<li>' + esc(f) + '</li>').join("") + '</ul>'
+    + '<p class="why"><b>为什么：</b>' + esc(whyText) + '</p>'
+    + '<p class="how"><b>怎么办：</b>' + esc(how) + '</p>'
+    + (note ? '<div class="note">' + esc(note) + '</div>' : "")
+    + '<div id="iface-list"></div>'
+    + '<div class="acts">' + acts + '</div></div>';
+  wireFailureActions(kind);
+  scrollMainTop();
+}
+
+function failedResult(title, detail, code) {
+  hideQuestion();
+  const why = detail || "未知错误";
+  const kind = failureKind(code, why);
+  if (kind) { renderFailureCard(kind, why); return; }
+  $("#result-chip").textContent = "失败";
+  $("#result").innerHTML = '<div class="errcard" data-card="generic"><h3>' + esc(title || "诊断失败")
+    + '</h3><p class="why"><b>为什么：</b>' + esc(why) + '</p>'
+    + '<p class="how"><b>怎么办：</b>' + esc(adviceFor(why)) + '</p>'
+    + '<div class="raw">如果以上步骤仍无法解决，点「查看日志」看完整过程，'
+    + '或到「报告与导出 → 导出诊断包」把脱敏日志发回给维护者。</div>'
+    + '<div class="acts"><button class="btn" id="err-log">查看日志</button>'
+    + '<button class="btn ghost" id="err-retry">重试</button></div></div>';
+  wireFailureActions("");
   scrollMainTop();
 }
 
@@ -1605,7 +1888,7 @@ async function poll() {
       stopRun();
       appendLog("诊断失败：" + why, "e");
       if (RUN_MODE) setMode(RUN_MODE);
-      failedResult("诊断失败", why);
+      failedResult("诊断失败", why, s.error_code);
     } else if (s.state === "running") {
       RUN_MODE = s.mode || RUN_MODE;
       RUN_DURATION = Number(s.duration || RUN_DURATION || 0);
@@ -1638,9 +1921,9 @@ async function startPassive(){
   $("#run").disabled = true;
   $("#run").innerHTML = '<span class="spin"></span>监听中…';
   $("#pstop").classList.remove("hidden");
-  $("#hint").textContent = "正在监听网卡，期间不要关闭本窗口…";
+  $("#hint").textContent = "正在观察网卡，期间不要关闭本窗口…";
   runningResult();
-  $("#result-title").textContent = "被动监听";
+  $("#result-title").textContent = "通信观察（被动监听）";
   lastLogCount = 0;
   $("#console").innerHTML = "";
   const r = await fetch("/api/passive", {
@@ -1656,7 +1939,7 @@ async function startPassive(){
     appendLog("监听启动失败：" + why, "e");
     failedResult("监听未能启动", why);
     $("#hint").textContent = "监听没能启动：" + why
-      + "。可改用离线分析（不需要管理员）或先做链路体检。";
+      + "。可改用分析抓包文件（不需要管理员）或先做连通与速度测试。";
     stopPassiveUI();
     return;
   }
@@ -1700,7 +1983,7 @@ async function pollPassive(){
     const why = p.error || "未知错误";
     appendLog("监听失败：" + why, "e");
     $("#hint").textContent = "监听失败：" + why
-      + "。可先检查网卡/引擎设置，或改用离线分析。";
+      + "。可先检查网卡/引擎设置，或改用分析抓包文件。";
     failedResult("监听失败", why);
   }
 }
@@ -1712,6 +1995,7 @@ $("#pstop").onclick = async () => {
 
 function renderPassive(res){
   if (!res || !res.ok) return;
+  hideQuestion();
   const s = res.summary || {};
   const st = (k, v) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`;
   const dist = (s.by_proto || []).slice(0, 8).map((p) => {
@@ -1732,7 +2016,7 @@ function renderPassive(res){
       + esc(f.state) + '</span></td>'
     + '</tr>').join("");
 
-  $("#result-title").textContent = "被动监听结果";
+  $("#result-title").textContent = "通信观察结果（被动监听）";
   $("#result-sub").textContent = "会话按流量排序；协议靠「端口画像 + 首包特征」识别，识别依据写在协议下方";
   $("#result-chip").textContent = (s.flows || 0) + " 条会话";
   $("#result").innerHTML =
@@ -1756,7 +2040,7 @@ function renderPassive(res){
       + '<th style="text-align:right">总流量</th><th>连接状态</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
     + '<div class="hint" style="margin-top:10px">Unknown TCP / Unknown UDP 表示既没有首包特征、'
-      + '端口也不在常见画像里，不代表故障；可对可疑 IP 用上面的「链路体检」指定协议再探一次。</div>';
+      + '端口也不在常见画像里，不代表故障；可对可疑 IP 用上面的「连通与速度测试」指定协议再探一次。</div>';
   scrollMainTop();
 }
 
@@ -1771,6 +2055,7 @@ function miniTable(head, body){
 
 function render(res) {
   if (!res || !res.ok) return;
+  hideQuestion();
   LAST_RESULT = res;
   $("#result-title").textContent = "诊断结果";
   const m = res.meta || {}, sum = res.summary || {}, vd = res.verdict || {};
@@ -1779,14 +2064,25 @@ function render(res) {
   $("#result-chip").textContent = lv + " · " + (vd.layer || "—");
 
   /* ---- 结论卡：先回答「哪一层坏了」 ---- */
+  const dnsOk = mt.dns_samples
+    ? (100 - Number(mt.dns_fail_rate)).toFixed(1) + "%"
+    : ((m.dns_total || 0) > 0 && (m.dns_resp || 0) > 0
+        ? (Number(m.dns_resp) / Number(m.dns_total) * 100).toFixed(1) + "%"
+        : "无响应样本");
   const chips = [
+    ["会话数", mt.streams_total != null ? mt.streams_total : (m.streams_total ?? "-")],
     ["RTT 均值", ms(mt.rtt_samples ? mt.rtt_avg_ms : null)],
     ["重传率", mt.retrans_rate != null ? mt.retrans_rate.toFixed(2) + "%" : "-"],
+    ["DNS 成功率", dnsOk],
     ["建连失败", mt.conn_fail != null ? mt.conn_fail + " 个" : "-"],
-    ["DNS 均值", ms(mt.dns_samples ? mt.dns_avg_ms : null)],
     ["HTTP 均值", ms(mt.http_samples ? mt.http_avg_ms : null)],
     ["吞吐", mt.throughput_mbps != null ? mt.throughput_mbps.toFixed(2) + " Mbps" : "-"],
   ].map(([k, v]) => '<span class="chip">' + k + ' <b>' + esc(v) + '</b></span>').join("");
+
+  /* 抓到包且四层都正常：结论卡明确写「四层均正常」+ 关键指标（结果矩阵第 2 行） */
+  const isNormal = lv === "正常" && !(vd.points || []).length;
+  const cardTitle = isNormal ? UI.cards.normal.title : UI.cards.fault.title;
+  const headline = isNormal ? "四层均正常" : (vd.headline || "");
 
   /* 「无样本」是第三态：状态写进徽标文字，不能只靠颜色/透明度表达 */
   const LAY_STATUS = { ok: "正常", warn: "注意", bad: "异常", na: "无样本" };
@@ -1894,10 +2190,11 @@ function render(res) {
     : "";
 
   const html = `
-    <div class="vcard ${esc(lv)}">
+    <div class="vcard ${esc(lv)}" data-card="${isNormal ? "normal" : "fault"}">
+      <div class="vkind">${esc(isNormal ? "结论 · 全部正常" : cardTitle)}</div>
       <div class="vtop"><span class="vt">${esc(lv)}</span>
         <span class="vlay">${esc(vd.layer || "—")}</span>
-        <h3>${esc(vd.headline || "")}</h3></div>
+        <h3>${esc(headline)}</h3></div>
       <p class="vplain">${esc(vd.plain || "")}</p>
       <div class="chips">${chips}</div>
     </div>
@@ -1954,40 +2251,72 @@ function render(res) {
 
 /* ---------- 0 包降级结果页（中性，不报红） ---------- */
 function renderDegraded(res) {
+  hideQuestion();
   LAST_RESULT = res;
   const link = res.link || {};
   const cap = res.capture || {};
+  const tgt = link.target || {};
+  const kind = res.kind || "empty_sessions";
+  const unreachable = kind === "target_unreachable";
+  const title = res.card_title
+    || (UI.cards[kind] && UI.cards[kind].title)
+    || UI.cards.empty_sessions.title;
   const fmt = (v) => (v == null || v === "" ? "-" : (Number(v) < 1 ? "<1 ms" : v + " ms"));
-  const via = link.via === "target" ? "目标" : "默认网关";
-  $("#result-title").textContent = "诊断结果 · 降级";
-  $("#result-sub").textContent = "抓包窗口没有业务报文，已自动用链路体检给出可达性结论";
-  $("#result-chip").textContent = "降级 · 链路可达";
+  const targetHost = tgt.host || cap.target || "-";
+  $("#result-title").textContent = title;
+  $("#result-sub").textContent = unreachable
+    ? "抓包窗口没有业务报文，ICMP 探测也拿不到目标响应"
+    : "抓包窗口内没有 TCP/IP 会话，已自动用 ICMP 给出链路可达性";
+  $("#result-chip").textContent = unreachable ? "降级 · 目标不可达" : "降级 · 链路可达";
+
+  const chips = [];
+  if (unreachable) {
+    chips.push('<span class="chip">ICMP 响应 <b>无响应</b></span>');
+    chips.push('<span class="chip">目标丢包 <b>100%</b></span>');
+    chips.push('<span class="chip">探测目标 <b>' + esc(targetHost) + '</b></span>');
+    if (link.via === "gateway") {
+      chips.push('<span class="chip">默认网关 <b>' + esc(link.host || "-") + '</b></span>');
+      chips.push('<span class="chip">网关 RTT <b>' + esc(fmt(link.avg_ms)) + '</b></span>');
+    }
+  } else {
+    chips.push('<span class="chip">ICMP RTT 平均 <b>' + esc(fmt(link.avg_ms)) + '</b></span>');
+    chips.push('<span class="chip">丢包 <b>'
+      + esc((link.loss_pct == null ? "-" : link.loss_pct) + "%") + '</b></span>');
+    chips.push('<span class="chip">探测目标 <b>' + esc(targetHost) + '</b></span>');
+    if (link.via === "gateway") {
+      chips.push('<span class="chip">默认网关 <b>' + esc(link.host || "-") + '</b></span>');
+    }
+  }
+  chips.push('<span class="chip">网卡 <b>' + esc(cap.interface || "-") + '</b></span>');
+  chips.push('<span class="chip">过滤器 <b>' + esc(cap.bpf || "-") + '</b></span>');
   const reasons = (res.reasons || []).map((r) => '<li>' + esc(r) + '</li>').join("");
   const steps = (res.next_steps || []).map((s) => '<li>' + esc(s) + '</li>').join("");
+  const reportName = String((res.report && res.report.markdown) || "").split(/[\\/]/).pop();
+  const reportBlock = reportName
+    ? '<div class="msg ok" style="margin:0 0 12px"><b>降级结论已落盘</b>：'
+      + '<a href="/api/report?path=' + encodeURIComponent(reportName)
+      + '" target="_blank" rel="noopener">查看 Markdown 报告</a>'
+      + '<span class="fname" style="margin-left:8px">' + esc(reportName) + '</span></div>'
+    : '<div class="msg wait" style="margin:0 0 12px">降级结论正在写入报告……</div>';
+
   $("#result").innerHTML =
-    '<div class="vcard 警告">'
-    + '<div class="vtop"><span class="vt">降级</span>'
-    + '<span class="vlay">采集有效性</span><h3>' + esc(res.headline || "未捕获业务报文，但链路可达")
-    + '</h3></div>'
-    + '<p class="vplain">' + esc(res.plain || "") + '</p>'
-    + '<div class="chips">'
-    + '<span class="chip">RTT 平均 <b>' + esc(fmt(link.avg_ms)) + '</b></span>'
-    + '<span class="chip">抖动 <b>' + esc(fmt(link.jitter_ms)) + '</b></span>'
-    + '<span class="chip">丢包 <b>' + esc((link.loss_pct == null ? "-" : link.loss_pct) + "%") + '</b></span>'
-    + '<span class="chip">' + esc(via) + ' <b>' + esc(link.host || "-") + '</b></span>'
-    + '<span class="chip">网卡 <b>' + esc(cap.interface || "-") + '</b></span>'
-    + '<span class="chip">过滤器 <b>' + esc(cap.bpf || "-") + '</b></span>'
-    + '</div></div>'
-    + '<div class="sectitle">为什么没抓到业务报文</div>'
+    reportBlock
+    + '<div class="vcard 警告" data-card="' + esc(kind) + '">'
+    + '<div class="vkind">采集有效性 · 降级</div>'
+    + '<div class="vtop"><span class="vt">' + (unreachable ? "目标不可达" : "未捕获会话")
+    + '</span><span class="vlay">采集有效性</span><h3>' + esc(title) + '</h3></div>'
+    + '<p class="vplain">' + esc(res.plain || res.headline || "") + '</p>'
+    + '<div class="chips">' + chips.join("") + '</div></div>'
+    + '<div class="sectitle">' + (unreachable ? "为什么判定目标不可达" : "为什么没看到 TCP/IP 会话（未捕获业务报文）") + '</div>'
     + '<div class="point"><div class="vl"><ol class="steps">' + reasons + '</ol></div></div>'
-    + '<div class="sectitle">接下来怎么做</div>'
+    + '<div class="sectitle">接下来怎么做（建议按顺序执行）</div>'
     + '<ol class="steps">' + steps + '</ol>'
     + '<div class="hint">本次抓包：' + esc(cap.duration || 0) + ' 秒 · 目标 '
     + esc(cap.target || "全网") + ' · 原始提示：<span class="fname">'
     + esc(cap.error || "-") + '</span></div>'
     + '<div class="toolbar" style="margin-top:12px">'
     + '<button class="btn ghost" id="deg-retry">再抓一次</button>'
-    + '<button class="btn ghost" id="deg-probe">去链路体检</button>'
+    + '<button class="btn ghost" id="deg-probe">去连通与速度测试</button>'
     + '</div>';
   const retry = $("#deg-retry");
   if (retry) retry.onclick = () => {
@@ -2031,8 +2360,9 @@ async function runProbe(){
   const target = $("#probe-target").value.trim();
   if(!target){ $("#probe-target").focus(); return; }
   const btn = $("#probe-run"), out = $("#probe-out");
-  btn.disabled = true; btn.textContent = "体检中…";
-  $("#result-chip").textContent = "体检中…";
+  hideQuestion();
+  btn.disabled = true; btn.textContent = "测试中…";
+  $("#result-chip").textContent = "测试中…";
   out.innerHTML = '<div class="msg wait" style="margin-top:12px">正在识别协议并分段探测，最长约 25 秒…</div>';
   let r;
   try{
@@ -2046,10 +2376,10 @@ async function runProbe(){
       }),
     }).then(x => x.json());
   }catch(e){ r = { ok:false, error:String(e) }; }
-  btn.disabled = false; btn.textContent = "开始体检";
+  btn.disabled = false; btn.textContent = "开始测试";
 
   if(!r.ok){
-    out.innerHTML = '<div class="msg bad" style="margin-top:12px">' + esc(r.error || "体检失败") + '</div>';
+    out.innerHTML = '<div class="msg bad" style="margin-top:12px">' + esc(r.error || "测试失败") + '</div>';
     return;
   }
   $("#result-chip").textContent = r.protocol || "已识别";

@@ -1394,7 +1394,7 @@ def _build_provenance() -> dict:
 
 
 def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> dict:
-    """离线分析一个 pcap，产出完整结果字典。
+    """分析抓包文件（离线分析）：读取一个 pcap，产出完整结果字典。
 
     Args:
         pcap: 抓包文件路径（``Path`` 或字符串）。

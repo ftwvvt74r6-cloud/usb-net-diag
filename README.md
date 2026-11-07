@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/dependencies-0%20pip-brightgreen" alt="Zero pip dependencies">
 </p>
 
-**NetDiag（网络矩阵）** 是一个 Windows 便携网络诊断工具：抓一段包，或对单个目标做一次链路体检，
+**NetDiag（网络矩阵）** 是一个 Windows 便携网络诊断工具：抓一段包，或对单个目标做一次连通与速度测试，
 把“慢、卡、丢包、连不上、时通时不通”定位到 **L2 链路 → L3 网络 → L4 传输 → L7 应用** 的某一层，
 并回答四个问题：**哪一层坏了 / 哪个协议 / 哪个对端 / 下一步做什么**。
 
@@ -32,6 +32,20 @@
 | 抓包工具丢给你几万行字段 | 需要专家才能读出结论，普通人看完更迷茫 | 输出「一句话结论 + 四层状态 + 问题详解 + 处置步骤」 |
 | 没抓到包也显示“正常” | 把“没有样本”误判成“没有问题” | 证据充分性闸门：无样本时返回「证据不足」 |
 | 日志/诊断包直接发回来 | 内网 IP、域名、用户名跟着泄漏 | 诊断包默认脱敏，并在写 zip 前做泄漏自检 |
+
+
+
+## 五种模式（它回答什么问题）
+
+| 模式 | 技术名 | 副标题 / 它回答什么问题 | 输入 |
+|---|---|---|---|
+| **全网体检** | 全网扫描 | 抓本机所有流量，看整体状况 | 网卡 + 时长 |
+| **单目标诊断** | 定向抓包 | 只看我和某个 IP/网站的通信，判断卡在哪一环 | 网卡 + 目标 + 时长 |
+| **通信观察** | 被动监听 | 不发包，只看谁在和谁通信 | 网卡 + 时长 |
+| **连通与速度测试** | 链路体检 | 主动探测，10 秒给出通不通、多快 | 目标地址 |
+| **分析抓包文件** | 离线分析 | 别人抓的/之前存的 pcap，导入分析 | pcap 文件 |
+
+> 括号里的旧名是技术名，老用户和文档可以继续按它搜索。
 
 ## 真实产物
 
@@ -109,7 +123,7 @@ python core\server.py
 ```
 
 浏览器打开 `http://127.0.0.1:8787/`。没有 pip 依赖，不需要 `pip install`。
-离线分析需要 tshark（安装 Wireshark，或把 `TSHARK_PATH` 指向 `tshark.exe`）：
+分析抓包文件需要 tshark（安装 Wireshark，或把 `TSHARK_PATH` 指向 `tshark.exe`）：
 
 ```bat
 python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\netdiag-demo
@@ -128,8 +142,8 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 python core\server.py
 ```
 
-lite 包**不含**便携 Python、Wireshark、Npcap。需要 Python 3.11+；离线分析另装 Wireshark；
-实时抓包 / 被动监听另装 Npcap 并以管理员运行。`自检.bat` 会逐项告诉你缺什么、去哪装。
+lite 包**不含**便携 Python、Wireshark、Npcap。需要 Python 3.11+；分析抓包文件另装 Wireshark；
+全网体检 / 单目标诊断 / 通信观察另装 Npcap 并以管理员运行。`自检.bat` 会逐项告诉你缺什么、去哪装。
 
 ### ③ internal 包（自带运行时，双击即用）
 
@@ -147,9 +161,9 @@ Npcap 安装器。双击 `NetDiag.vbs`（静默、自动提权）或 `start.bat`
 
 | 能力 | 依赖 | 说明 |
 |---|---|---|
-| 离线分析（pcap） | tshark | 不需要 Npcap / 管理员 |
-| 链路体检（单目标 TCP） | 无 | 纯标准库 socket |
-| 实时抓包 / 被动监听 | Npcap + 管理员 | Windows 驱动，无法免安装 |
+| 分析抓包文件（pcap） | tshark | 不需要 Npcap / 管理员 |
+| 连通与速度测试（单目标 TCP） | 无 | 纯标准库 socket |
+| 全网体检 / 单目标诊断 / 通信观察 | Npcap + 管理员 | Windows 驱动，无法免安装 |
 
 ## 工程严谨性
 

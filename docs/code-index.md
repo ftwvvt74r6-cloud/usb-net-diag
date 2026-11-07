@@ -45,7 +45,7 @@
 | 21 | 零窗口文案（现有是**对的**） | `core/verdict.py` L143-145 | 「接收端处理不过来」方向正确。规划文档把它写成「服务端瓶颈」是**错的**，别照着改 |
 | 22 | 启动器契约测试 | `tests/test_launcher_contract.py` | 守着 `start.bat` 的 `%ROOT%` 引用；改它等于放行破坏启动 |
 | 23 | 协议自适应体检 | `core/probe.py`（946 行，`_identify()` ≈ L472） | 全项目最具差异化的部分，只搬不改 |
-| 24 | 被动监听 | `core/passive.py`（483 行） | scapy 2.8 的唯一使用者，只搬不改 |
+| 24 | 通信观察（被动监听） | `core/passive.py`（483 行） | scapy 2.8 的唯一使用者，只搬不改 |
 | 25 | 盘符自适应 | `core/bootstrap.py` `gen_configs()` L29-58 | 每次启动重写 mcp/harness 配置，不要改成「只在缺失时写」 |
 | 26 | 示例抓包 | `captures/faults_demo.pcap` | README 首跑引导 + CI 金标准（54 包 / 16s / 4 会话 / 重传 5.56%） |
 

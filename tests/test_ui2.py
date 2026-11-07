@@ -181,7 +181,7 @@ class ScanTargetSuppressionTest(unittest.TestCase):
             self.assertEqual(thread.call_args.kwargs["args"][1], "",
                              "scan 模式传给 worker 的 target 必须是空串")
             text = "\n".join(row["m"] for row in server.JOB["logs"])
-            self.assertIn("全网扫描模式忽略目标 10.0.0.1", text)
+            self.assertIn("忽略目标 10.0.0.1", text)
             self.assertIn("抓取全部流量", text)
         finally:
             server.JOB.clear()

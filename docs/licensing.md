@@ -84,9 +84,9 @@
 
 ### 2.4 不想碰 Npcap 时
 
-- **离线分析不需要 Npcap**：tshark 读 pcap 只依赖 Wireshark / 系统安装，
+- **分析抓包文件不需要 Npcap**：tshark 读 pcap 只依赖 Wireshark / 系统安装，
   `自检.bat` 会明确区分「tshark 缺失（WARN）」与「Npcap 缺失（WARN）」。
-- 实时抓包 / 被动监听才需要 Npcap + 管理员。缺 Npcap 时 `start.bat` 会降级提示，
+- 全网体检 / 单目标诊断 / 通信观察才需要 Npcap + 管理员。缺 Npcap 时 `start.bat` 会降级提示，
   不会崩。
 
 ---
@@ -115,11 +115,11 @@
 
 ## 5. Scapy（GPL-2.0）
 
-- 被动监听用的 Scapy 2.8.0 只存在于内部离线包的
+- 通信观察（被动监听）用的 Scapy 2.8.0 只存在于内部离线包的
   `tools\python\Lib\site-packages\scapy\`，许可文本在
   `scapy-2.8.0.dist-info\licenses\LICENSE`。
 - 与 Wireshark 一样是 GPL：再分发需附许可文本；源码可从 <https://scapy.net/> 获取。
-- lite 包不含 Scapy；被动监听在 lite 下需要用户自装（或不可用），不影响离线分析。
+- lite 包不含 Scapy；通信观察（被动监听）在 lite 下需要用户自装（或不可用），不影响分析抓包文件。
 
 ---
 
