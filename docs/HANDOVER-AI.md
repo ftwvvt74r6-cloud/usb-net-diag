@@ -25,8 +25,12 @@
 <python> -m unittest discover -s tests          # 看 "Ran N tests" 与 "OK (skipped=N)"
 <python> scripts\gen_api_doc.py --check 0.95    # 看 "模块 N 个｜公开符号 N 个"
 git ls-files 'core/*.py'                        # 核心模块清单（注意用单引号，PowerShell 不吃双引号里的通配）
-git grep -nF "/api/" -- core/server.py          # 路由清单（-F 定长匹配，别用正则转义）
+git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，见下方说明）
 ```
+
+> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **45 行**
+> （含 docstring / 注释 / 示例 URL），**不等于路由数量**；精确路由清单看 **§4 的表**
+> （10 个 POST + 2 个 GET = 12 个核心 API）。
 
 > 仓库里有多份**历史文档**（`docs/START-HERE.md`、`docs/plan-review.md`、`docs/code-index.md`、
 > `docs/t00-findings.md`、`docs/handoff-MANIFEST.json`）描述的是 v0.1.0 或目标架构，
@@ -505,7 +509,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `<owner>` | `docs/git-setup.md`（7 处 URL） | 你的 GitHub 账号/组织 |
 | `<repo>` | 同上 | 你的仓库名 |
 
-文档里另有 `<你的工作目录>`（本机路径示例，12 处），按自己的目录替换即可；
+文档里另有 `<你的工作目录>`（本机路径示例；`git grep -nF` 当前 **18 行命中**），按自己的目录替换即可；
 它不影响代码运行。**没有别的写死用户名/盘符/邮箱。**
 （核对方法：`git grep -nF "<你的工作目录>"`、`git grep -nF "<工作区目录>"`；
 另用 `-F` 搜自己的账号名/用户目录确认为 0 —— **必须 `-F`**，正则转义写错会得到假 0。）
@@ -657,7 +661,7 @@ curl.exe -X POST http://127.0.0.1:8787/api/quit
 
 | 结果 | 结论 |
 |---|---|
-| 1~4 全绿，UI 能开、`/api/ping` 返回 0.2.0 | ✅ 交接成功 |
+| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.2.0 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
 | 测试绿但 UI 打不开 | 看 `logs/app-*.log` / `logs/diag-*.log`，先查端口占用与 `ui/index.html` |
 | demo 报告层/计数不对 | 先确认 `captures/faults_demo.pcap` 未被改（sha256 应与入库一致），再看 `rows[]` |
 | 诊断包解压乱码/缺 README | 看 `core/diagpack.py` 的 `README_NAME` 与 zip 条目名脱敏（`*` → `_`） |
