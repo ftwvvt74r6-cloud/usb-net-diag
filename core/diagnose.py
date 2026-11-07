@@ -73,6 +73,37 @@ def _log_to_file(line: str) -> None:
     logstore.diag_log(line)
 
 
+def _harden_console() -> None:
+    """让 CLI 在 cp936(GBK) 等窄编码控制台下「编不出也不崩」（只改 errors）。
+
+    中文 Windows 控制台默认 cp936，而报告里的 ``❌`` / ``✅`` 不在 GBK 字符集里：
+    :func:`main` 打印完整报告时会抛 ``UnicodeEncodeError``，把一次已经成功、
+    报告也已落盘的诊断变成 exit 1。这里在打印任何内容之前把 ``errors`` 改成
+    ``backslashreplace``：能编码的中文照旧按原编码输出，编不出的 emoji 变成
+    ``\\u274c`` 这样的可见转义——不丢字符、不误导，也不抛异常。
+
+    选 ``backslashreplace`` 而不是 ``replace``：前者保留了「哪个字符没编出来」的
+    信息（可检索、可反查），后者只剩 ``?``，排障时分不清丢的是 emoji 还是别的
+    字符。两者都不会崩，但前者的证据更完整，也符合本任务「emoji 可显示为
+    ``\\u274c``」的验收口径。
+
+    Note:
+        只改 ``errors``、不传 ``encoding``，保留控制台当前编码（cp936 下中文照常
+        显示）。没有 ``reconfigure`` 的流（测试的 ``StringIO``、重定向包装器）直接
+        跳过；流为 ``None``（pythonw / VBS 无控制台）或重配置失败也只跳过——兜底
+        逻辑本身绝不能在入口抛错。报告文件仍由 :func:`report.save` 以 UTF-8 原文
+        落盘，不受这里影响。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="backslashreplace")
+        except Exception:  # noqa: BLE001  入口兜底失败只能跳过，不能反过来崩
+            continue
+
+
 def log(msg: str) -> None:
     """默认日志回调：打印到控制台，同时追加到 ``logs/diag-YYYYMMDD.log``。
 
@@ -646,7 +677,13 @@ def main(argv: list[str] | None = None) -> int:
 
     Returns:
         int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
+
+    Note:
+        入口第一件事是 :func:`_harden_console`：cp936 控制台下把编不出的 emoji
+        转义成 ``\\u274c``，避免「报告已落盘、打印时却 exit 1」。只影响控制台
+        显示，``.md`` / ``.json`` 报告内容不变。
     """
+    _harden_console()
     ap = argparse.ArgumentParser(description="NetDiag 网络诊断")
     ap.add_argument("--target", default="", help="目标 IP 或 CIDR 网段，留空表示全网扫描")
     ap.add_argument("--duration", type=int, default=load_config()["default_duration"])

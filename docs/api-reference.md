@@ -1572,11 +1572,11 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `load_config` | function | 44 | ✅ |
-| `log` | function | 76 | ✅ |
-| `bpf_for` | function | 89 | ✅ |
-| `capture_live` | function | 282 | ✅ |
-| `run_scan` | function | 451 | ✅ |
-| `main` | function | 637 | ✅ |
+| `log` | function | 107 | ✅ |
+| `bpf_for` | function | 120 | ✅ |
+| `capture_live` | function | 313 | ✅ |
+| `run_scan` | function | 482 | ✅ |
+| `main` | function | 668 | ✅ |
 
 ### `load_config`
 
@@ -1713,6 +1713,11 @@ Args:
 
 Returns:
     int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
+
+Note:
+    入口第一件事是 :func:`_harden_console`：cp936 控制台下把编不出的 emoji
+    转义成 ``\u274c``，避免「报告已落盘、打印时却 exit 1」。只影响控制台
+    显示，``.md`` / ``.json`` 报告内容不变。
 ```
 
 ## `core/diagpack.py`
