@@ -207,9 +207,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 301 | ✅ |
-| `build_findings` | function | 751 | ✅ |
-| `analyze` | function | 1213 | ✅ |
+| `collect` | function | 335 | ✅ |
+| `build_findings` | function | 845 | ✅ |
+| `analyze` | function | 1337 | ✅ |
 
 ### `collect`
 
@@ -244,7 +244,9 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]
 把统计聚合翻译成「按层归类的发现」，供 UI 与报告消费。
 
 Args:
-    st: :func:`collect` 的统计字典（各类计数器）。
+    st: :func:`collect` 的统计字典（各类计数器）。其中 ``st["dir"]`` 是分方向
+        统计（``c2s`` / ``s2c`` 的数据重传、重复 ACK、帧数与方向未定的
+        ``unknown`` 帧数）；缺失时（旧调用方的合成 st）退回通用重传行。
     m: :func:`_metrics` 算出的比率与时延指标（``retrans_rate`` / ``rtt_avg_ms`` 等）。
     streams: :func:`_stream_rows` 聚合出的会话列表。
 
@@ -266,6 +268,9 @@ Note:
     ``layer`` / ``category`` / ``severity`` 三个字段是**结构化标识**（既被
     ``verdict`` / ``legacy_map`` 当键匹配，也直接进报告表格）：它们不是本轮
     可迁移的「文案」，改值会连带改变判定与映射，因此保留在代码里。
+
+    方向判定（见 :func:`_retrans_direction`）只换重传行的**文案与建议**，
+    不改严重度阈值，也不产生新行：没有重复 ACK 证据时仍是原来的通用行。
 ```
 
 ### `analyze`
