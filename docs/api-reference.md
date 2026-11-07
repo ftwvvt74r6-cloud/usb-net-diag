@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**29** 个（有模块说明 29 个）
-- 公开符号：**206** 个（有 docstring 206 个，合格 206 个）
+- 公开符号：**210** 个（有 docstring 210 个，合格 210 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -305,8 +305,8 @@ Returns:
 | `msgbox` | function | 53 | ✅ |
 | `is_admin` | function | 70 | ✅ |
 | `relaunch_as_admin` | function | 82 | ✅ |
-| `find_running` | function | 100 | ✅ |
-| `main` | function | 127 | ✅ |
+| `find_running` | function | 105 | ✅ |
+| `main` | function | 132 | ✅ |
 
 ### `redirect_output`
 
@@ -1571,13 +1571,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 46 | ✅ |
-| `log` | function | 109 | ✅ |
-| `capture_filter_for` | function | 195 | ✅ |
-| `bpf_for` | function | 267 | ✅ |
-| `capture_live` | function | 450 | ✅ |
-| `run_scan` | function | 627 | ✅ |
-| `main` | function | 813 | ✅ |
+| `load_config` | function | 49 | ✅ |
+| `log` | function | 112 | ✅ |
+| `capture_filter_for` | function | 218 | ✅ |
+| `bpf_for` | function | 304 | ✅ |
+| `capture_live` | function | 493 | ✅ |
+| `degraded_empty_capture_result` | function | 674 | ✅ |
+| `run_scan` | function | 815 | ✅ |
+| `main` | function | 1005 | ✅ |
 
 ### `load_config`
 
@@ -1631,7 +1632,8 @@ Args:
 Returns:
     dict: 键 ``bpf``（最终过滤器，空串=无过滤）/ ``kind``（``none`` /
         ``ip`` / ``cidr`` / ``domain``）/ ``resolved``（域名解析出的 IP 列表）/
-        ``reason``（决策原因）。
+        ``reason``（决策原因）。只有**公网** IP、域名、CIDR 才会下过滤器；
+        私网 / fake-ip / 回环等目标一律抓全网，分析阶段再按目标筛。
 ```
 
 ### `bpf_for`
@@ -1650,7 +1652,8 @@ Args:
     target: 用户输入的目标，如 ``192.168.1.10`` / ``10.0.0.0/24`` / ``example.com``。
 
 Returns:
-    str: BPF 串；空串表示抓全网（空目标、解析失败、fake-ip/私网域名等）。
+    str: BPF 串；空串表示抓全网（空目标、解析失败、fake-ip/私网域名、
+        私网 IP / 私网 CIDR 等）。
 
 Raises:
     ValueError: 目标含非法字符，或长度超过 200 个字符（由调用方转成可展示的错误）。
@@ -1680,7 +1683,8 @@ Args:
 Returns:
     dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
         "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
-        "degraded": bool}``，``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
+        "degraded": bool, "empty": bool}``，``empty=True`` 表示抓包窗口内
+        0 包（可走 0 包降级），``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
         环境问题，前端据此提示改用离线分析。自动选择模式下抓满 0 包/0 字节时不
         直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
         ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
@@ -1691,6 +1695,35 @@ Note:
     在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
     0 包的空抓包文件会被删除（日志写一行「已删除空抓包」），避免在
     ``captures/`` 留下无法分析的垃圾。
+```
+
+### `degraded_empty_capture_result`
+
+```python
+def degraded_empty_capture_result(target: str='', duration: int=0, interface: str | None=None, capture_error: str='', bpf: str='', logger=log) -> dict | None
+```
+
+```text
+0 包优雅降级：抓包窗口没有业务报文时，用链路可达性代替「红色失败」。
+
+路测反馈：网卡选错、流量走 VPN/TUN、或目标本来就没流量时，三块网卡 0 包直接
+判「诊断失败」会让人以为工具坏了。这里自动对「目标 → 默认网关」做一次 ICMP
+体检，只要拿到时延/抖动/丢包就返回中性降级结论；只有连这组信息都拿不到
+（如 Npcap 不可用、网卡打不开）时才让调用方报错。
+
+Args:
+    target: 用户填的目标；空表示全网扫描。
+    duration: 本次抓包时长（秒），写进结论。
+    interface: 用户显式选择的网卡；空表示自动选择。
+    capture_error: 抓包阶段的原始错误文案（放进「为什么」供排障）。
+    bpf: 本次实际使用的 BPF 过滤器；空串表示全网。
+    logger: 日志回调。
+
+Returns:
+    dict | None: 成功时 ``{"ok": True, "degraded": True, "headline",
+        "plain", "link": {...}, "reasons": [...], "next_steps": [...],
+        "capture": {...}}``；目标与默认网关都测不到时返回 ``None``
+        （调用方应按真正的失败处理）。
 ```
 
 ### `run_scan`
@@ -2695,13 +2728,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `is_admin` | function | 28 | ✅ |
-| `npcap_installed` | function | 43 | ✅ |
-| `Adapter` | class | 79 | ✅ |
-| `adapters` | function | 120 | ✅ |
-| `default_gateway` | function | 162 | ✅ |
-| `dns_servers` | function | 175 | ✅ |
-| `interface_index_map` | function | 190 | ✅ |
+| `is_admin` | function | 77 | ✅ |
+| `npcap_installed` | function | 92 | ✅ |
+| `Adapter` | class | 128 | ✅ |
+| `adapters` | function | 169 | ✅ |
+| `default_gateway` | function | 211 | ✅ |
+| `icmp_stats` | function | 240 | ✅ |
+| `dns_servers` | function | 326 | ✅ |
+| `interface_index_map` | function | 341 | ✅ |
 
 ### `is_admin`
 
@@ -2785,18 +2819,45 @@ Returns:
 ### `default_gateway`
 
 ```python
-def default_gateway() -> str
+def default_gateway(dest: str='8.8.8.8') -> str
 ```
 
 ```text
-默认网关地址（路径探测的第 1 跳）。
+默认网关地址（路径探测 / 0 包降级时判断「本地链路是否可达」）。
+
+调 ``iphlpapi.GetBestRoute`` 查「去往 ``dest`` 的最优路由」的下一跳，**不解析
+任何本地化命令行输出**。没有默认路由（如断网、只有直连网段）时返回空串。
+
+Args:
+    dest: 查询目的地址（IPv4 字面量），默认 ``8.8.8.8``，即走默认路由。
 
 Returns:
-    str: 网关 IP。
+    str: 网关 IPv4 地址；非 Windows、无默认路由或 API 调用失败时返回 ``""``。
+```
 
-Raises:
-    NotImplementedError: 本阶段未实现。落地方案见 docstring 正文
-        （``GetBestRoute2`` 或内置 Scapy 的 ``conf.route.default_gateway()``）。
+### `icmp_stats`
+
+```python
+def icmp_stats(host: str, count: int=4, timeout_ms: int=800) -> dict
+```
+
+```text
+用 Windows ``IcmpSendEcho`` 测一个地址的 RTT / 抖动 / 丢包（非管理员可用）。
+
+0 包优雅降级需要一组「链路是否可达」的数字，但抓包可能根本看不到业务报文；
+这里用系统 ICMP 回显做一次轻量探测。用 API 而不是解析 ``ping`` 文本：中文 /
+英文系统的输出格式不同，做文本匹配会在别的机器上静默失效。
+
+Args:
+    host: IPv4 字面量（域名请先解析；本函数不联网查 DNS）。
+    count: 探测次数，夹在 1~10；默认 4。
+    timeout_ms: 单次等待毫秒数，夹在 100~5000；默认 800。
+
+Returns:
+    dict: 键 ``ok``（至少收到 1 个回复）/ ``host`` / ``sent`` / ``recv`` /
+        ``loss_pct``（0~100，1 位小数）/ ``avg_ms`` / ``jitter_ms``（RTT 总体
+        标准差，1 位小数）/ ``error``（失败原因，成功为空串）。非 Windows、
+        非 IPv4、API 不可用时 ``ok=False`` 且 ``error`` 说明原因，不抛异常。
 ```
 
 ### `dns_servers`
@@ -3204,23 +3265,25 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 115 | ✅ |
-| `request_quit` | function | 120 | ✅ |
-| `cleanup_pid` | function | 168 | ✅ |
-| `BodyTooLarge` | class | 178 | ✅ |
-| `doctor_cached` | function | 205 | ✅ |
-| `log` | function | 259 | ✅ |
-| `start_job` | function | 333 | ✅ |
-| `engine_info` | function | 380 | ✅ |
-| `passive_start` | function | 423 | ✅ |
-| `passive_status` | function | 457 | ✅ |
-| `Handler` | class | 475 | ✅ |
-| `Handler.log_message` | method | 521 | ✅ |
-| `Handler.do_GET` | method | 659 | ✅ |
-| `Handler.do_POST` | method | 676 | ✅ |
-| `DiagServer` | class | 872 | ✅ |
-| `create_server` | function | 884 | ✅ |
-| `main` | function | 931 | ✅ |
+| `touch` | function | 120 | ✅ |
+| `request_quit` | function | 125 | ✅ |
+| `cleanup_pid` | function | 173 | ✅ |
+| `BodyTooLarge` | class | 183 | ✅ |
+| `doctor_cached` | function | 262 | ✅ |
+| `log` | function | 316 | ✅ |
+| `start_job` | function | 401 | ✅ |
+| `report_index` | function | 455 | ✅ |
+| `request_elevation` | function | 489 | ✅ |
+| `engine_info` | function | 522 | ✅ |
+| `passive_start` | function | 565 | ✅ |
+| `passive_status` | function | 600 | ✅ |
+| `Handler` | class | 623 | ✅ |
+| `Handler.log_message` | method | 669 | ✅ |
+| `Handler.do_GET` | method | 807 | ✅ |
+| `Handler.do_POST` | method | 824 | ✅ |
+| `DiagServer` | class | 1030 | ✅ |
+| `create_server` | function | 1042 | ✅ |
+| `main` | function | 1089 | ✅ |
 
 ### `touch`
 
@@ -3328,6 +3391,48 @@ Args:
 Returns:
     dict: 成功 ``{"ok": True}``；已在跑或参数不合法时 ``{"ok": False, "error": "..."}``。
         任务本身在后台线程执行，进度请轮询 ``/api/status``。
+```
+
+### `report_index`
+
+```python
+def report_index(limit: int=50) -> list[dict]
+```
+
+```text
+列出 ``reports/`` 下的历史报告（界面「报告与导出 → 历史报告」用）。
+
+只读目录，不生成、不修改任何报告；按修改时间倒序，最多 ``limit`` 条。
+
+Args:
+    limit: 最多返回多少条（正数；调用方负责上限）。
+
+Returns:
+    list[dict]: 每项键 ``name``（.md 文件名）/ ``size``（字节）/
+        ``mtime``（``YYYY-MM-DD HH:MM``）/ ``json``（同名 .json 存在时为文件名，
+        否则空串）。目录不可读时返回空列表，不抛异常。
+```
+
+### `request_elevation`
+
+```python
+def request_elevation() -> dict
+```
+
+```text
+UI「以管理员身份重启」：调用启动器已有的 UAC 提权路径。
+
+提权本身是 Windows 的安全桌面确认，做不到静默；这里只负责发起请求：
+
+* 已是管理员 → 直接返回 ``already_admin``，不重复弹 UAC；
+* 用户点「是」→ 新进程以管理员权限启动（``core/app.py --elevated`` 会等旧实例
+  释放端口后再监听，避免两个实例抢同一个端口），随后旧服务退出；
+* 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
+  离线分析与链路体检不受影响。
+
+Returns:
+    dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
+        失败 ``{"ok": False, "error": "..."}``。
 ```
 
 ### `engine_info`
