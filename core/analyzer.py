@@ -36,9 +36,9 @@ except ModuleNotFoundError:                        # 场景二：包方式（fro
     from core.extract.fields import parse_flag as _parse_flag
 
 try:                                              # 文案表访问器（扁平导入：core/ 在 sys.path）
-    from copytext import text as _copy_text
+    from copytext import load_table as _copy_load, text as _copy_text
 except ModuleNotFoundError:                        # 包方式：仓库根在 sys.path
-    from core.copytext import text as _copy_text
+    from core.copytext import load_table as _copy_load, text as _copy_text
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -257,8 +257,16 @@ def _conn_no_response(s: dict) -> bool:
     """判断这条 TCP 流是不是「发出了 SYN、始终没有回应」（建连无响应）。
 
     这是**结构化判定**，与文案彻底解耦：有 SYN、没有 SYN-ACK、也没有 RST。
-    与 :func:`_is_handshake_rst` 的口径只差一处 —— 握手期被 RST 的流算「被拒」，
-    不算「无响应」，所以这里额外要求 ``not rst``（与旧实现的内联条件逐字等价）。
+
+    与 :func:`_is_handshake_rst` 的异同（**不是「只差一处」**，见下）：
+
+    * ``_is_handshake_rst`` 判的是**某一次 RST 帧**：``not from_client``、
+      有 ``syn``、没有 ``synack_ts``、没有 ``ack_ts``；
+    * 本函数判的是**整条流**「发过 SYN 却始终没有回应」，不涉及方向。
+      它没有显式检查 ``ack_ts``：``ack_ts`` 只在 ``synack_ts`` 存在时写入，
+      而这里已要求 ``not synack_ts``，所以该条件天然冗余；
+      额外要求 ``not rst`` 让「握手期被对端 RST」的流归入 ``conn_refused``、
+      不归 ``conn_fail``（与旧实现的内联 flags 条件逐字等价）。
 
     为什么必须改：旧实现把中文标记 ``"建连无响应"`` 当查找键，
     ``conn_fail`` 计数与 ``streams_top`` 排序都靠 ``"建连无响应" in flags``。
@@ -635,8 +643,15 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
 # ---------------------------------------------------------------- 派生指标
 
 def _stream_rows(st: dict) -> list[dict]:
-    """把流字典整理成可展示的会话明细，按「问题严重度」排序。"""
+    """把流字典整理成可展示的会话明细，按「问题严重度」排序。
+
+    Note:
+        会话标记文案来自 copy 表 ``stream_flag``。这是逐流热循环（大 pcap 上万条流），
+        所以表只读一次、格式化时传 ``table=``，避免每条标记都走一次读盘/解析。
+    """
     out: list[dict] = []
+    # 热循环里只取一次表：copy 表有缓存，但传 table 连缓存查找也省掉
+    flag_table = _copy_load()
     for sid, s in st["streams"].items():
         hs = None
         if s["syn_ts"] and s["synack_ts"]:
@@ -649,17 +664,19 @@ def _stream_rows(st: dict) -> list[dict]:
         flags: list[str] = []
         no_response = _conn_no_response(s)
         if no_response:
-            flags.append(_t("stream_flag", "no_response"))
+            flags.append(_copy_text("stream_flag", "no_response", table=flag_table))
         elif s["syn_retrans"]:
-            flags.append(_t("stream_flag", "syn_retrans", count=s["syn_retrans"]))
+            flags.append(_copy_text("stream_flag", "syn_retrans",
+                                    table=flag_table, count=s["syn_retrans"]))
         if s["rst"]:
-            flags.append(_t("stream_flag", "rst"))
+            flags.append(_copy_text("stream_flag", "rst", table=flag_table))
         if s["zero_win"]:
-            flags.append(_t("stream_flag", "zero_win"))
+            flags.append(_copy_text("stream_flag", "zero_win", table=flag_table))
         if s["ooo"]:
-            flags.append(_t("stream_flag", "ooo", count=s["ooo"]))
+            flags.append(_copy_text("stream_flag", "ooo", table=flag_table, count=s["ooo"]))
         if hs is not None and hs >= 300:
-            flags.append(_t("stream_flag", "slow_handshake", ms=hs))
+            flags.append(_copy_text("stream_flag", "slow_handshake",
+                                    table=flag_table, ms=hs))
         # 排序权重只看结构化条件，不看 flags 里的文案
         score = (100 if no_response else 0) + len(flags) * 10 \
             + s["retrans"] * 2 + s["zero_win"] * 3 + s["rst"] * 5 + min(s["bytes"] / 1e6, 20)
