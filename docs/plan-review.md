@@ -594,7 +594,7 @@ REM 等价于：tools\python\python.exe core\bootstrap.py --check
 
 | 视角 | 内容 | 是否完整 |
 |---|---|---|
-| 本地工作区（`G:\USB-Net-Diag`） | 源码 + `tools/`（约 360 MB）+ `harness/`（约 540 MB）+ 真实 `config/*.json` + `captures/` + `logs/` + `reports/` | ✅ 完整 |
+| 本地工作区（`<工作区目录>`） | 源码 + `tools/`（约 360 MB）+ `harness/`（约 540 MB）+ 真实 `config/*.json` + `captures/` + `logs/` + `reports/` | ✅ 完整 |
 | GitHub 仓库 | 仅 27 个源码/配置模板文件（`tools/`、`harness/`、真实配置、抓包、日志、报告全部被忽略） | ❌ 缺运行依赖与真实配置 |
 
 **原因**：
@@ -620,7 +620,7 @@ REM 等价于：tools\python\python.exe core\bootstrap.py --check
 
 - **我默认只看本地目录**，不看 GitHub；如果两者不一致，以本地为准，并**主动提醒你「本地与远端可能不同步」**。
 - 判断是否同步**不需要联网**：`git status` + `git rev-parse HEAD` vs `git rev-parse origin/main` 就够。
-- 若你要我评审「已推送到 GitHub 的版本」，**最省事的方式**是：`git clone` 到另一个本地目录（如 `D:\work\usb-net-diag`），把这个路径告诉我，我在那里做只读审查。
+- 若你要我评审「已推送到 GitHub 的版本」，**最省事的方式**是：`git clone` 到另一个本地目录（如 `<另一个本地目录>`），把这个路径告诉我，我在那里做只读审查。
 - **CI 相关的判断**（Actions 是否绿、哪个 step 失败）我看不到，需要你把日志贴过来，或允许我用 `git log` / 本地复跑测试的方式间接验证。
 
 ### C.2.1 闭环工作流（配套「我审计 → 出文档 → 你交给公司 AI 实现」）
