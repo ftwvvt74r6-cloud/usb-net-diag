@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import ipaddress
 import json
+import socket
 import sys
 import time
 from pathlib import Path
@@ -117,32 +119,167 @@ def log(msg: str) -> None:
     _log_to_file(msg)
 
 
-def bpf_for(target: str) -> str:
-    """把目标转成 BPF 过滤器表达式。
+# 抓包阶段**不能**当作公网地址的网段。198.18.0.0/15 必须单列：mihomo/Clash
+# 的 fake-ip 就落在这里，它只是域名在代理里的假地址，拿它做 host 过滤必然 0 包。
+_NON_PUBLIC_NETS = [
+    (ipaddress.ip_network("0.0.0.0/8"), "无效地址"),
+    (ipaddress.ip_network("10.0.0.0/8"), "私网地址"),
+    (ipaddress.ip_network("100.64.0.0/10"), "运营商级 NAT 地址"),
+    (ipaddress.ip_network("127.0.0.0/8"), "回环地址"),
+    (ipaddress.ip_network("169.254.0.0/16"), "链路本地地址"),
+    (ipaddress.ip_network("172.16.0.0/12"), "私网地址"),
+    (ipaddress.ip_network("192.0.0.0/24"), "保留地址"),
+    (ipaddress.ip_network("192.0.2.0/24"), "文档示例地址"),
+    (ipaddress.ip_network("192.168.0.0/16"), "私网地址"),
+    (ipaddress.ip_network("198.18.0.0/15"), "代理假 IP 段"),
+    (ipaddress.ip_network("198.51.100.0/24"), "文档示例地址"),
+    (ipaddress.ip_network("203.0.113.0/24"), "文档示例地址"),
+    (ipaddress.ip_network("224.0.0.0/4"), "组播地址"),
+    (ipaddress.ip_network("240.0.0.0/4"), "保留地址"),
+    (ipaddress.ip_network("::/128"), "未指定地址"),
+    (ipaddress.ip_network("::1/128"), "回环地址"),
+    (ipaddress.ip_network("fc00::/7"), "IPv6 唯一本地地址(ULA)"),
+    (ipaddress.ip_network("fe80::/10"), "IPv6 链路本地地址"),
+    (ipaddress.ip_network("ff00::/8"), "IPv6 组播地址"),
+    (ipaddress.ip_network("2001:db8::/32"), "文档示例地址"),
+]
 
-    只接受 IP / CIDR / 域名，其它字符一律拒绝 —— 过滤器最终会进 tshark 命令行，
-    放任任意表达式等于把抓包器变成可编程工具。
+
+def _non_public_reason(ip: str) -> str:
+    """判断一个 IP 为什么不能作为抓包阶段的 host 目标。
+
+    Args:
+        ip: 待判断的 IPv4/IPv6 字符串。
+
+    Returns:
+        str: 非公网原因（如 ``代理假 IP 段`` / ``私网地址``）；公网地址返回空串。
+            解析不了的值返回 ``不是有效 IP``。
+    """
+    try:
+        addr = ipaddress.ip_address(str(ip).strip())
+    except ValueError:
+        return "不是有效 IP"
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    for net, label in _NON_PUBLIC_NETS:
+        if addr.version == net.version and addr in net:
+            return label
+    return ""
+
+
+def _resolve_ips(host: str) -> list[str]:
+    """把域名解析成去重后的 IP 列表（IPv4 在前）。
+
+    单独抽成函数是为了让单测能替换 DNS（不联网也能覆盖 fake-ip/私网/公网分支）。
+
+    Args:
+        host: 域名，如 ``baidu.com``。
+
+    Returns:
+        list[str]: 去重后的 IP 字符串；解析失败返回 ``[]``（不抛异常）。
+    """
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return []
+    ips: list[str] = []
+    for info in infos:
+        ip = str(info[4][0])
+        if ip not in ips:
+            ips.append(ip)
+    # IPv4 优先：代理环境里 AAAA 常被丢弃，先尝试 IPv4 更接近真实业务流量。
+    ips.sort(key=lambda value: 0 if ":" not in value else 1)
+    return ips
+
+
+def capture_filter_for(target: str, logger=None) -> dict:
+    """决定「定向抓包」阶段到底用不用 BPF 过滤器。
+
+    路测根因：``-f "host baidu.com"`` 在 tshark 里会先把域名解析成 IP，而 mihomo
+    的 fake-ip（198.18.0.0/15）并不是真实业务地址，过滤后 0 包。因此只有**解析
+    结果全部是公网地址**时才用 ``host <ip>``；fake-ip / 私网 / 解析失败 / 无法
+    表达的目标一律不加抓包过滤器（抓全网），分析阶段仍按用户目标筛选。
+
+    Args:
+        target: 用户输入的目标，如 ``192.168.1.10`` / ``192.168.1.0/24`` /
+            ``baidu.com``；空串表示全网。
+        logger: 日志回调；省略时不打印。
+
+    Returns:
+        dict: 键 ``bpf``（最终过滤器，空串=无过滤）/ ``kind``（``none`` /
+            ``ip`` / ``cidr`` / ``domain``）/ ``resolved``（域名解析出的 IP 列表）/
+            ``reason``（决策原因）。
+    """
+    log = logger or (lambda _message: None)
+    t = (target or "").strip()
+    if not t:
+        return {"bpf": "", "kind": "none", "resolved": [], "reason": "未指定目标"}
+    if len(t) > 200:
+        raise ValueError("目标过长")
+    if not all(c.isalnum() or c in ".:/-_" for c in t):
+        raise ValueError("目标只能是 IP、网段(CIDR) 或域名，不要带空格与特殊符号")
+
+    # 1) 纯 IP：用户已经指定到地址，直接按 IP 过滤（包括内网网关，这是常见用法）。
+    try:
+        addr = ipaddress.ip_address(t)
+    except ValueError:
+        addr = None
+    if addr is not None:
+        bpf = f"host {addr}"
+        log(f"[提示] 目标 {t} 是 IP 地址，抓包阶段使用 {bpf}")
+        return {"bpf": bpf, "kind": "ip", "resolved": [str(addr)], "reason": "目标为 IP"}
+
+    # 2) CIDR：pcap 的 net 支持 192.168.1.0/24；带主机位时先规范成网络地址。
+    if "/" in t:
+        try:
+            net = ipaddress.ip_network(t, strict=False)
+        except ValueError as exc:
+            log(f"[提示] 目标 {t} 的网段写法无法解析（{exc}），抓包阶段不做过滤，"
+                "分析阶段再按目标筛选")
+            return {"bpf": "", "kind": "cidr", "resolved": [], "reason": "网段无法解析"}
+        bpf = f"net {net.with_prefixlen}"
+        note = "（已按网络地址规范化）" if t != net.with_prefixlen else ""
+        log(f"[提示] 目标 {t} 是网段，抓包阶段使用 {bpf}{note}")
+        return {"bpf": bpf, "kind": "cidr", "resolved": [], "reason": "目标为网段"}
+
+    # 3) 域名：解析 → 只接受全公网结果；其余情况明确降级为「抓全网」。
+    ips = _resolve_ips(t)
+    if not ips:
+        log(f"[提示] 目标 {t} 解析失败（DNS 无结果），抓包阶段不做 host 过滤，"
+            "分析阶段再按目标筛选")
+        return {"bpf": "", "kind": "domain", "resolved": [], "reason": "域名解析失败"}
+    bad = [(ip, _non_public_reason(ip)) for ip in ips]
+    bad = [(ip, reason) for ip, reason in bad if reason]
+    if bad:
+        detail = "、".join(f"{ip}（{reason}）" for ip, reason in bad)
+        log(f"[提示] 目标 {t} 解析到 {detail}，抓包阶段不做 host 过滤，"
+            "分析阶段再按目标筛选")
+        return {"bpf": "", "kind": "domain", "resolved": ips,
+                "reason": f"解析结果含非公网地址：{bad[0][1]}"}
+    chosen = ips[:4]
+    if len(ips) > len(chosen):
+        log(f"[提示] 目标 {t} 解析到 {len(ips)} 个公网地址，过滤器只取前 {len(chosen)} 个")
+    bpf = " or ".join(f"host {ip}" for ip in chosen)
+    log(f"[提示] 目标 {t} 解析到 {'、'.join(chosen)}（公网地址），抓包阶段使用 {bpf}")
+    return {"bpf": bpf, "kind": "domain", "resolved": ips, "reason": "解析结果为公网地址"}
+
+
+def bpf_for(target: str) -> str:
+    """把目标转成实时抓包用的 BPF 过滤器（兼容旧调用方）。
+
+    只保留「能安全进 tshark 命令行」的写法，真正的取舍在
+    :func:`capture_filter_for`：域名解析到 fake-ip/私网/失败时返回空串（抓全网）。
 
     Args:
         target: 用户输入的目标，如 ``192.168.1.10`` / ``10.0.0.0/24`` / ``example.com``。
 
     Returns:
-        str: 可用的 BPF 串；空目标返回空串（表示抓全网）。
+        str: BPF 串；空串表示抓全网（空目标、解析失败、fake-ip/私网域名等）。
 
     Raises:
         ValueError: 目标含非法字符，或长度超过 200 个字符（由调用方转成可展示的错误）。
     """
-    t = (target or "").strip()
-    if not t:
-        return ""
-    if len(t) > 200:
-        raise ValueError("目标过长")
-    if not all(c.isalnum() or c in ".:/-_" for c in t):
-        raise ValueError("目标只能是 IP、网段(CIDR) 或域名，不要带空格与特殊符号")
-    # 支持 CIDR 段
-    if "/" in t:
-        return f"net {t}"
-    return f"host {t}"
+    return capture_filter_for(target)["bpf"]
 
 
 def _capture_candidates(chosen: dict, ordered: list[dict], limit: int = 3) -> list[dict]:
@@ -315,8 +452,10 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     """实时抓包并落盘到 ``captures/``。
 
     Args:
-        target: 抓包目标（转成 BPF）；空表示全网。
-        duration: 抓包秒数。
+        target: 抓包目标；空表示全网。实际过滤器由 :func:`capture_filter_for`
+            决定：域名只有解析结果全是公网地址时才用 ``host <ip>``，fake-ip/
+            私网/解析失败一律不加过滤器（分析阶段仍按目标筛选）。
+        duration: 首块网卡的抓包秒数；换卡重试时每块缩短为 ``min(duration, 10)``。
         interface: 网卡序号或名称关键字；空则按 :func:`tshark.order_interfaces`
             的候选顺序逐块探测（每块 2 秒、最多 5 块），取第一块真有流量的；
             全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时**只抓该网卡**：
@@ -376,9 +515,11 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         return {"ok": False, "degraded": True, "error": "未枚举到可用网卡。"}
 
     try:
-        bpf = bpf_for(target)
+        decision = capture_filter_for(target, logger=logger)
     except ValueError as exc:
         return {"ok": False, "error": f"目标不合法：{exc}"}
+    bpf = decision["bpf"]
+    logger(f"[提示] 最终使用的抓包过滤器：{bpf or '无（全网）'}")
     duration = max(3, min(int(duration or 30), 180))
     CAPTURES.mkdir(parents=True, exist_ok=True)
 
@@ -386,17 +527,21 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     plan = [iface] if explicit else _capture_candidates(iface, ordered, limit=3)
     failures: list[str] = []
     for attempt, cand in enumerate(plan, 1):
+        # 换卡重试用短时长：3 块 × 用户时长会让失败路径拖到 90s；重试只值 10s。
+        attempt_duration = duration if attempt == 1 else min(duration, 10)
         pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
         cmd = [str(ts), "-i", str(cand["index"]), "-w", str(pcap),
-               "-a", f"duration:{duration}", "-q"]
+               "-a", f"duration:{attempt_duration}", "-q"]
         if bpf:
             cmd += ["-f", bpf]
 
         prefix = f"（第 {attempt}/{len(plan)} 块）" if len(plan) > 1 else ""
+        shorten = (f"（重试缩短时长，原 {duration}s）"
+                   if attempt_duration < duration else "")
         logger(f"开始抓包{prefix}：网卡[{cand['index']}] "
-               f"{tshark.short_name(cand['name'])}，时长 {duration}s，"
+               f"{tshark.short_name(cand['name'])}，时长 {attempt_duration}s{shorten}，"
                f"过滤器 `{bpf or '无（全网）'}`")
-        rc, out, err = tshark.run(cmd, timeout=duration + 120)
+        rc, out, err = tshark.run(cmd, timeout=attempt_duration + 120)
         msg = (err or "") + (out or "")
 
         try:
@@ -432,7 +577,7 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             if explicit:
                 return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
             logger(f"[提示] 网卡[{cand['index']}] {tshark.short_name(cand['name'])} "
-                   f"在 {duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
+                   f"在 {attempt_duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
             continue
 
         logger(f"抓包完成：{pcap.name}（{size / 1024:.0f} KB）")
@@ -443,7 +588,7 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
 
         return {"ok": True, "pcap": str(pcap), "interface": tshark.short_name(cand["name"]),
                 "interface_index": cand["index"], "bpf": bpf or "无（全网）",
-                "duration": duration}
+                "duration": attempt_duration}
 
     error = _capture_empty_error(plan, duration, bpf)
     if failures:

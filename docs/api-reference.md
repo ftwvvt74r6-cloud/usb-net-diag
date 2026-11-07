@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**29** 个（有模块说明 29 个）
-- 公开符号：**205** 个（有 docstring 205 个，合格 205 个）
+- 公开符号：**206** 个（有 docstring 206 个，合格 206 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -1571,12 +1571,13 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 44 | ✅ |
-| `log` | function | 107 | ✅ |
-| `bpf_for` | function | 120 | ✅ |
-| `capture_live` | function | 313 | ✅ |
-| `run_scan` | function | 482 | ✅ |
-| `main` | function | 668 | ✅ |
+| `load_config` | function | 46 | ✅ |
+| `log` | function | 109 | ✅ |
+| `capture_filter_for` | function | 195 | ✅ |
+| `bpf_for` | function | 267 | ✅ |
+| `capture_live` | function | 450 | ✅ |
+| `run_scan` | function | 627 | ✅ |
+| `main` | function | 813 | ✅ |
 
 ### `load_config`
 
@@ -1608,6 +1609,31 @@ Returns:
     None: 写盘失败只影响日志，不影响诊断。
 ```
 
+### `capture_filter_for`
+
+```python
+def capture_filter_for(target: str, logger=None) -> dict
+```
+
+```text
+决定「定向抓包」阶段到底用不用 BPF 过滤器。
+
+路测根因：``-f "host baidu.com"`` 在 tshark 里会先把域名解析成 IP，而 mihomo
+的 fake-ip（198.18.0.0/15）并不是真实业务地址，过滤后 0 包。因此只有**解析
+结果全部是公网地址**时才用 ``host <ip>``；fake-ip / 私网 / 解析失败 / 无法
+表达的目标一律不加抓包过滤器（抓全网），分析阶段仍按用户目标筛选。
+
+Args:
+    target: 用户输入的目标，如 ``192.168.1.10`` / ``192.168.1.0/24`` /
+        ``baidu.com``；空串表示全网。
+    logger: 日志回调；省略时不打印。
+
+Returns:
+    dict: 键 ``bpf``（最终过滤器，空串=无过滤）/ ``kind``（``none`` /
+        ``ip`` / ``cidr`` / ``domain``）/ ``resolved``（域名解析出的 IP 列表）/
+        ``reason``（决策原因）。
+```
+
 ### `bpf_for`
 
 ```python
@@ -1615,16 +1641,16 @@ def bpf_for(target: str) -> str
 ```
 
 ```text
-把目标转成 BPF 过滤器表达式。
+把目标转成实时抓包用的 BPF 过滤器（兼容旧调用方）。
 
-只接受 IP / CIDR / 域名，其它字符一律拒绝 —— 过滤器最终会进 tshark 命令行，
-放任任意表达式等于把抓包器变成可编程工具。
+只保留「能安全进 tshark 命令行」的写法，真正的取舍在
+:func:`capture_filter_for`：域名解析到 fake-ip/私网/失败时返回空串（抓全网）。
 
 Args:
     target: 用户输入的目标，如 ``192.168.1.10`` / ``10.0.0.0/24`` / ``example.com``。
 
 Returns:
-    str: 可用的 BPF 串；空目标返回空串（表示抓全网）。
+    str: BPF 串；空串表示抓全网（空目标、解析失败、fake-ip/私网域名等）。
 
 Raises:
     ValueError: 目标含非法字符，或长度超过 200 个字符（由调用方转成可展示的错误）。
@@ -1640,8 +1666,10 @@ def capture_live(target: str='', duration: int=30, interface: str | None=None, l
 实时抓包并落盘到 ``captures/``。
 
 Args:
-    target: 抓包目标（转成 BPF）；空表示全网。
-    duration: 抓包秒数。
+    target: 抓包目标；空表示全网。实际过滤器由 :func:`capture_filter_for`
+        决定：域名只有解析结果全是公网地址时才用 ``host <ip>``，fake-ip/
+        私网/解析失败一律不加过滤器（分析阶段仍按目标筛选）。
+    duration: 首块网卡的抓包秒数；换卡重试时每块缩短为 ``min(duration, 10)``。
     interface: 网卡序号或名称关键字；空则按 :func:`tshark.order_interfaces`
         的候选顺序逐块探测（每块 2 秒、最多 5 块），取第一块真有流量的；
         全都没流量再用 :func:`tshark.pick_interface` 兜底。显式指定时**只抓该网卡**：
