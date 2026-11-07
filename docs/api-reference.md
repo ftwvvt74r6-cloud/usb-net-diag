@@ -17,7 +17,7 @@
 
 ## `core/__init__.py`
 
-**职责**：USB-Net-Diag 核心包（目标架构骨架）。
+**职责**：NetDiag（网络矩阵）核心包（目标架构骨架）。
 
 _（无公开符号）_
 
@@ -327,7 +327,7 @@ Returns:
 ### `msgbox`
 
 ```python
-def msgbox(text: str, title: str='网络诊断工具', flags: int=MB_ICONINFO) -> None
+def msgbox(text: str, title: str='NetDiag · 网络矩阵', flags: int=MB_ICONINFO) -> None
 ```
 
 ```text
@@ -1567,7 +1567,7 @@ Returns:
 
 ## `core/diagnose.py`
 
-**职责**：USB-Net-Diag 采集与诊断主流程（CLI 入口）。
+**职责**：NetDiag（网络矩阵）采集与诊断主流程（CLI 入口）。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
