@@ -71,31 +71,51 @@ class CaptureFilterDecisionTest(unittest.TestCase):
 
         self.assertEqual(decision["bpf"], "")
 
-    def test_cidr_uses_net(self):
+    def test_public_cidr_uses_net(self):
+        decision, logs = self._decide("8.8.8.0/24")
+
+        self.assertEqual(decision["bpf"], "net 8.8.8.0/24")
+        self.assertEqual(decision["kind"], "cidr")
+        self.assertIn("net 8.8.8.0/24", "\n".join(logs))
+
+    def test_public_cidr_with_host_bits_is_normalized(self):
+        decision, _logs = self._decide("8.8.8.5/24")
+
+        self.assertEqual(decision["bpf"], "net 8.8.8.0/24")
+
+    def test_private_cidr_uses_no_filter(self):
+        """私网网段抓全网、分析阶段筛：net 过滤在代理/TUN 环境同样容易 0 包。"""
         decision, logs = self._decide("192.168.1.0/24")
 
-        self.assertEqual(decision["bpf"], "net 192.168.1.0/24")
+        self.assertEqual(decision["bpf"], "")
         self.assertEqual(decision["kind"], "cidr")
-        self.assertIn("net 192.168.1.0/24", "\n".join(logs))
+        text = "\n".join(logs)
+        self.assertIn("私网地址", text)
+        self.assertIn("不做 net 过滤", text)
+        self.assertIn("分析阶段再按目标筛选", text)
 
-    def test_cidr_with_host_bits_is_normalized(self):
-        decision, _logs = self._decide("192.168.1.5/24")
-
-        self.assertEqual(decision["bpf"], "net 192.168.1.0/24")
-
-    def test_plain_ip_uses_host_even_for_private_gateway(self):
-        """用户显式给 IP（如内网网关）时必须按 host 抓，这是定向抓包的主用法。"""
+    def test_private_ip_uses_no_filter(self):
+        """内网网关也不下 host 过滤：先抓全网，分析阶段仍按目标筛选。"""
         decision, logs = self._decide("192.168.1.1")
 
-        self.assertEqual(decision["bpf"], "host 192.168.1.1")
+        self.assertEqual(decision["bpf"], "")
         self.assertEqual(decision["kind"], "ip")
-        self.assertIn("host 192.168.1.1", "\n".join(logs))
+        text = "\n".join(logs)
+        self.assertIn("私网地址", text)
+        self.assertIn("不做 host 过滤", text)
 
-    def test_fake_ip_literal_still_uses_host(self):
-        """显式输入的 fake-ip 也尊重用户，但决策按 IP 而非域名（不含 DNS）。"""
-        decision, _logs = self._decide("198.18.1.145")
+    def test_public_ip_uses_host(self):
+        decision, logs = self._decide("93.184.216.34")
 
-        self.assertEqual(decision["bpf"], "host 198.18.1.145")
+        self.assertEqual(decision["bpf"], "host 93.184.216.34")
+        self.assertIn("公网 IP", "\n".join(logs))
+
+    def test_fake_ip_literal_uses_no_filter(self):
+        """显式输入的 fake-ip 属于代理假地址段，同样抓全网。"""
+        decision, logs = self._decide("198.18.1.145")
+
+        self.assertEqual(decision["bpf"], "")
+        self.assertIn("代理假 IP 段", "\n".join(logs))
 
     def test_dns_failure_uses_no_filter(self):
         decision, logs = self._decide("no-such-host.invalid", [])
@@ -157,6 +177,7 @@ class RetryDurationTest(unittest.TestCase):
         result = diagnose.capture_live(duration=30, logger=logs.append)
 
         self.assertFalse(result.get("ok"))
+        self.assertTrue(result.get("empty"), "0 包失败必须带 empty 标记供降级判定")
         self.assertEqual(self.durations, [30, 10, 10],
                          "首块 30s，换卡重试两块都必须缩到 10s")
         self.assertEqual(self.filters, ["", "", ""],
@@ -172,6 +193,14 @@ class RetryDurationTest(unittest.TestCase):
         self.assertFalse(result.get("ok"))
         self.assertEqual(self.durations, [3, 3, 3],
                          "min(3,10)=3，重试不能比用户时长更长")
+
+    def test_all_fail_message_lists_actual_duration_sequence(self):
+        """全失败文案必须写真实时长序列，不能只写用户请求的 30s（复审 nit #22①）。"""
+        result = diagnose.capture_live(duration=30, logger=lambda _m: None)
+
+        self.assertFalse(result.get("ok"))
+        self.assertIn("30s→10s→10s", result.get("error", ""),
+                      "重试缩短后文案仍写 30 秒，会误导用户以为每块都抓了 30s")
 
 
 if __name__ == "__main__":

@@ -134,9 +134,13 @@ def test_validation() -> None:
     section("§1 输入校验与边界")
 
     # 域名不再直接当抓包过滤器（可能解析到 fake-ip，见 test_capture_filter.py）；
-    # 这里只验纯 IP / CIDR 的语法转换与注入拦截。
-    check("IP 可转 BPF", diagnose.bpf_for("1.1.1.1") == "host 1.1.1.1")
-    check("CIDR 可转 BPF", diagnose.bpf_for("192.168.1.0/24") == "net 192.168.1.0/24")
+    # 这里只验纯公网 IP / CIDR 的语法转换与注入拦截。私网目标按 UI 2.0 的
+    # 「抓全网、分析阶段筛」策略不下抓包过滤，单独用两条 check 钉住。
+    check("公网 IP 可转 BPF", diagnose.bpf_for("1.1.1.1") == "host 1.1.1.1")
+    check("公网 CIDR 可转 BPF",
+          diagnose.bpf_for("8.8.8.0/24") == "net 8.8.8.0/24")
+    check("私网 CIDR 不下抓包过滤", diagnose.bpf_for("192.168.1.0/24") == "")
+    check("私网 IP 不下抓包过滤", diagnose.bpf_for("192.168.1.1") == "")
     for bad in ("1.1.1.1 or host 8.8.8.8", 'a"b', "x;y"):
         try:
             diagnose.bpf_for(bad)

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -66,6 +67,7 @@ JOB = {
     "state": "idle",      # idle | running | done | error
     "mode": "",
     "target": "",
+    "duration": 0,        # 用户请求的抓包秒数（离线分析为 0，进度条据此算倒计时）
     "started_at": 0.0,
     "finished_at": 0.0,
     "logs": [],
@@ -76,6 +78,7 @@ JOB = {
 # 被动监听单独一个任务槽，避免和诊断任务互相覆盖
 PJOB = {
     "state": "idle",      # idle | running | done | error
+    "duration": 0,
     "started_at": 0.0,
     "finished_at": 0.0,
     "result": None,
@@ -204,6 +207,58 @@ def _to_float(v, default: float, lo: float, hi: float) -> float:
     return max(lo, min(n, hi))
 
 
+_ATTEMPT_RE = re.compile(r"第\s*(\d+)\s*/\s*(\d+)\s*块")
+
+
+def _job_phase(state: str, logs: list[dict]) -> str:
+    """从任务状态与日志关键字推断当前阶段（给进度条显示）。
+
+    日志是采集层写的唯一事实来源；与其在抓包线程里到处埋状态，不如由查询接口
+    统一解析 —— 这样老的 ``/api/status`` 字段完全不变，只做加法。
+
+    Args:
+        state: :data:`JOB` 的 ``state``。
+        logs: :data:`JOB` 的日志列表（每项含 ``t`` / ``m``）。
+
+    Returns:
+        str: ``空闲`` / ``准备中`` / ``探测网卡`` / ``抓包中`` / ``分析中`` /
+            ``完成`` / ``失败`` 之一。
+    """
+    if state == "idle":
+        return "空闲"
+    if state == "done":
+        return "完成"
+    if state == "error":
+        return "失败"
+    messages = [str(row.get("m") or "") for row in (logs or [])]
+    if any("报告已生成" in m for m in messages):
+        return "完成"
+    if any("开始分析报文" in m or "链路体检" in m for m in messages):
+        return "分析中"
+    if any("开始抓包" in m for m in messages):
+        return "抓包中"
+    if any("探测网卡" in m for m in messages):
+        return "探测网卡"
+    return "准备中"
+
+
+def _job_attempt(logs: list[dict]) -> tuple[int, int]:
+    """从「第 2/3 块」日志里取最近一次换卡重试的进度。
+
+    Args:
+        logs: :data:`JOB` 的日志列表。
+
+    Returns:
+        tuple[int, int]: ``(当前块, 总块数)``；没有换卡日志时返回 ``(0, 0)``。
+    """
+    attempt = total = 0
+    for row in logs or []:
+        match = _ATTEMPT_RE.search(str(row.get("m") or ""))
+        if match:
+            attempt, total = int(match.group(1)), int(match.group(2))
+    return attempt, total
+
+
 def doctor_cached(ttl: int = 60) -> dict:
     """环境自检（带缓存）。
 
@@ -316,6 +371,16 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
         else:
             res = diagnose.run_scan(target=target, duration=duration,
                                     interface=interface, logger=log)
+            if not res.get("ok") and res.get("empty_capture"):
+                # 0 包不直接判失败：自动做一次链路体检（目标 → 默认网关），
+                # 拿到时延/抖动/丢包就降级成中性结论；拿不到才走红色失败。
+                fallback = diagnose.degraded_empty_capture_result(
+                    target=target, duration=duration,
+                    interface=res.get("interface") or interface,
+                    capture_error=res.get("error", ""),
+                    bpf=res.get("bpf", ""), logger=log)
+                if fallback is not None:
+                    res = fallback
         with LOCK:
             if res.get("ok"):
                 JOB["state"] = "done"
@@ -377,6 +442,7 @@ def start_job(payload: dict) -> dict:
             pcap = str(cand)
 
         JOB.update({"state": "running", "mode": mode, "target": target or "全网",
+                    "duration": duration if mode != "offline" else 0,
                     "started_at": time.time(), "finished_at": 0, "logs": [],
                     "result": None, "error": ""})
     if ignored_target:
@@ -522,7 +588,8 @@ def passive_start(payload: dict) -> dict:
         engine = "auto"
     with LOCK:
         PJOB.update({"state": "running", "error": "", "result": None, "engine": engine,
-                     "started_at": time.time(), "finished_at": 0, "stop": False})
+                     "duration": duration, "started_at": time.time(),
+                     "finished_at": 0, "stop": False})
     log(f"被动监听启动：网卡 {interface or '自动选择'}，{duration}s，"
         f"目标 {target or '全部流量'}，引擎 {engine}")
     threading.Thread(target=_passive_worker,
@@ -540,11 +607,16 @@ def passive_status() -> dict:
     """
     with LOCK:
         snap = {k: PJOB[k] for k in ("state", "result", "error", "engine",
-                                     "started_at", "finished_at")}
+                                     "started_at", "finished_at", "duration")}
         running = PJOB["state"] == "running"
     snap["ok"] = True
     snap["engine_info"] = engine_info()
     snap["elapsed"] = round(time.time() - snap["started_at"], 1) if running and snap["started_at"] else 0
+    if running:
+        # 监听中 → 汇总中：最后 1 秒留给会话汇总，别让用户以为卡在 0 秒不动。
+        snap["phase"] = "监听中" if snap["elapsed"] < max(1, snap["duration"] - 1) else "汇总中"
+    else:
+        snap["phase"] = {"done": "完成", "error": "失败"}.get(snap["state"], "空闲")
     return snap
 
 
@@ -799,6 +871,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = dict(JOB)
             data["elapsed"] = round((data["finished_at"] or time.time()) - data["started_at"], 1) \
                 if data["state"] in ("running", "done", "error") and data["started_at"] else 0
+            # 加法字段：老前端不读也不受影响；新前端据此画进度条 / 倒计时 / 阶段。
+            data["phase"] = _job_phase(data["state"], data.get("logs") or [])
+            attempt, attempts = _job_attempt(data.get("logs") or [])
+            data["attempt"] = attempt
+            data["attempts"] = attempts
             return self._json(data)
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]
