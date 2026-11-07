@@ -91,6 +91,10 @@ APP_NAME = "USBNetDiag"
 def _read_version(root: Path = ROOT) -> str:
     """从 ``root/VERSION`` 读产品版本号；文件缺失或内容为空时回退 ``0.0.0``。
 
+    UTF-8 BOM（U+FEFF，Windows 记事本保存时默认会写）在读入时剥掉：``strip()``
+    只去空白不去 BOM，否则版本号会变成「不可见字符 + 0.2.0」，出现在启动横幅 /
+    ``/api/ping`` / ``/api/app`` 与报告里。
+
     Args:
         root: 仓库根目录，默认即 ``core/`` 的上一级。
 
@@ -98,10 +102,10 @@ def _read_version(root: Path = ROOT) -> str:
         str: 形如 ``0.2.0`` 的版本号；读不到时是 ``0.0.0``。
     """
     try:
-        version = (root / "VERSION").read_text(encoding="utf-8").strip()
+        version = (root / "VERSION").read_text(encoding="utf-8")
     except OSError:
         return "0.0.0"
-    return version or "0.0.0"
+    return version.lstrip("\ufeff").strip() or "0.0.0"
 
 
 #: 产品版本的唯一来源是仓库根 ``VERSION``（启动横幅 / ``/api/ping`` / ``/api/app`` 共用）。

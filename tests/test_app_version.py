@@ -53,6 +53,24 @@ class AppVersionTest(unittest.TestCase):
             (Path(tmp) / "VERSION").write_text("  \n", encoding="utf-8")
             self.assertEqual(server._read_version(Path(tmp)), "0.0.0")
 
+    def test_read_version_strips_utf8_bom(self):
+        """带 UTF-8 BOM 的 ``VERSION`` 必须读回 ``0.2.0``（L 轮 V6）。
+
+        回归钉：``strip()`` 只去空白不去 BOM，否则读到的是「不可见 BOM + 0.2.0」，
+        这个值会经 ``APP_VERSION`` 流进启动横幅 / ``/api/ping`` / ``/api/app`` 与报告。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "VERSION").write_text("\ufeff0.2.0\n", encoding="utf-8")
+            version = server._read_version(Path(tmp))
+            self.assertEqual(version, "0.2.0")
+            self.assertNotIn("\ufeff", version, "读到的版本号里仍带 UTF-8 BOM")
+            # BOM 与空白混排：BOM 在前、正文两边有空白，一样要剥干净
+            (Path(tmp) / "VERSION").write_text("\ufeff 0.2.0 \n", encoding="utf-8")
+            self.assertEqual(server._read_version(Path(tmp)), "0.2.0")
+            # 只有 BOM 的「空」文件仍按空处理，回退 0.0.0
+            (Path(tmp) / "VERSION").write_text("\ufeff", encoding="utf-8")
+            self.assertEqual(server._read_version(Path(tmp)), "0.0.0")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

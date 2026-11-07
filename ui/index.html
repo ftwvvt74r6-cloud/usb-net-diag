@@ -1205,7 +1205,7 @@ function fillAIForm() {
     : "粘贴 Key，例如 sk-...";
   $("#ai-keystate").innerHTML = cfg.has_key
     ? `已配置 <span class="tag">${esc(cfg.key_masked)}</span> · 更新于 ${esc(cfg.updated_at || "-")}`
-    : '<span class="tag">未配置 Key</span> · 只保存在本机 U 盘的 config\\ai-config.json';
+    : '<span class="tag">未配置 Key</span> · 只保存在本机工具目录的 config\\ai-config.json';
   $("#ai-msg").innerHTML = "";
 }
 
