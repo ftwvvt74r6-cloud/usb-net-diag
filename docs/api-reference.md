@@ -1942,9 +1942,9 @@ Returns:
 | `close_streams` | function | 380 | ✅ |
 | `write_env_snapshot` | function | 454 | ✅ |
 | `record_run` | function | 481 | ✅ |
-| `record_crash` | function | 501 | ✅ |
-| `install_excepthooks` | function | 581 | ✅ |
-| `prune` | function | 669 | ✅ |
+| `record_crash` | function | 527 | ✅ |
+| `install_excepthooks` | function | 610 | ✅ |
+| `prune` | function | 709 | ✅ |
 
 ### `log_root`
 
@@ -2227,7 +2227,7 @@ def record_crash(exc_type, exc, tb) -> Path | None
 ```
 
 ```text
-把一次未捕获异常写成 ``crashes/<ts>.txt``（类型/消息/traceback/环境摘要）。
+把一次未捕获异常写成 ``crashes/<ts>-<pid>-<tid>-<rand>.txt``（类型/消息/traceback/环境摘要）。
 
 Args:
     exc_type: 异常类（``sys.excepthook`` 的第一个参数）。
@@ -3046,12 +3046,12 @@ Returns:
 | `passive_start` | function | 401 | ✅ |
 | `passive_status` | function | 435 | ✅ |
 | `Handler` | class | 453 | ✅ |
-| `Handler.log_message` | method | 495 | ✅ |
-| `Handler.do_GET` | method | 594 | ✅ |
-| `Handler.do_POST` | method | 609 | ✅ |
-| `DiagServer` | class | 772 | ✅ |
-| `create_server` | function | 784 | ✅ |
-| `main` | function | 831 | ✅ |
+| `Handler.log_message` | method | 499 | ✅ |
+| `Handler.do_GET` | method | 632 | ✅ |
+| `Handler.do_POST` | method | 649 | ✅ |
+| `DiagServer` | class | 826 | ✅ |
+| `create_server` | function | 838 | ✅ |
+| `main` | function | 885 | ✅ |
 
 ### `touch`
 

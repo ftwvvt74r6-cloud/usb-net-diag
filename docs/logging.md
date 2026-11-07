@@ -22,8 +22,8 @@ logs/
 ├─ runs/               每次分析一条 JSON：<ts>-<8位随机>.json
 │   └─ 20261107-193245-a1b2c3d4.json
 └─ crashes/            崩溃快照
-    ├─ 20261107-193301.txt          Python 未捕获异常（主线程 / 子线程）
-    └─ fatal-20261107-193200.log    faulthandler：进程级崩溃（段错误/栈溢出等）
+    ├─ 20261107-193301-18444-22104-a1b2.txt   Python 未捕获异常（主线程 / 子线程）
+    └─ fatal-20261107-193200.log              faulthandler：进程级崩溃（段错误/栈溢出等）
 ```
 
 时间标记统一：
@@ -32,7 +32,7 @@ logs/
 |---|---|---|
 | 日文件名 | `%Y%m%d` | `app-20261107.log` |
 | `runs/` 文件名 | `%Y%m%d-%H%M%S` + 8 位随机十六进制 | `20261107-193245-a1b2c3d4.json` |
-| `crashes/*.txt` | `%Y%m%d-%H%M%S`（同秒冲突时加 `-2`） | `20261107-193301.txt` |
+| `crashes/*.txt` | `%Y%m%d-%H%M%S` + pid + 线程 id + 4 位随机十六进制（`O_EXCL` 创建，并发同秒不撞名） | `20261107-193301-18444-22104-a1b2.txt` |
 | `crashes/fatal-*.log` | `fatal-%Y%m%d-%H%M%S.log` | `fatal-20261107-193200.log` |
 
 日文件里的行格式固定为：
@@ -92,7 +92,7 @@ logs/
   "mode": "offline",
   "params": {
     "target": "192.168.1.10",
-    "duration": 0,
+    "duration": 30,
     "interface": "",
     "pcap": "faults_demo.pcap"
   },
@@ -123,7 +123,7 @@ logs/
 
 ## 四、crashes/：崩了也要留证据
 
-* `crashes/<ts>.txt`：`sys.excepthook`（主线程）与 `threading.excepthook`（子线程）
+* `crashes/<ts>-<pid>-<tid>-<rand>.txt`：`sys.excepthook`（主线程）与 `threading.excepthook`（子线程）
   捕获的未捕获异常。内容依次是：时间、异常类型、消息、完整 traceback、环境摘要
   （版本 / Python / 系统 / 管理员 / Npcap / tshark 版本与路径 / 控制台编码）。
 * `crashes/fatal-<ts>.log`：`faulthandler.enable(file=...)` 的输出文件。Python 层
@@ -139,8 +139,8 @@ logs/
 | 规则 | 默认值 | 行为 |
 |---|---|---|
 | 单文件上限 | 5 MB | 超限时**只留尾部**（约一半、从行首开始），文件名不换、目录保持干净 |
-| `runs/` | 最近 200 个 | 按文件名（时间戳）保留最新，删更旧的 |
-| `crashes/` | 最近 50 个 | 同上（`fatal-*.log` 也计入） |
+| `runs/` | 最近 200 个 | 按 mtime 保留最新，删更旧的；mtime 相同再按文件名兜底 |
+| `crashes/` | 最近 50 个 | 按 mtime 保留最新（`fatal-*.log` 也计入）—— 崩溃 txt 与 fatal 公平竞争，不会因文件名排序被优先删光 |
 | `logs/` 总量 | 100 MB | 最旧优先删除；**跳过 `env.json`、`netdiag.pid` 与当天的日志** |
 
 设计约束：
