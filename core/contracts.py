@@ -305,7 +305,7 @@ class CaptureMeta:
     """采集元信息 —— 回答「这份结论是从哪份数据、用什么参数算出来的」。
 
     字段：
-        mode: ``live``（实时抓）或 ``offline``（离线分析）。
+        mode: ``live``（实时抓）或 ``offline``（分析抓包文件）。
         pcap_file / pcap_name: 绝对路径与文件名；报告命名用后者。
         packets / bytes / duration_s: 规模与时间跨度，判断证据是否充分的第一步。
         interface / bpf: 网卡与过滤器，复现同一份抓包时必需。
@@ -737,7 +737,7 @@ class ProbeResult:
 
 @dataclass
 class PassiveResult:
-    """``passive``（被动监听）的结果。"""
+    """``passive``（通信观察 / 被动监听）的结果。"""
 
     interface: str = ""
     duration_s: float = 0.0
@@ -760,7 +760,7 @@ class PassiveResult:
 
 @dataclass
 class Job:
-    """一个后台任务。抓包、离线分析、被动监听都走它。
+    """一个后台任务。抓包、分析抓包文件、通信观察都走它。
 
     字段：
         job_id: 短随机串，用作 API 路径参数。

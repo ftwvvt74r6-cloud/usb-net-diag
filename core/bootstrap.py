@@ -122,7 +122,7 @@ def check(verbose: bool = True) -> dict:
             print(f" 版本      : {status['tshark_version']}")
         print(f" Npcap     : {'已就绪' if npcap else '未安装 (!)'}")
         print(f" 管理员    : {'是' if admin else '否（实时抓包可能失败）'}")
-        print(f" Scapy     : {status['scapy'] or '未内置（被动监听将用 tshark 兜底）'}")
+        print(f" Scapy     : {status['scapy'] or '未内置（通信观察（被动监听）将用 tshark 兜底）'}")
         print(f" 网卡      : {len(ifaces)} 个")
         for i in ifaces[:8]:
             print(f"            [{i['index']}] {i['name']}")

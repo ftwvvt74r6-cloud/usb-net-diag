@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import verdict as verdict_mod
@@ -37,6 +38,19 @@ def _t(key: str, **args) -> str:
         str: 可直接展示的文案；缺 key 时回退成 key 本身。
     """
     return _copy_text("report", key, **args)
+
+
+def _d(key: str, **args) -> str:
+    """取降级结论报告的静态文案（``copy.degraded_report`` section）。
+
+    Args:
+        key: ``degraded_report`` section 内的键。
+        **args: ``{name}`` 占位符实参。
+
+    Returns:
+        str: 可直接展示的文案；缺 key 时回退成 key 本身（绝不抛异常）。
+    """
+    return _copy_text("degraded_report", key, **args)
 
 
 def _state_text(status: str) -> str:
@@ -360,4 +374,102 @@ def save(result: dict, out_dir: Path) -> dict:
         ),
         encoding="utf-8",
     )
+    return {"markdown": str(md_path), "json": str(json_path)}
+
+
+def render_degraded(result: dict) -> str:
+    """把 0 包降级结论渲染成 Markdown（结论 + 事实 + 原因 + 建议）。
+
+    与正常诊断报告分开渲染：降级结果没有 ``rows`` / ``verdict``，强行套用
+    :func:`render_markdown` 会出现空章节，反而又变成「结果区没有内容」。
+
+    Args:
+        result: :func:`diagnose.degraded_empty_capture_result` 的返回值，键含
+            ``card_title`` / ``headline`` / ``plain`` / ``link`` / ``capture`` /
+            ``reasons`` / ``next_steps`` / ``at``。
+
+    Returns:
+        str: Markdown 正文（UTF-8 文本，LF 换行）。
+    """
+    link = result.get("link") or {}
+    cap = result.get("capture") or {}
+    via = str(link.get("via") or "")
+    if via == "target":
+        link_text = _d("link_target", host=str(link.get("host") or "-"))
+    elif via == "gateway":
+        link_text = _d("link_gateway", host=str(link.get("host") or "-"))
+    else:
+        link_text = "-"
+    if link.get("avg_ms") is not None:
+        link_text += (f"；RTT 平均 {link.get('avg_ms')} ms / 抖动 "
+                      f"{link.get('jitter_ms')} ms / {_d('field_loss')} "
+                      f"{link.get('loss_pct')}%")
+    reasons = [f"{i}. {r}" for i, r in enumerate(result.get("reasons") or [], 1)]
+    steps = [f"{i}. {s}" for i, s in enumerate(result.get("next_steps") or [], 1)]
+    lines = [
+        _d("title"),
+        "",
+        _d("meta_line", mode="单目标诊断（定向抓包）" if cap.get("target")
+           else "全网体检（全网扫描）", at=result.get("at") or "-"),
+        "",
+        _d("section_conclusion"),
+        "",
+        f"**{result.get('card_title') or result.get('headline') or '降级'}**",
+        "",
+        str(result.get("plain") or result.get("headline") or ""),
+        "",
+        _d("section_facts"),
+        "",
+        f"- {_d('field_target')}：{cap.get('target') or '全网'}",
+        f"- {_d('field_interface')}：{cap.get('interface') or '-'}",
+        f"- {_d('field_duration')}：{cap.get('duration') or 0} 秒",
+        f"- {_d('field_bpf')}：`{cap.get('bpf') or '无（全网）'}`",
+        f"- {_d('field_link')}：{link_text}",
+        "",
+        _d("section_reasons"),
+        "",
+        *(reasons or ["-"]),
+        "",
+        _d("section_steps"),
+        "",
+        *(steps or ["-"]),
+        "",
+        _d("footer"),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def save_degraded(result: dict, out_dir: Path) -> dict:
+    """把 0 包降级结论落盘成 ``.md`` + ``.json``（复审遗留 #7）。
+
+    路测要求：降级卡不能只活在界面上，历史报告 / 导出诊断包里也要能查到这次
+    结论。文件名带时间戳，不覆盖任何既有报告。
+
+    Args:
+        result: :func:`diagnose.degraded_empty_capture_result` 的返回值。
+        out_dir: 输出目录（通常是 ``reports/``）。
+
+    Returns:
+        dict: 键 ``markdown`` / ``json``（绝对路径字符串）。
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    md_path = out_dir / f"degraded_{stamp}.md"
+    json_path = out_dir / f"degraded_{stamp}.json"
+    md_path.write_text(render_degraded(result), encoding="utf-8")
+    payload = {
+        "kind": result.get("kind", ""),
+        "card_title": result.get("card_title", ""),
+        "headline": result.get("headline", ""),
+        "plain": result.get("plain", ""),
+        "capture": result.get("capture", {}),
+        "link": result.get("link", {}),
+        "reasons": result.get("reasons", []),
+        "next_steps": result.get("next_steps", []),
+        "generated_at": result.get("at", ""),
+    }
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                         encoding="utf-8")
     return {"markdown": str(md_path), "json": str(json_path)}

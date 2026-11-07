@@ -184,7 +184,7 @@ OK
 | 骨架测试报 `Start directory is not importable` | `scaffold/tests/__init__.py` 丢了 |
 | `tshark 未找到` | 确认 `tools\WiresharkPortable\App\Wireshark\tshark.exe`；或设 `TSHARK_PATH` |
 | 抓包 0 报文 | 用 `--interfaces` 看序号，`--interface 6` 显式指定；确认 Npcap 已装且已提权 |
-| 报告里 RTT 是 `-` | 本次没有 ACK 采样（纯 UDP/短连接），不是 bug；用「链路体检」补测 |
+| 报告里 RTT 是 `-` | 本次没有 ACK 采样（纯 UDP/短连接），不是 bug；用「连通与速度测试」补测 |
 | 「同一 pcap 两次结论不同」 | 这是**已知未解问题**（T00），先解决再谈 CI |
 
 ---

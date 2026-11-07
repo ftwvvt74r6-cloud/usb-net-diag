@@ -6,7 +6,7 @@
 于是 ``import tshark`` / ``import analyzer`` 这样的写法才能用。代价是
 ``core/`` 里的任何文件名都会「遮住」同名标准库模块 —— 本包就叫 ``platform``。
 
-实测后果（不是假设）：Scapy 在被动监听引擎初始化时会执行
+实测后果（不是假设）：Scapy 在通信观察（被动监听）引擎初始化时会执行
 ``import platform; platform.release()``，命中本包后抛
 ``AttributeError: module 'platform' has no attribute 'release'``，
 Scapy 引擎因此不可用（``tests/selftest.py`` §3 抓到）。

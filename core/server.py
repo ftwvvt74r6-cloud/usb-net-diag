@@ -8,17 +8,17 @@ API:
   GET  /api/reports         历史报告列表（报告与导出 → 历史报告）
   POST /api/scan            启动诊断 {mode,target,duration,interface,pcap}
   POST /api/elevate         非管理员一键请求 UAC 提权重启
-  POST /api/upload?name=x   上传 pcap 后离线分析
+  POST /api/upload?name=x   上传 pcap 后分析抓包文件
   GET  /api/report?path=    读取报告文件
   GET  /api/doctor          环境自检
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
   POST /api/ai/test         用当前或临时参数测试连通性
   POST /api/ai/analyze      对最近一次诊断结果做 AI 解读
-  GET/POST /api/probe       链路体检（分段测 DNS/TCP/TLS/首字节，按协议自适应）
-  POST /api/passive         启动被动监听 {interface,duration,target,engine}
-  GET  /api/passive         被动监听状态与结果
-  POST /api/passive/stop    提前结束被动监听
+  GET/POST /api/probe       连通与速度测试（链路体检，分段测 DNS/TCP/TLS/首字节）
+  POST /api/passive         启动通信观察（被动监听）{interface,duration,target,engine}
+  GET  /api/passive         通信观察状态与结果
+  POST /api/passive/stop    提前结束通信观察
   GET  /api/ping            存活探测（单实例判断）
   GET  /api/app             应用信息（版本/端口/PID/是否静默模式）
   POST /api/diagpack        导出脱敏诊断包（zip），返回 path / size / entries
@@ -55,6 +55,7 @@ import diagpack  # noqa: E402
 import logstore  # noqa: E402
 import passive  # noqa: E402
 import probe  # noqa: E402
+import report  # noqa: E402
 import tshark  # noqa: E402
 import version  # noqa: E402
 
@@ -67,15 +68,16 @@ JOB = {
     "state": "idle",      # idle | running | done | error
     "mode": "",
     "target": "",
-    "duration": 0,        # 用户请求的抓包秒数（离线分析为 0，进度条据此算倒计时）
+    "duration": 0,        # 用户请求的抓包秒数（分析抓包文件为 0，进度条据此算倒计时）
     "started_at": 0.0,
     "finished_at": 0.0,
     "logs": [],
     "result": None,
     "error": "",
+    "error_code": "",     # 稳定错误码（E_NO_NPCAP / E_NO_ADMIN / E_BAD_PCAP ...）
 }
 
-# 被动监听单独一个任务槽，避免和诊断任务互相覆盖
+# 通信观察（被动监听）单独一个任务槽，避免和诊断任务互相覆盖
 PJOB = {
     "state": "idle",      # idle | running | done | error
     "duration": 0,
@@ -332,7 +334,7 @@ def log(msg: str) -> None:
 
 
 def _record_ui_run(mode: str, params: dict, started: float, result: dict) -> None:
-    """记录一次 UI 触发的被动监听/链路体检（诊断任务由 ``diagnose.run_scan`` 自记）。
+    """记录一次 UI 触发的通信观察 / 连通与速度测试（诊断任务由 ``diagnose.run_scan`` 自记）。
 
     Args:
         mode: ``passive`` 或 ``probe``。
@@ -380,14 +382,24 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
                     capture_error=res.get("error", ""),
                     bpf=res.get("bpf", ""), logger=log)
                 if fallback is not None:
+                    # 降级卡也必须落盘（复审遗留 #7）：历史报告/导出里要能查到。
+                    try:
+                        fallback["report"] = report.save_degraded(fallback, REPORTS)
+                        log(f"[提示] 降级结论报告已生成："
+                            f"{fallback['report']['markdown']}")
+                    except Exception as exc:  # noqa: BLE001 落盘失败不改变降级结论
+                        log(f"[警告] 降级结论报告落盘失败：{type(exc).__name__}: {exc}")
                     res = fallback
         with LOCK:
             if res.get("ok"):
                 JOB["state"] = "done"
                 JOB["result"] = res
+                JOB["error"] = ""
+                JOB["error_code"] = ""
             else:
                 JOB["state"] = "error"
                 JOB["error"] = res.get("error", "未知错误")
+                JOB["error_code"] = diagnose._error_code(res)
                 JOB["result"] = None
             JOB["finished_at"] = time.time()
     except Exception as exc:  # noqa: BLE001
@@ -395,11 +407,12 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
         with LOCK:
             JOB["state"] = "error"
             JOB["error"] = f"{type(exc).__name__}: {exc}"
+            JOB["error_code"] = "E_INTERNAL"
             JOB["finished_at"] = time.time()
 
 
 def start_job(payload: dict) -> dict:
-    """启动一次诊断任务（实时抓包 / 全网扫描 / 离线分析）。
+    """启动一次诊断任务（全网体检 / 单目标诊断 / 分析抓包文件）。
 
     Args:
         payload: 前端提交的原始 JSON，键：
@@ -423,7 +436,7 @@ def start_job(payload: dict) -> dict:
         target = (payload.get("target") or "").strip()[:300]
         ignored_target = ""
         if mode == "scan" and target:
-            # 全网扫描的语义是「不设过滤、抓本机全部流量」。历史上前端仍显示目标框，
+            # 全网体检（全网扫描）的语义是「不设过滤、抓本机全部流量」。历史上前端仍显示目标框，
             # 用户填了就被当成 host 过滤导致 0 包；这里做后端兜底：忽略并记日志。
             ignored_target, target = target, ""
         duration = _to_int(payload.get("duration"), int(cfg.get("default_duration", 30)),
@@ -432,21 +445,21 @@ def start_job(payload: dict) -> dict:
         pcap = payload.get("pcap") or None
         if mode == "offline":
             if not pcap:
-                return {"ok": False, "error": "离线分析需要指定抓包文件"}
+                return {"ok": False, "error_code": "E_BAD_PCAP", "error": "分析抓包文件需要指定 pcap 文件"}
             # 只允许 captures/ 下的文件：防止通过接口去读任意本地文件
             name = Path(str(pcap)).name
             cand = CAPTURES / name
             if not cand.is_file():
-                return {"ok": False,
+                return {"ok": False, "error_code": "E_BAD_PCAP",
                         "error": f"抓包文件不存在：{name}（请先在界面里上传到 captures/）"}
             pcap = str(cand)
 
         JOB.update({"state": "running", "mode": mode, "target": target or "全网",
                     "duration": duration if mode != "offline" else 0,
                     "started_at": time.time(), "finished_at": 0, "logs": [],
-                    "result": None, "error": ""})
+                    "result": None, "error": "", "error_code": ""})
     if ignored_target:
-        log(f"[提示] 全网扫描模式忽略目标 {ignored_target}，抓取全部流量")
+        log(f"[提示] 全网体检（全网扫描）模式忽略目标 {ignored_target}，抓取全部流量")
     log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s")
     threading.Thread(target=_worker, args=(mode, target, duration, interface, pcap), daemon=True).start()
     return {"ok": True}
@@ -495,7 +508,7 @@ def request_elevation() -> dict:
     * 用户点「是」→ 新进程以管理员权限启动（``core/app.py --elevated`` 会等旧实例
       释放端口后再监听，避免两个实例抢同一个端口），随后旧服务退出；
     * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
-      离线分析与链路体检不受影响。
+      分析抓包文件与连通与速度测试不受影响。
 
     Returns:
         dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
@@ -511,14 +524,14 @@ def request_elevation() -> dict:
     if not started:
         return {"ok": False,
                 "error": "未获得管理员权限（已取消，或被系统策略禁止）。"
-                         "仍可继续使用离线分析与链路体检。"}
+                         "仍可继续使用分析抓包文件与连通与速度测试。"}
     log("[提示] 已请求以管理员身份重启，等待 Windows 授权…")
     threading.Timer(0.8, lambda: request_quit("正在以管理员权限重启，服务即将退出…")
                     ).start()
     return {"ok": True, "message": "已请求管理员权限，服务将重启"}
 
 
-# ---------------------------------------------------------------- 被动监听
+# ---------------------------------------------------------------- 通信观察
 def engine_info() -> dict:
     """当前可用的采集引擎（第一步就告诉用户「能不能用 Scapy」）。
 
@@ -563,7 +576,7 @@ def _passive_worker(interface: str | None, duration: int, target: str, engine: s
 
 
 def passive_start(payload: dict) -> dict:
-    """启动被动监听（只听不发）。
+    """启动通信观察（被动监听，只听不发）。
 
     Args:
         payload: 键 ``interface``（网卡序号，空=自动挑）、``duration``（秒，夹在 3~300）、
@@ -590,7 +603,7 @@ def passive_start(payload: dict) -> dict:
         PJOB.update({"state": "running", "error": "", "result": None, "engine": engine,
                      "duration": duration, "started_at": time.time(),
                      "finished_at": 0, "stop": False})
-    log(f"被动监听启动：网卡 {interface or '自动选择'}，{duration}s，"
+    log(f"通信观察（被动监听）启动：网卡 {interface or '自动选择'}，{duration}s，"
         f"目标 {target or '全部流量'}，引擎 {engine}")
     threading.Thread(target=_passive_worker,
                      args=(interface, duration, target, engine), daemon=True).start()
@@ -598,7 +611,7 @@ def passive_start(payload: dict) -> dict:
 
 
 def passive_status() -> dict:
-    """被动监听的当前状态与结果（界面每秒轮询它）。
+    """通信观察的当前状态与结果（界面每秒轮询它）。
 
     Returns:
         dict: 键 ``ok`` / ``state``（``idle``/``running``/``done``/``error``）/
@@ -947,7 +960,7 @@ class Handler(BaseHTTPRequestHandler):
             self._discard_body()
             with LOCK:
                 PJOB["stop"] = True
-            log("被动监听：收到停止指令，正在收尾…")
+            log("通信观察：收到停止指令，正在收尾…")
             return self._json({"ok": True})
         if parsed.path == "/api/probe":
             payload = self._read_json()
@@ -957,7 +970,7 @@ class Handler(BaseHTTPRequestHandler):
             port = _to_int(payload.get("port"), None, 1, 65535)
             count = _to_int(payload.get("count"), 4, 1, 10)
             timeout = _to_float(payload.get("timeout"), 3.0, 0.5, 10.0)
-            log(f"链路体检：{target}:{port or '默认端口'}")
+            log(f"连通与速度测试（链路体检）：{target}:{port or '默认端口'}")
             return self._json(_probe_guarded(target, port, count, timeout,
                                              payload.get("proto") or None))
         if parsed.path == "/api/scan":

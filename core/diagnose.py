@@ -216,7 +216,7 @@ def _resolve_ips(host: str) -> list[str]:
 
 
 def capture_filter_for(target: str, logger=None) -> dict:
-    """决定「定向抓包」阶段到底用不用 BPF 过滤器。
+    """决定「单目标诊断（定向抓包）」阶段到底用不用 BPF 过滤器。
 
     路测根因：``-f "host baidu.com"`` 在 tshark 里会先把域名解析成 IP，而 mihomo
     的 fake-ip（198.18.0.0/15）并不是真实业务地址，过滤后 0 包。因此只有**解析
@@ -509,10 +509,13 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
             "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
-            "degraded": bool, "empty": bool}``，``empty=True`` 表示抓包窗口内
-            0 包（可走 0 包降级），``degraded=True`` 表示「缺 tshark/Npcap/提权」这类
-            环境问题，前端据此提示改用离线分析。自动选择模式下抓满 0 包/0 字节时不
-            直接失败，会按候选顺序自动换卡重试（最多 3 块）；全失败时错误里带
+            "degraded": bool, "empty": bool, "interface": str, "bpf": str}``。
+            **所有**返回路径都带 ``interface`` / ``bpf``（没有可用值时为 ``""``），
+            供降级卡与 ``degraded_*`` 报告写「最终网卡 / 实际过滤器」；``empty=True``
+            表示抓包窗口内 0 包（可走 0 包降级），``degraded=True`` 表示
+            「缺 tshark/Npcap/提权」这类环境问题，前端据此提示改用分析抓包文件。
+            自动选择模式下抓满 0 包/0 字节时不直接失败，会按候选顺序自动换卡重试
+            （最多 3 块）；全失败时 ``interface`` 是最后尝试的那块，错误里带
             ``--interfaces`` / ``--interface`` 指引与常见原因。显式指定模式 0 包时
             不换卡，错误里列出本次探测发现有流量的候选网卡和两条自助命令。
 
@@ -527,19 +530,23 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         return {
             "ok": False,
             "degraded": True,
+            "interface": "",
+            "bpf": "",
             "error": "未找到 tshark。请确认 tools/WiresharkPortable/App/Wireshark/tshark.exe 是否存在。",
         }
     if not tshark.npcap_installed():
         return {
             "ok": False,
             "degraded": True,
+            "interface": "",
+            "bpf": "",
             "error": "Npcap 未安装或未生效，实时抓包不可用。请以管理员身份运行 start.bat 完成安装，"
-                     "或改用“离线分析”上传已有 pcap 文件。",
+                     "或改用「分析抓包文件」上传已有 pcap 文件。",
         }
 
     interfaces = tshark.list_interfaces(ts)
     if not interfaces:
-        return {"ok": False, "degraded": True,
+        return {"ok": False, "degraded": True, "interface": "", "bpf": "",
                 "error": "未枚举到可用网卡，请确认 Npcap 已安装且 tshark -D 可正常输出。"}
 
     ordered = tshark.order_interfaces(interfaces)
@@ -556,12 +563,14 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         logger("探测网卡流量（每块 2 秒，最多 5 块），自动选择有流量的网卡 ...")
         iface = tshark.probe_interface(ts, ordered) or tshark.pick_interface(interfaces)
     if iface is None:
-        return {"ok": False, "degraded": True, "error": "未枚举到可用网卡。"}
+        return {"ok": False, "degraded": True, "interface": "", "bpf": "",
+                "error": "未枚举到可用网卡。"}
 
     try:
         decision = capture_filter_for(target, logger=logger)
     except ValueError as exc:
-        return {"ok": False, "error": f"目标不合法：{exc}"}
+        return {"ok": False, "interface": tshark.short_name(iface["name"]),
+                "bpf": "", "error": f"目标不合法：{exc}"}
     bpf = decision["bpf"]
     logger(f"[提示] 最终使用的抓包过滤器：{bpf or '无（全网）'}")
     duration = max(3, min(int(duration or 30), 180))
@@ -597,8 +606,10 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             if ("permission" in low or "access is denied" in low
                     or "not permitted" in low or "admin" in low):
                 return {"ok": False, "degraded": True,
+                        "interface": tshark.short_name(cand["name"]),
+                        "bpf": bpf or "无（全网）",
                         "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
-                                 "或使用离线分析已有 pcap 文件。"}
+                                 "或使用「分析抓包文件」分析已有 pcap。"}
             failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 字节(rc={rc})")
             if explicit:
                 return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
@@ -639,7 +650,15 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     error = _capture_empty_error(plan, durations, bpf)
     if failures:
         error += f"（各网卡结果：{'；'.join(failures)}）"
-    return {"ok": False, "degraded": True, "empty": True, "error": error}
+    # 复审阻塞 1：全失败也要交代「最终用的是哪块卡、哪个过滤器」，否则
+    # server 的降级卡与 degraded_* 报告只能填「自动选择 / 无（全网）」，
+    # 把实际用过的 `host 8.8.8.8` 误报成没过滤。
+    last = plan[-1] if plan else iface
+    return {"ok": False, "degraded": True, "empty": True,
+            "interface": tshark.short_name(last["name"]),
+            "interface_index": last["index"],
+            "bpf": bpf or "无（全网）",
+            "error": error}
 
 
 def _fmt_ms(value: float) -> str:
@@ -683,7 +702,7 @@ def degraded_empty_capture_result(target: str = "", duration: int = 0,
     （如 Npcap 不可用、网卡打不开）时才让调用方报错。
 
     Args:
-        target: 用户填的目标；空表示全网扫描。
+        target: 用户填的目标；空表示全网体检（不设过滤，抓本机全部流量）。
         duration: 本次抓包时长（秒），写进结论。
         interface: 用户显式选择的网卡；空表示自动选择。
         capture_error: 抓包阶段的原始错误文案（放进「为什么」供排障）。
@@ -700,6 +719,7 @@ def degraded_empty_capture_result(target: str = "", duration: int = 0,
     via = ""
     host = ""
     probe_host = ""
+    target_stats: dict | None = None
     if target:
         # 域名先解析成 IP 再探测；10.255.255.1 这类 IP 直接探。
         probe_host = target
@@ -709,9 +729,10 @@ def degraded_empty_capture_result(target: str = "", duration: int = 0,
             resolved = _resolve_ips(target)
             probe_host = resolved[0] if resolved else ""
         if probe_host:
-            stats = _link_stats(probe_host)
-            if stats.get("ok"):
-                link, via, host = stats, "target", target
+            target_stats = _link_stats(probe_host)
+            if target_stats.get("ok"):
+                link, via, host = target_stats, "target", target
+    target_probe = probe_host
     gateway = ""
     if link is None:
         gateway = winapi.default_gateway()
@@ -723,6 +744,12 @@ def degraded_empty_capture_result(target: str = "", duration: int = 0,
         return None
     if via == "gateway":
         probe_host = host
+
+    # 目标明确 ping 不通 → 「目标不可达」；其余 0 包 → 「未观察到任何 TCP/IP 会话」。
+    kind = ("target_unreachable"
+            if target and not (target_stats or {}).get("ok") else "empty_sessions")
+    card_title = ("目标不可达" if kind == "target_unreachable"
+                  else "未观察到任何 TCP/IP 会话")
 
     avg = _fmt_ms(link.get("avg_ms", 0))
     jitter = _fmt_ms(link.get("jitter_ms", 0))
@@ -741,36 +768,64 @@ def degraded_empty_capture_result(target: str = "", duration: int = 0,
             plain = (f"抓包窗口内没有业务报文；本机到默认网关 {host} 的链路可达："
                      f"{metrics}。")
 
-    reasons = [
-        "抓包点可能看不到业务流量：VPN / 代理 / TUN 虚拟网卡（如 mihomo 的 Meta）"
-        "会改写路由，物理网卡上可能没有业务报文。",
-        "该目标在抓包窗口内本来就没有流量（例如只发了一次请求，或目标不在线）。",
-    ]
-    if via == "gateway":
-        reasons.append("目标本身可能不可达：先用「链路体检」测目标与网关，"
+    if kind == "empty_sessions":
+        reasons = [
+            "抓包点可能看不到业务流量：VPN / 代理 / TUN 虚拟网卡（如 mihomo 的 Meta）"
+            "会改写路由，物理网卡上可能没有业务报文。",
+            "该目标在抓包窗口内本来就没有流量（例如只发了一次请求，或目标不在线）。",
+            "对方可能只响应 ICMP（例如只开 ping 的网关/设备），没有可观察的 TCP/UDP 服务交互。",
+        ]
+    else:
+        reasons = [
+            f"目标 {target} 对 ICMP 探测没有响应：可能目标离线、路由不通，"
+            "或被中间防火墙 / 安全组拦截。",
+            "抓包点可能看不到业务流量：VPN / 代理 / TUN 虚拟网卡会改写路由，"
+            "物理网卡上可能没有业务报文。",
+            "抓包窗口内没有与该目标的 TCP/UDP 交互；也可能目标只提供 UDP 服务，"
+            "ICMP 被单独禁用。",
+        ]
+    if via == "gateway" and target and kind == "target_unreachable":
+        reasons.append("目标本身不可达；先用「连通与速度测试」测目标与网关，"
                        "确认是本地链路问题还是对端问题。")
-    next_steps = [
-        "换一块有流量的网卡（或保持「自动选择」）再抓一次。",
-        "把抓包时长调到 30~60 秒；仍为空可先用「全网扫描」确认本机有没有业务流量。",
-        "如果走代理 / VPN，优先在 TUN 虚拟网卡（如 Meta）上抓包。",
-    ]
-    if via == "gateway" and target:
-        next_steps.insert(0, f"目标 {target} 当前不可达：先查路由 / 防火墙，"
-                             "或用「链路体检」确认目标端口是否在监听。")
+    if kind == "target_unreachable":
+        next_steps = [
+            "先查路由：确认本机到目标网段有可用路由，默认网关是否正确。",
+            "检查目标侧防火墙 / 安全组是否放行，以及目标主机是否在线。",
+            "用「连通与速度测试」测目标的常见端口（如 443），区分「主机不通」"
+            "还是「端口/服务不通」。",
+        ]
+    else:
+        next_steps = [
+            "换一块有流量的网卡（或保持「自动选择」）再抓一次。",
+            "把抓包时长调到 30~60 秒；仍为空可先用「全网体检」确认本机有没有业务流量。",
+            "如果走代理 / VPN，优先在 TUN 虚拟网卡（如 Meta）上抓包。",
+        ]
+    if via == "gateway" and target and kind == "empty_sessions":
+        next_steps.insert(0, f"目标 {target} 当前没有响应：先查路由 / 防火墙，"
+                             "或用「连通与速度测试」确认目标端口是否在监听。")
 
-    logger(f"[提示] 未捕获业务报文，已自动做链路体检：{metrics}"
-           f"（{'目标' if via == 'target' else '默认网关'} {host}），不判为失败")
+    logger(f"[提示] 未捕获业务报文，已自动做连通与速度测试（链路体检）：{metrics}"
+           f"（{'目标' if via == 'target' else '默认网关'} {host}），"
+           f"按「{card_title}」降级，不判为失败")
     return {
         "ok": True,
         "degraded": True,
         "degraded_reason": "empty_capture",
+        "kind": kind,
+        "card_title": card_title,
         "headline": headline,
         "plain": plain,
         "link": {"via": via, "host": host, "probe_host": probe_host or host,
                  "avg_ms": link.get("avg_ms", 0.0),
                  "jitter_ms": link.get("jitter_ms", 0.0),
                  "loss_pct": link.get("loss_pct", 100.0),
-                 "recv": link.get("recv", 0), "sent": link.get("sent", 0)},
+                 "recv": link.get("recv", 0), "sent": link.get("sent", 0),
+                 "target": {
+                     "host": target_probe or target,
+                     "ok": bool((target_stats or {}).get("ok")),
+                     "avg_ms": (target_stats or {}).get("avg_ms", 0.0),
+                     "loss_pct": (target_stats or {}).get("loss_pct", 100.0),
+                 }},
         "reasons": reasons,
         "next_steps": next_steps,
         "capture": {
@@ -821,7 +876,7 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
         target: 目标 IP/网段/域名；空表示全网。
         duration: 实时抓包秒数（仅无 ``pcap`` 时生效）。
         interface: 网卡序号或名称关键字。
-        pcap: 离线分析的抓包路径。只给文件名时会到 ``captures/`` 下找
+        pcap: 分析抓包文件的路径。只给文件名时会到 ``captures/`` 下找
             （兼容 U 盘盘符变化）。
         logger: 日志回调。
         report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
@@ -877,10 +932,19 @@ def _error_code(result: dict) -> str:
     lowered = message.lower()
     if "未找到 tshark" in message:
         return "E_NO_TSHARK"
-    if "npcap" in lowered:
+    if ("npcap 未安装" in lowered or "npcap 未就绪" in lowered
+            or "缺少抓包驱动" in message):
         return "E_NO_NPCAP"
     if "权限不足" in message or "permission" in lowered or "access is denied" in lowered:
         return "E_NO_ADMIN"
+    if ("未枚举到可用网卡" in message or "device is being used" in lowered
+            or "could not be initiated" in lowered or "adapter" in lowered):
+        return "E_NO_INTERFACE"
+    if ("解析失败" in message or "不完整" in message or "cut short" in lowered
+            or "capture file" in lowered or "pcap" in lowered):
+        return "E_BAD_PCAP"
+    if "npcap" in lowered:
+        return "E_NO_NPCAP"
     if "网卡" in message and result.get("degraded"):
         return "E_NO_INTERFACE"
     if "不存在" in message or "not found" in lowered:
@@ -1022,10 +1086,10 @@ def main(argv: list[str] | None = None) -> int:
     """
     _harden_console()
     ap = argparse.ArgumentParser(description="NetDiag 网络诊断")
-    ap.add_argument("--target", default="", help="目标 IP 或 CIDR 网段，留空表示全网扫描")
+    ap.add_argument("--target", default="", help="目标 IP 或 CIDR 网段，留空表示全网体检（不设过滤）")
     ap.add_argument("--duration", type=int, default=load_config()["default_duration"])
     ap.add_argument("--interface", default=None, help="网卡序号或名称关键字")
-    ap.add_argument("--pcap", default=None, help="离线分析指定 pcap 文件")
+    ap.add_argument("--pcap", default=None, help="分析抓包文件：指定 pcap 文件")
     ap.add_argument("--interfaces", action="store_true", help="列出可用网卡")
     ap.add_argument("--json", action="store_true", help="仅输出 JSON 摘要")
     ap.add_argument("--report-out", default=None, metavar="DIR",
@@ -1062,7 +1126,7 @@ def main(argv: list[str] | None = None) -> int:
     if not res.get("ok"):
         print(f"[错误] {res.get('error')}", file=sys.stderr)
         if res.get("degraded"):
-            print("[降级] 可执行：python diagnose.py --pcap <已有抓包文件> 进行离线分析", file=sys.stderr)
+            print("[降级] 可执行：python diagnose.py --pcap <已有抓包文件> 分析抓包文件", file=sys.stderr)
         return 2
 
     if args.json:

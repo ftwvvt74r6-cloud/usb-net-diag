@@ -515,6 +515,23 @@
     "user.security_header": "【安全观察（附带项，非主线）】",
     "user.question_prefix": "另外请重点回答这个问题："
   },
+  "degraded_report": {
+    "title": "# NetDiag · 网络矩阵 · 降级结论报告",
+    "meta_line": "- 模式：{mode}｜生成时间：{at}",
+    "section_conclusion": "## 一、结论",
+    "section_facts": "## 二、抓包事实",
+    "section_reasons": "## 三、可能原因",
+    "section_steps": "## 四、建议动作",
+    "field_target": "抓包目标",
+    "field_interface": "采集网卡",
+    "field_duration": "抓包时长",
+    "field_bpf": "抓包过滤器",
+    "field_link": "链路探测",
+    "field_loss": "丢包",
+    "link_target": "目标 {host}（ICMP）",
+    "link_gateway": "默认网关 {host}（ICMP，目标不可达时的对照）",
+    "footer": "本报告由 NetDiag 在 0 包降级路径自动生成；未捕获业务报文不等于诊断失败。"
+  },
   "preset": {
     "deepseek": "DeepSeek 官方",
     "qwen": "阿里云百炼（通义千问）",

@@ -563,7 +563,7 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
         return {"ok": False, "error": "scapy 未安装且找不到 tshark，无法抓包"}
 
     if logger:
-        logger(f"被动监听：网卡 {tshark.short_name(device)}，{duration}s，"
+        logger(f"通信观察（被动监听）：网卡 {tshark.short_name(device)}，{duration}s，"
                f"过滤器 {bpf or '全部流量'}，引擎 {used}")
 
     t0 = time.time()
@@ -588,7 +588,7 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
     iface_name = tshark.short_name((chosen or {}).get("name") or device)
     elapsed = round(time.time() - t0, 1)
     if logger:
-        logger(f"被动监听完成：{summary['packets']} 个报文 / {summary['flows']} 条会话，"
+        logger(f"通信观察（被动监听）完成：{summary['packets']} 个报文 / {summary['flows']} 条会话，"
                f"未识别 {summary['unknown']} 条")
 
     if not recs:
@@ -607,11 +607,11 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
         headline = (f"抓到 {summary['flows']} 条会话，其中 {unknown} 条协议未识别"
                     f"（显示为 Unknown TCP/UDP）")
         advice = ("未识别不代表异常：多为自定义端口或加密私有协议。可对可疑目标用"
-                  "「链路体检」指定协议再探，或展开会话看端口与包长判断。")
+                  "「连通与速度测试」指定协议再探，或展开会话看端口与包长判断。")
     else:
         headline = f"抓到 {summary['flows']} 条会话，协议全部识别成功"
         advice = ("识别依据写在协议下方，鼠标悬停可看全文。要看某条连接为什么慢，"
-                  "把目标填成它的 IP，用左侧「链路体检」再测一次分段耗时。")
+                  "把目标填成它的 IP，用左侧「连通与速度测试」再测一次分段耗时。")
 
     # 单端口对多对端：带宽被谁占了的常见答案
     fan = summary.get("fanout") or []

@@ -23,7 +23,7 @@ if not errorlevel 1 goto :have_admin
 echo  [*] 未获得管理员权限，正在请求提权（UAC 请点"是"）...
 powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop; exit 0 } catch { exit 1 }"
 if not errorlevel 1 exit /b
-echo  [!] 提权被取消，以普通权限继续：实时抓包可能失败，可改用离线分析。
+echo  [!] 提权被取消，以普通权限继续：实时抓包可能失败，可改用「分析抓包文件」（离线分析）。
 echo.
 :have_admin
 
@@ -78,7 +78,7 @@ goto :check_npcap
 
 :no_tshark
 echo.
-echo  [X] 未找到 tshark，实时抓包与离线分析都不可用。
+echo  [X] 未找到 tshark，实时抓包与「分析抓包文件」（离线分析）都不可用。
 echo      请将 Wireshark 便携版解压到:
 echo      %ROOT%\tools\WiresharkPortable\App\Wireshark\tshark.exe
 echo.
@@ -100,7 +100,7 @@ for %%f in ("%ROOT%\tools\npcap-*.exe") do (
 if not errorlevel 1 (
     echo  [OK] Npcap 安装完成。
 ) else (
-    echo  [!] Npcap 仍未就绪，实时抓包不可用；离线分析（上传 pcap）不受影响。
+    echo  [!] Npcap 仍未就绪，实时抓包不可用；「分析抓包文件」（离线分析，上传 pcap）不受影响。
 )
 goto :launch
 
