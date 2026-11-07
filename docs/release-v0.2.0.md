@@ -21,15 +21,15 @@
 | 标题 | NetDiag · 网络矩阵 v0.2.0（lite 源码包） |
 | Tag | `v0.2.0` |
 | Tag 指向 | `601561426ffd8a4d569ec8b9e6242e1052df0ed5`（`main` HEAD） |
-| 发布件构建自 | 分支 `chore/release-packaging` 的提交 `（构建后回填）`（产品代码与 `main` 相同） |
+| 发布件构建自 | 分支 `chore/release-packaging` 的提交 `d831853`（产品代码与 `main` 相同；`3e2f440` 之后的法务修正提交） |
 | Release notes | `CHANGELOG.md` 的 `## v0.2.0` 段 + 「Python / Wireshark / Npcap 需自行安装」说明 |
 
 ## 2. 资产（只有 lite + SHA256SUMS）
 
 | 文件 | 大小 | SHA-256 |
 |---|---|---|
-| `NetDiag-0.2.0-lite.zip` | （构建后回填） | （构建后回填） |
-| `SHA256SUMS.txt` | （构建后回填） | — |
+| `NetDiag-0.2.0-lite.zip` | **669,357 B**（0.6 MiB / 0.7 MB） | `176b4f7056cc34df92f23a2733e1399641d3c1352c8dcafe7ef394f5cbb0b920` |
+| `SHA256SUMS.txt` | 89 B | — |
 
 > 公开附件里**没有** `npcap-*.exe`、**没有** `Wireshark`、**没有** `tools/`。
 > 核对命令：`gh release view v0.2.0` +
@@ -40,8 +40,8 @@
 | 项 | 值 |
 |---|---|
 | 顶层目录 | `NetDiag/`（单目录，不散落） |
-| 文件数 | 约 **142** |
-| 解压后大小 | 约 **1.5 MB** |
+| 文件数 | **142** |
+| 解压后大小 | **1,681,711 B**（1.6 MiB / 1.7 MB） |
 | `tools/` | **不存在**（构建脚本断言） |
 | Npcap 安装器 | **不存在**（构建脚本断言） |
 | `reports/` | 只有 `faults_demo.md` / `faults_demo.json` |
@@ -60,7 +60,7 @@
 
 | 检查 | 结果 |
 |---|---|
-| 解压到空目录 | `NetDiag/` 单目录，约 142 文件 / 约 1.5 MB |
+| 解压到空目录 | `NetDiag/` 单目录，**142 文件 / 1,681,711 B** |
 | `自检.bat --no-pause` | `PASS: 2  WARN: 5  FAIL: 0` → `RESULT: USABLE`，rc=0（本机无 tshark / Npcap / 未提权，故 5 个 WARN；Python 与源码导入 PASS） |
 | 系统 Python 全套测试 | `Ran 235 tests ... OK (skipped=19)`，rc=0 |
 
@@ -68,7 +68,7 @@
 
 | 项 | 结果 |
 |---|---|
-| demo + 9 样本 `analyze()+verdict.build()+render_markdown()` | **20/20 逐字节相同** |
+| demo + 9 样本 `analyze()+verdict.build()+render_markdown()` | **20/20 逐字节相同**（20 个文件，总字节 173,653 = 173,653） |
 | `reports/` | `git status` / `git diff` 均为空；两份示例 sha256 不变 |
 | 测试 | 235（未减少） |
 | `.github/**` / `.gitignore` / `core/**` / `ui/**` | 零改动 |
