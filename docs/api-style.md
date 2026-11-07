@@ -60,7 +60,7 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
 
     Raises:
         不抛异常。tshark 找不到、超时、权限不足都转成 ``error`` 返回
-        —— 因为这是 U 盘工具，任何异常都不能让界面白屏。
+        —— 因为这是便携工具，任何异常都不能让界面白屏。
 
     Example:
         >>> stats, err = collect(Path("captures/faults_demo.pcap"))

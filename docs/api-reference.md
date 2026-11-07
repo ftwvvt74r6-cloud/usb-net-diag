@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**28** 个（有模块说明 28 个）
-- 公开符号：**203** 个（有 docstring 203 个，合格 203 个）
+- 扫描模块：**29** 个（有模块说明 29 个）
+- 公开符号：**204** 个（有 docstring 204 个，合格 204 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -207,9 +207,9 @@ Raises:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `collect` | function | 407 | ✅ |
-| `build_findings` | function | 902 | ✅ |
-| `analyze` | function | 1394 | ✅ |
+| `collect` | function | 412 | ✅ |
+| `build_findings` | function | 907 | ✅ |
+| `analyze` | function | 1396 | ✅ |
 
 ### `collect`
 
@@ -1712,7 +1712,7 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `build` | function | 68 | ✅ |
+| `build` | function | 69 | ✅ |
 
 ### `build`
 
@@ -1962,28 +1962,28 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `log_root` | function | 64 | ✅ |
-| `ensure_dirs` | function | 87 | ✅ |
-| `_DailySink.close` | method | 184 | ✅ |
-| `_DailySink.write` | method | 205 | ✅ |
-| `_Stream.write` | method | 243 | ✅ |
-| `_Stream.writelines` | method | 257 | ✅ |
-| `_Stream.flush` | method | 269 | ✅ |
-| `_Stream.isatty` | method | 273 | ✅ |
-| `_Stream.writable` | method | 281 | ✅ |
-| `_Stream.readable` | method | 289 | ✅ |
-| `_Stream.fileno` | method | 297 | ✅ |
-| `_Stream.closed` | method | 309 | ✅ |
-| `_Stream.close` | method | 317 | ✅ |
-| `app_log` | function | 346 | ✅ |
-| `diag_log` | function | 358 | ✅ |
-| `open_stream` | function | 370 | ✅ |
-| `close_streams` | function | 380 | ✅ |
-| `write_env_snapshot` | function | 454 | ✅ |
-| `record_run` | function | 481 | ✅ |
-| `record_crash` | function | 527 | ✅ |
-| `install_excepthooks` | function | 610 | ✅ |
-| `prune` | function | 709 | ✅ |
+| `log_root` | function | 69 | ✅ |
+| `ensure_dirs` | function | 92 | ✅ |
+| `_DailySink.close` | method | 189 | ✅ |
+| `_DailySink.write` | method | 210 | ✅ |
+| `_Stream.write` | method | 248 | ✅ |
+| `_Stream.writelines` | method | 262 | ✅ |
+| `_Stream.flush` | method | 274 | ✅ |
+| `_Stream.isatty` | method | 278 | ✅ |
+| `_Stream.writable` | method | 286 | ✅ |
+| `_Stream.readable` | method | 294 | ✅ |
+| `_Stream.fileno` | method | 302 | ✅ |
+| `_Stream.closed` | method | 314 | ✅ |
+| `_Stream.close` | method | 322 | ✅ |
+| `app_log` | function | 351 | ✅ |
+| `diag_log` | function | 363 | ✅ |
+| `open_stream` | function | 375 | ✅ |
+| `close_streams` | function | 385 | ✅ |
+| `write_env_snapshot` | function | 456 | ✅ |
+| `record_run` | function | 483 | ✅ |
+| `record_crash` | function | 529 | ✅ |
+| `install_excepthooks` | function | 612 | ✅ |
+| `prune` | function | 711 | ✅ |
 
 ### `log_root`
 
@@ -3742,6 +3742,32 @@ Note:
 
     本函数只做路由与拼装：用户可见文案全部来自 ``core/copy/zh-CN.json``，
     字典里的 ``level`` / ``layer`` / ``category`` 等是机器侧的结构化标识。
+```
+
+## `core/version.py`
+
+**职责**：产品版本号的唯一读取点：仓库根 ``VERSION``（UTF-8，容忍 BOM 与首尾空白）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `read_version` | function | 16 | ✅ |
+
+### `read_version`
+
+```python
+def read_version(root: Path | None=None) -> str
+```
+
+```text
+读取 ``root/VERSION`` 里的产品版本号。
+
+Args:
+    root: 仓库根目录（``VERSION`` 所在目录）；``None`` 表示本文件所在
+        ``core/`` 的上一级。测试可传临时目录。
+
+Returns:
+    str: 形如 ``0.2.0`` 的版本号。文件缺失、读失败、内容为空或只有
+    UTF-8 BOM 时回退 ``0.0.0``，任何情况都不抛异常。
 ```
 
 ## `mcp/wireshark-mcp/server.py`

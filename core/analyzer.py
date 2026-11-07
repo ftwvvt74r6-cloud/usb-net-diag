@@ -40,6 +40,11 @@ try:                                              # 文案表访问器（扁平�
 except ModuleNotFoundError:                        # 包方式：仓库根在 sys.path
     from core.copytext import load_table as _copy_load, text as _copy_text
 
+try:                                              # 版本号读取（扁平导入：core/ 在 sys.path）
+    from version import read_version
+except ModuleNotFoundError:                        # 包方式：仓库根在 sys.path
+    from core.version import read_version
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # 单次抓包解析的字段集合（一次 tshark 调用取全，避免多次扫描 pcap）
@@ -1361,7 +1366,7 @@ def _build_provenance() -> dict:
 
     Returns:
         可直接 JSON 序列化的字典，键同 :class:`core.contracts.Provenance` 字段。
-        任一来源取不到时该键为空串，不抛异常。
+        版本号读不到时回退 ``0.0.0``，其余来源取不到时该键为空串，不抛异常。
 
     Note:
         ``config_sha256`` 只覆盖 app 配置与阈值，**不含 AI Key**（见 core.config）。
@@ -1384,10 +1389,7 @@ def _build_provenance() -> dict:
         info["config_sha256"] = config_sha256()
     except Exception:                              # noqa: BLE001
         pass
-    try:
-        info["app_version"] = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    except OSError:
-        pass
+    info["app_version"] = read_version(ROOT)
     return info
 
 

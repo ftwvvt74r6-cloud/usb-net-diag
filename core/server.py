@@ -53,6 +53,7 @@ import logstore  # noqa: E402
 import passive  # noqa: E402
 import probe  # noqa: E402
 import tshark  # noqa: E402
+import version  # noqa: E402
 
 UI_DIR = ROOT / "ui"
 CAPTURES = ROOT / "captures"
@@ -89,7 +90,10 @@ APP_NAME = "USBNetDiag"
 
 
 def _read_version(root: Path = ROOT) -> str:
-    """从 ``root/VERSION`` 读产品版本号；文件缺失或内容为空时回退 ``0.0.0``。
+    """读产品版本号（薄包装，实现见 :func:`version.read_version`）。
+
+    ``APP_VERSION`` 与既有用例都通过它取值，所以保留入口；真正读文件、
+    剥 UTF-8 BOM 的逻辑只在 :mod:`core.version` 一处（L 轮补丁）。
 
     Args:
         root: 仓库根目录，默认即 ``core/`` 的上一级。
@@ -97,11 +101,7 @@ def _read_version(root: Path = ROOT) -> str:
     Returns:
         str: 形如 ``0.2.0`` 的版本号；读不到时是 ``0.0.0``。
     """
-    try:
-        version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    except OSError:
-        return "0.0.0"
-    return version or "0.0.0"
+    return version.read_version(root)
 
 
 #: 产品版本的唯一来源是仓库根 ``VERSION``（启动横幅 / ``/api/ping`` / ``/api/app`` 共用）。

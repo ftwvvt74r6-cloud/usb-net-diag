@@ -42,6 +42,7 @@ from pathlib import Path
 
 import logstore
 import sanitize
+from version import read_version
 
 ROOT = Path(__file__).resolve().parents[1]
 #: 报告目录；测试可整体替换（避免读仓库里的历史报告）。
@@ -401,11 +402,8 @@ def _human_size(size: int) -> str:
 
 
 def _version() -> str:
-    """读仓库 ``VERSION``；读不到返回空串（README 里只是装饰信息）。"""
-    try:
-        return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+    """读仓库 ``VERSION``（剥 UTF-8 BOM）；读不到回退 ``0.0.0``。"""
+    return read_version(ROOT)
 
 
 def _render_readme(entries: list, skipped: list, raw: bool, include_reports: bool) -> str:
