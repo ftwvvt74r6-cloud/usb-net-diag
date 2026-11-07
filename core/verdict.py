@@ -591,7 +591,11 @@ def build(result: dict) -> dict:
     for r in (bad + hints)[:6]:
         cat = r.get("category", "")
         finding = r.get("finding") or ""
-        is_rst = cat == "连接建立" and "RST" in finding and "无响应" not in finding
+        # RST 分支用「类别 + 协议缩写 RST」识别，不再对中文 finding 文案做包含匹配
+        # （旧实现还要求「无响应」不在文案里，但对 analyzer 产出的每一类连接建立行
+        #  都恒等价：无响应行的文案是「没有收到回应」、RST 行的文案含 RST）。
+        # 彻底机制化需要在 rows[] 里加机器标记，会改报告 JSON 形状 —— 登记 BACKLOG。
+        is_rst = cat == "连接建立" and "RST" in finding
         plain_txt = _explain(cat, is_rst) + _t("verdict.plain", "explain_join") + finding
         points.append({
             "severity": r.get("severity"),

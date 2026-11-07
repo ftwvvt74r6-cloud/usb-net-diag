@@ -253,6 +253,26 @@ def _is_handshake_rst(stream: dict, from_client: bool) -> bool:
     return bool(stream.get("syn")) and not stream.get("synack_ts") and not stream.get("ack_ts")
 
 
+def _conn_no_response(s: dict) -> bool:
+    """判断这条 TCP 流是不是「发出了 SYN、始终没有回应」（建连无响应）。
+
+    这是**结构化判定**，与文案彻底解耦：有 SYN、没有 SYN-ACK、也没有 RST。
+    与 :func:`_is_handshake_rst` 的口径只差一处 —— 握手期被 RST 的流算「被拒」，
+    不算「无响应」，所以这里额外要求 ``not rst``（与旧实现的内联条件逐字等价）。
+
+    为什么必须改：旧实现把中文标记 ``"建连无响应"`` 当查找键，
+    ``conn_fail`` 计数与 ``streams_top`` 排序都靠 ``"建连无响应" in flags``。
+    那样改 copy 表里的这条文案就会**改变判定结果** —— 文案与逻辑必须解耦。
+
+    Args:
+        s: ``st["streams"]`` 里的单条流聚合字典。
+
+    Returns:
+        bool: True 表示应计入 ``conn_fail`` / 打「建连无响应」标记。
+    """
+    return bool(s.get("syn")) and not s.get("synack_ts") and not s.get("rst")
+
+
 def _dns_timeout_count(q_ids, r_ids) -> int:
     """按 transaction id 配对，统计「发出查询但没收到响应」的次数。
 
@@ -627,19 +647,21 @@ def _stream_rows(st: dict) -> list[dict]:
         dur = round(max(0.0, s["last"] - s["first"]), 2)
         rtt = _stats(s["rtt"])
         flags: list[str] = []
-        if s["syn"] and not s["synack_ts"] and not s["rst"]:
-            flags.append("建连无响应")
+        no_response = _conn_no_response(s)
+        if no_response:
+            flags.append(_t("stream_flag", "no_response"))
         elif s["syn_retrans"]:
-            flags.append(f"SYN 重发{s['syn_retrans']}")
+            flags.append(_t("stream_flag", "syn_retrans", count=s["syn_retrans"]))
         if s["rst"]:
-            flags.append("被重置")
+            flags.append(_t("stream_flag", "rst"))
         if s["zero_win"]:
-            flags.append("零窗口")
+            flags.append(_t("stream_flag", "zero_win"))
         if s["ooo"]:
-            flags.append(f"乱序{s['ooo']}")
+            flags.append(_t("stream_flag", "ooo", count=s["ooo"]))
         if hs is not None and hs >= 300:
-            flags.append(f"握手慢 {hs:.0f}ms")
-        score = (100 if ("建连无响应" in flags) else 0) + len(flags) * 10 \
+            flags.append(_t("stream_flag", "slow_handshake", ms=hs))
+        # 排序权重只看结构化条件，不看 flags 里的文案
+        score = (100 if no_response else 0) + len(flags) * 10 \
             + s["retrans"] * 2 + s["zero_win"] * 3 + s["rst"] * 5 + min(s["bytes"] / 1e6, 20)
         out.append({
             "stream": sid, "client": s["client"], "sport": s["sport"],
@@ -671,7 +693,8 @@ def _metrics(st: dict, streams: list[dict]) -> dict:
     codes = st["http_codes"]
     err5 = sum(v for k, v in codes.items() if k.startswith("5"))
     err4 = sum(v for k, v in codes.items() if k.startswith("4"))
-    conn_fail = sum(1 for x in streams if "建连无响应" in (x["flags"] or []))
+    # 建连无响应 = 结构化条件（见 _conn_no_response），不再匹配 flags 里的中文文案
+    conn_fail = sum(1 for s in st["streams"].values() if _conn_no_response(s))
     # 只认「握手阶段被对端 RST」。已建连后的 RST 属于连接中断，
     # 不计入「被拒」——旧实现用 x["rst"] 判，会把正常关闭的 RST 也算进来。
     # 从 st 里取（st["streams"] 不对外暴露），避免给 _stream_rows 的投影加键
@@ -745,7 +768,11 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                          _t("advice", "L4.CONNECT.ADVICE.NO_SAMPLE")))
     else:
         if m["conn_fail"]:
-            bad = [x for x in streams if "建连无响应" in x["flags"]][:3]
+            # 用 st["streams"] 的结构化条件筛；再按 streams（已按 score 排序）取前 3，
+            # 保持证据条目的原始顺序。不能给 streams_top 的行加键（会改报告快照形状）。
+            no_response_ids = {sid for sid, s in st["streams"].items()
+                               if _conn_no_response(s)}
+            bad = [x for x in streams if x["stream"] in no_response_ids][:3]
             detail = "；".join(
                 _t("evidence", "connect.no_response_item", server=x["server"],
                    dport=x["dport"], count=x["packets"]) for x in bad)

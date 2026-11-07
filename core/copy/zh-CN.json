@@ -162,7 +162,16 @@
     "4899": "Radmin 远控",
     "5555": "ADB/Meterpreter 常用",
     "6667": "IRC C2 常用",
-    "9001": "Tor 中继"
+    "9001": "Tor 中继",
+    "9050": "Tor Socks"
+  },
+  "stream_flag": {
+    "no_response": "建连无响应",
+    "syn_retrans": "SYN 重发{count}",
+    "rst": "被重置",
+    "zero_win": "零窗口",
+    "ooo": "乱序{count}",
+    "slow_handshake": "握手慢 {ms:.0f}ms"
   },
   "icmp_code": {
     "3.0": "网络不可达",
