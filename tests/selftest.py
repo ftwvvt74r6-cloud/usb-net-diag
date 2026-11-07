@@ -63,9 +63,19 @@ class MockServer:
     def __init__(self, handler, family=socket.AF_INET, port: int = 0):
         self.handler = handler
         self.sock = socket.socket(family, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(("::1" if family == socket.AF_INET6 else "127.0.0.1", port))
-        self.sock.listen(16)
+        # 测试服务**不能**设 SO_REUSEADDR：Windows 上它会让两个进程同时绑上同一端口，
+        # 端口冲突检测因此失效，probe 会连到别人的服务上（B1 的复现根因）。
+        # SO_EXCLUSIVEADDRUSE 更进一步：即使对方设了 SO_REUSEADDR，bind 也会失败。
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            self.sock.bind(("::1" if family == socket.AF_INET6 else "127.0.0.1", port))
+            self.sock.listen(16)
+        except OSError:
+            # bind/listen 失败（端口被占）也要关 socket，否则四个端口全占时留一堆
+            # ResourceWarning（C5）；关完再把异常抛给调用方记 skip。
+            self.sock.close()
+            raise
         self.port = self.sock.getsockname()[1]
         threading.Thread(target=self._loop, daemon=True).start()
 

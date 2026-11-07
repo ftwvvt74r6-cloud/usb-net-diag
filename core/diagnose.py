@@ -229,7 +229,8 @@ def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
 
 
 def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
-             pcap: str | None = None, logger=log) -> dict:
+             pcap: str | None = None, logger=log,
+             report_dir: str | Path | None = None) -> dict:
     """完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告。
 
     Args:
@@ -239,6 +240,9 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
         pcap: 离线分析的抓包路径。只给文件名时会到 ``captures/`` 下找
             （兼容 U 盘盘符变化）。
         logger: 日志回调。
+        report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
+            给定时只写该目录（目录不存在会自动创建），文件名清洗仍由
+            :func:`report.save` 负责。
 
     Returns:
         dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
@@ -280,7 +284,8 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
         result["summary"]["critical_count"] = sum(1 for r in result["rows"] if r["severity"] == "严重")
 
     result["verdict"] = verdict.build(result)
-    paths = report.save(result, REPORTS)
+    out_dir = Path(report_dir) if report_dir else REPORTS
+    paths = report.save(result, out_dir)
     result["report"] = paths
     logger(f"报告已生成：{paths['markdown']}")
 
@@ -295,7 +300,9 @@ def main(argv: list[str] | None = None) -> int:
 
     Args:
         argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
-            ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）。
+            ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
+            ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
+            省略时仍写 ``reports/``）。
 
     Returns:
         int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
@@ -307,6 +314,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pcap", default=None, help="离线分析指定 pcap 文件")
     ap.add_argument("--interfaces", action="store_true", help="列出可用网卡")
     ap.add_argument("--json", action="store_true", help="仅输出 JSON 摘要")
+    ap.add_argument("--report-out", default=None, metavar="DIR",
+                    help="只写该目录（不再写 reports/）：把完整报告 .md/.json "
+                         "导出到指定目录；省略时仍写 reports/")
     args = ap.parse_args(argv)
 
     if args.interfaces:
@@ -315,7 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\ntshark: {tshark.version()}")
         return 0
 
-    res = run_scan(args.target, args.duration, args.interface, args.pcap)
+    res = run_scan(args.target, args.duration, args.interface, args.pcap,
+                   report_dir=args.report_out)
     if not res.get("ok"):
         print(f"[错误] {res.get('error')}", file=sys.stderr)
         if res.get("degraded"):

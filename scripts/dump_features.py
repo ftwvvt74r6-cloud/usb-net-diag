@@ -9,8 +9,12 @@
     python scripts/dump_features.py --pcap captures/faults_demo.pcap \
         --out tests/fixtures/faults_features.json
 
-输出结构：``Features.to_dict()`` 的全部键，外加三个顶层元信息 ——
-``schema_version`` / ``source_pcap``（只留文件名）/ ``generated_at``（UTC）。
+输出结构：``Features.to_dict()`` 的全部键，外加四个顶层元信息 ——
+``schema_version`` / ``source_pcap``（只留文件名）/ ``generated_at``（UTC）/
+``tshark_version``（当前 tshark 版本首行）。
+
+``tshark_version`` 是给 golden 比对用的：不同版本对同一份 pcap 的字段解析可能不同，
+数字对不上时先看版本，比逐个排查口径快。
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ if str(ROOT) not in sys.path:
 
 from core.contracts import SCHEMA_VERSION                        # noqa: E402
 from core.extract import FIELDS, build_features, parse_rows      # noqa: E402
-from core.tshark import find_tshark, iter_lines                  # noqa: E402
+from core.tshark import find_tshark, iter_lines, version         # noqa: E402
 
 
 def make_args(tshark: Path, pcap: Path) -> list[str]:
@@ -96,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     data = feats.to_dict()
     data["schema_version"] = SCHEMA_VERSION
     data["source_pcap"] = pcap.name
+    data["tshark_version"] = version(tshark)
     data["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     out = Path(args.out)

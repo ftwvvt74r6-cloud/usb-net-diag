@@ -15,7 +15,7 @@
   },
   "derived": {},
   "dns": {},
-  "generated_at": "2026-11-06T15:20:07+00:00",
+  "generated_at": "2026-11-07T10:29:44+00:00",
   "http": {},
   "icmp": {},
   "missing": [
@@ -406,5 +406,6 @@
       }
     ]
   },
-  "tls": {}
+  "tls": {},
+  "tshark_version": "TShark (Wireshark) 4.7.4 (v4.7.4-0-g3261ea7f570f)."
 }

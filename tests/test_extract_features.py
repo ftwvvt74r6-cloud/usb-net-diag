@@ -8,6 +8,8 @@
    悄悄换含义，比代码报错更难发现。
 2. **fixture 不能被手改坏**。第二个用例现跑一遍 pcap 重新算，
    要求与 fixture 逐项相同；没有 tshark 时自动跳过（CI 里就靠第一个用例）。
+3. **换 tshark 版本要显式重生成**。fixture 记录了生成时的 ``tshark_version``；
+   现跑版本的**主次版本**对不上时给出「怎么重新生成」的命令，而不是只报数字不同。
 
 第一个用例不 import tshark，因此 CI 的干净环境里也能跑完整套判断口径的校验。
 """
@@ -15,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -23,12 +26,30 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.extract import FIELDS, build_features, parse_rows   # noqa: E402
-from core.tshark import find_tshark, iter_lines               # noqa: E402
+from core.tshark import find_tshark, iter_lines, version       # noqa: E402
 
 FIXTURE = ROOT / "tests" / "fixtures" / "faults_features.json"
 SAMPLE = ROOT / "captures" / "faults_demo.pcap"
 
 NO_TSHARK = find_tshark() is None
+
+#: fixture 里 tshark_version 的比对口径：只比主次版本（``4.7``）。
+#: 完整版本串含构建哈希（``4.7.4 (v4.7.4-0-g...).``），同一主次版本的不同补丁／
+#: 不同构建之间数字也可能不变 —— 比整行会让正常升级误报，不是我们要守的东西。
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)")
+
+
+def _major_minor(version_text: str) -> str:
+    """从 tshark 版本串里取 ``主.次`` 版本（取不到返回空串）。
+
+    Args:
+        version_text: 形如 ``TShark (Wireshark) 4.7.4 (v4.7.4-0-g...).`` 的版本首行。
+
+    Returns:
+        str: ``"4.7"``；串里没有版本号时返回 ``""``。
+    """
+    match = _VERSION_RE.search(version_text or "")
+    return f"{match.group(1)}.{match.group(2)}" if match else ""
 
 #: golden 基线：来自 demo pcap，改动即代表口径变化。
 G_PACKETS = 36
@@ -118,6 +139,29 @@ class FeaturesLiveTest(unittest.TestCase):
         self.assertTrue(rows, f"tshark 没解析出报文：rc={sink.get('rc')}")
         feats = build_features(rows, meta={"pcap_name": SAMPLE.name})
         _assert_golden(self, feats.tcp.to_dict())
+
+    def test_tshark_version_matches_fixture(self):
+        """现跑 tshark 的主次版本必须与 golden 记录一致（不一致时给重生成命令）。"""
+        self.assertTrue(FIXTURE.is_file(), f"缺少特征样本：{FIXTURE}")
+        data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        recorded = data.get("tshark_version", "")
+        current = version()
+        recorded_mm = _major_minor(recorded)
+        current_mm = _major_minor(current)
+        hint = (
+            "用 `python scripts/dump_features.py --pcap captures/faults_demo.pcap "
+            "--out tests/fixtures/faults_features.json` 重新生成"
+        )
+        if not recorded_mm:
+            self.fail(
+                f"fixture 没有可用的 tshark_version（记录值：{recorded!r}）；{hint}"
+            )
+        if recorded_mm != current_mm:
+            self.fail(
+                "tshark 主次版本不同："
+                f"fixture 记录 {recorded_mm} / 当前 {current_mm} / {hint}"
+                f"（当前完整版本：{current}）"
+            )
 
 
 if __name__ == "__main__":
