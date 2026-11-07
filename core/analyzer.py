@@ -35,6 +35,11 @@ try:                                              # 场景一：extract 作为�
 except ModuleNotFoundError:                        # 场景二：包方式（from core.analyzer import ...）
     from core.extract.fields import parse_flag as _parse_flag
 
+try:                                              # 文案表访问器（扁平导入：core/ 在 sys.path）
+    from copytext import text as _copy_text
+except ModuleNotFoundError:                        # 包方式：仓库根在 sys.path
+    from core.copytext import text as _copy_text
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # 单次抓包解析的字段集合（一次 tshark 调用取全，避免多次扫描 pcap）
@@ -86,18 +91,27 @@ FIELDS = [
     "arp.src.proto_ipv4",
 ]
 
-# 常见远控 / 后门 / 挖矿端口（安全观察用，非主线）
-SUSPICIOUS_PORTS = {
-    1080: "代理端口", 1337: "常见后门端口", 31337: "Back Orifice 后门端口",
-    4444: "Metasploit 反弹端口", 4899: "Radmin 远控", 5555: "ADB/Meterpreter 常用",
-    6667: "IRC C2 常用", 9001: "Tor 中继", 9050: "Tor Socks",
-}
+# 常见远控 / 后门 / 挖矿端口（安全观察用，非主线）。
+# 展示用名称在 copy 表 ``suspicious_port.<port>``，这里只保留端口集合。
+SUSPICIOUS_PORTS = {1080, 1337, 31337, 4444, 4899, 5555, 6667, 9001, 9050}
 
-ICMP_CODES = {
-    (3, 0): "网络不可达", (3, 1): "主机不可达", (3, 2): "协议不可达", (3, 3): "端口不可达",
-    (3, 4): "需要分片但 DF 置位(MTU 问题)", (3, 9): "网络被管理禁止", (3, 10): "主机被管理禁止",
-    (3, 13): "通信被管理过滤", (11, 0): "TTL 超时(可能存在路由环)",
-}
+#: ICMP 类型/代码 → 展示含义的 copy 表 key（``icmp_code.<type>.<code>``）。
+#: 值本身放在 copy 表；这里只维护「哪些 (type, code) 有专名」。
+ICMP_CODES = {(3, 0), (3, 1), (3, 2), (3, 3), (3, 4), (3, 9), (3, 10), (3, 13), (11, 0)}
+
+
+def _t(section: str, key: str, **args) -> str:
+    """从 copy 表取文案（缺失时回退成 key 本身，保证渲染不抛异常）。
+
+    Args:
+        section: copy 表 section 名。
+        key: section 内的键。
+        **args: ``{name}`` 占位符实参。
+
+    Returns:
+        str: 可直接展示的中文文案。
+    """
+    return _copy_text(section, key, **args)
 
 SEV_ORDER = {"严重": 0, "警告": 1, "提示": 2, "—": 3}
 
@@ -532,10 +546,12 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             st["icmp_packets"] += 1
             st["icmp_types"][icmp_type] += 1
             if icmp_type in ("3", "11") and len(st["icmp_detail"]) < 60:
+                code = r.get("icmp.code", "")
+                key = (int(_num(icmp_type)), int(_num(code)))
+                desc = (_t("icmp_code", f"{key[0]}.{key[1]}") if key in ICMP_CODES
+                        else f"ICMP type {icmp_type}/{code}")
                 st["icmp_detail"].append({
-                    "type": icmp_type, "code": r.get("icmp.code", ""),
-                    "desc": ICMP_CODES.get((int(_num(icmp_type)), int(_num(r.get("icmp.code")))),
-                                           f"ICMP type {icmp_type}/{r.get('icmp.code', '')}"),
+                    "type": icmp_type, "code": code, "desc": desc,
                     "src": src, "dst": dst, "frame": frame,
                 })
 
@@ -701,9 +717,10 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         streams: :func:`_stream_rows` 聚合出的会话列表。
 
     Returns:
-        list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``，
-            全部是**中文文案**（历史包袱，PR2 起改由规则引擎产出 ``findings_v2``）。
-            没有异常时仍会有一条「安全观察」行，表示「检查过，没发现」。
+        list[dict]: 每项 ``{"layer", "category", "severity", "finding", "advice", "evidence"}``。
+            ``finding`` / ``evidence`` / ``advice`` 的中文全部来自
+            ``core/copy/zh-CN.json``（section：``finding`` / ``evidence`` / ``advice``），
+            本模块只保留 key 与占位符实参。
 
     Note:
         ``severity`` 有三种非故障取值：``"严重"/"警告"/"提示"`` 之外，
@@ -713,27 +730,32 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         中性行（``"—"``）的保留与否**不在产出的位置决定**，而是最后按 ``category``
         统一裁定：同类别只要出现过故障行，中性行一律丢弃。否则会出现
         「传输质量正常」与「出现 TCP 零窗口」并列这种自相矛盾的报告。
+
+        ``layer`` / ``category`` / ``severity`` 三个字段是**结构化标识**（既被
+        ``verdict`` / ``legacy_map`` 当键匹配，也直接进报告表格）：它们不是本轮
+        可迁移的「文案」，改值会连带改变判定与映射，因此保留在代码里。
     """
     rows: list[dict] = []
-    takes = st["duration"] or 0
 
     # ============ L4 连接建立 ============
     if m["streams_total"] == 0:
         rows.append(_row("L4 传输层", "TCP", "连接建立",
-                         "未检测到 TCP 会话（抓包周期内无 TCP 流量）", NO_SAMPLE_SEVERITY,
-                         f"报文 {st['packets']} 个", "确认抓包网卡与过滤器是否选对"))
+                         _t("finding", "connect.no_sample"), NO_SAMPLE_SEVERITY,
+                         _t("evidence", "connect.no_sample", packets=st["packets"]),
+                         _t("advice", "L4.CONNECT.ADVICE.NO_SAMPLE")))
     else:
         if m["conn_fail"]:
             bad = [x for x in streams if "建连无响应" in x["flags"]][:3]
-            detail = "；".join(f"{x['server']}:{x['dport']}（SYN {x['packets']} 包）" for x in bad)
+            detail = "；".join(
+                _t("evidence", "connect.no_response_item", server=x["server"],
+                   dport=x["dport"], count=x["packets"]) for x in bad)
             frames = ",".join(f"#{f}" for f in (bad[0].get("frames") or [])[:3]) if bad else "-"
             rows.append(_row(
                 "L4 传输层", "TCP", "连接建立",
-                f"{m['conn_fail']} 个连接发出 SYN 后始终没有收到回应，TCP 三次握手未完成",
+                _t("finding", "connect.no_response", conn_fail=m["conn_fail"]),
                 "严重",
-                f"{detail}｜帧 {frames}",
-                "先用「链路体检」测目标端口是否可达；再查中间防火墙/安全组是否放行该端口、"
-                "目标服务是否只监听 127.0.0.1、路由是否回指正确。"))
+                _t("evidence", "connect.no_response", detail=detail, frames=frames),
+                _t("advice", "L4.CONNECT.ADVICE.NO_RESPONSE")))
         # 证据只列「握手期被拒」的流，与 conn_refused 的口径保持一致；
         # 若还按 x["rst"] 取，会把正常关闭的 RST 流写进证据里，读者会以为它也拒绝了连接。
         refused = [s for s in st["streams"].values() if s.get("rst_hs")][:3]
@@ -741,31 +763,32 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
             detail = "；".join(f"{x['server']}:{x['dport']}" for x in refused)
             rows.append(_row(
                 "L4 传输层", "TCP", "连接建立",
-                f"{m['conn_refused']} 个连接被对端 RST 重置（对方明确拒绝）",
+                _t("finding", "connect.refused", conn_refused=m["conn_refused"]),
                 "警告" if m["conn_refused"] >= 3 else "提示",
-                detail, "说明网络是通的、但端口没有服务在监听（或触发了限流/ACL 拒绝）。"
-                        "确认服务进程是否启动、监听地址与端口是否正确。"))
+                detail, _t("advice", "L4.CONNECT.ADVICE.RST")))
         if m["hs_avg_ms"] and m["hs_avg_ms"] >= 300:
             sev = "警告" if m["hs_avg_ms"] < 800 else "严重"
             rows.append(_row(
                 "L4 传输层", "TCP", "连接建立",
-                f"TCP 握手平均 {m['hs_avg_ms']:.0f}ms、最大 {m['hs_max_ms']:.0f}ms，"
-                f"抖动 {m['hs_jitter_ms']:.0f}ms", sev,
-                f"共 {sum(1 for x in streams if x['handshake_ms'] is not None)} 个完整握手样本",
-                "握手慢=syn/syn-ack 往返慢。跨地域/跨国访问属正常；同城专线出现该值，"
-                "检查链路质量、是否绕行、是否有代理或 VPN 中转。"))
+                _t("finding", "connect.slow", avg=m["hs_avg_ms"], max=m["hs_max_ms"],
+                   jitter=m["hs_jitter_ms"]), sev,
+                _t("evidence", "connect.slow",
+                   count=sum(1 for x in streams if x["handshake_ms"] is not None)),
+                _t("advice", "L4.CONNECT.ADVICE.SLOW_HANDSHAKE")))
         # 中性行照常产出，是否该留下由函数末尾的「阶段二」统一裁定。
         # 就地判断靠不住：后面还可能追加同类别故障行（零窗口就是这么漏的）。
-        note = f"其中 {m['conn_refused']} 个被 RST（偶发，多为对端主动关闭）" \
-            if m["conn_refused"] else "—"
+        note = (_t("evidence", "connect.refused_note", count=m["conn_refused"])
+                if m["conn_refused"] else "—")
         rows.append(_row("L4 传输层", "TCP", "连接建立",
-                         f"建连正常（{m['streams_total']} 个会话，握手平均 "
-                         f"{m['hs_avg_ms']:.0f}ms）", NEUTRAL_SEVERITY, note, "无需处理"))
+                         _t("finding", "connect.ok", streams_total=m["streams_total"],
+                            hs_avg=m["hs_avg_ms"]),
+                         NEUTRAL_SEVERITY, note, _t("advice", "none")))
 
     # ============ L4 传输质量 ============
     if st["tcp_packets"] == 0:
-        rows.append(_row("L4 传输层", "TCP", "传输质量", "未检测到 TCP 报文",
-                         NO_SAMPLE_SEVERITY, "—", "确认抓包过滤器"))
+        rows.append(_row("L4 传输层", "TCP", "传输质量",
+                         _t("finding", "transport.no_sample"), NO_SAMPLE_SEVERITY, "—",
+                         _t("advice", "L4.TRANSPORT.ADVICE.NO_SAMPLE")))
     else:
         rr = m["retrans_rate"]
         if rr >= 5:
@@ -778,61 +801,68 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
             sev = "—"
         if sev != "—":
             top = [x for x in streams if x["retrans"]][:3]
-            detail = "；".join(f"Stream {x['stream']} {x['client']}→{x['server']}:{x['dport']} "
-                               f"重传 {x['retrans']} 次" for x in top) or "-"
+            detail = "；".join(
+                _t("evidence", "transport.retrans", stream=x["stream"], client=x["client"],
+                   server=x["server"], dport=x["dport"], retrans=x["retrans"])
+                for x in top) or "-"
             rows.append(_row(
                 "L4 传输层", "TCP", "传输质量",
-                f"TCP 重传率 {rr:.2f}%（{st['retrans']}/{st['tcp_packets']} 个报文），"
-                f"乱序 {m['ooo_rate']:.2f}%，重复 ACK {m['dup_ack_rate']:.2f}%", sev,
-                detail,
-                "重传=发出去的数据没收到确认，等于丢包。先看是否集中在少数对端（对端或中间链路问题），"
-                "再看是否全网段都高（本机网卡/上行链路问题）。排查顺序：网线/光模块 → 交换机端口"
-                "（CRC 错包、双工不匹配）→ 无线信号 → 运营商链路。"))
+                _t("finding", "transport.retrans", rate=rr, retrans=st["retrans"],
+                   tcp_packets=st["tcp_packets"], ooo=m["ooo_rate"], dup=m["dup_ack_rate"]),
+                sev, detail,
+                _t("advice", "L4.RETRANS.ADVICE")))
         else:
             rows.append(_row("L4 传输层", "TCP", "传输质量",
-                             f"传输质量正常（重传率 {rr:.2f}%，乱序 {m['ooo_rate']:.2f}%）",
-                             NEUTRAL_SEVERITY, f"{st['tcp_packets']} 个 TCP 报文", "无需处理"))
+                             _t("finding", "transport.ok", rate=rr, ooo=m["ooo_rate"]),
+                             NEUTRAL_SEVERITY,
+                             _t("evidence", "transport.ok", tcp_packets=st["tcp_packets"]),
+                             _t("advice", "none")))
         if st["zero_win"] >= 3 or st["win_full"] >= 10:
             rows.append(_row(
                 "L4 传输层", "TCP", "传输质量",
-                f"出现 TCP 零窗口 {st['zero_win']} 次、窗口满 {st['win_full']} 次", "警告",
-                "零窗口=接收方缓冲区被塞满，发送方只能暂停",
-                "这不是网络慢，是接收端应用处理不过来（线程池满、磁盘 IO 慢、GC 停顿）。"
-                "排查服务端应用日志与 CPU/IO，而不是查网络。"))
+                _t("finding", "transport.zero_win", zero_win=st["zero_win"],
+                   win_full=st["win_full"]), "警告",
+                _t("evidence", "transport.zero_win"),
+                _t("advice", "L4.ZEROWIN.ADVICE")))
 
     # ============ L3 网络层 ============
     if m["icmp_unreach"] or m["icmp_timeout"]:
         items = st["icmp_detail"][:3]
-        detail = "；".join(f"{i['src']}→{i['dst']} {i['desc']}(帧 #{i['frame']})" for i in items)
-        mtu_hit = any("MTU" in i["desc"] or "分片" in i["desc"] for i in st["icmp_detail"])
+        detail = "；".join(
+            _t("evidence", "net.icmp", src=i["src"], dst=i["dst"], desc=i["desc"],
+               frame=i["frame"]) for i in items)
+        # 旧实现按 desc 里有没有「MTU/分片」判是否升级严重度；文案迁到 copy 表后
+        # 不能再靠文字判（改文案会改判定），改按 ICMP 类型码 (type 3, code 4) 判，
+        # 语义等价（只有这一条 desc 提到 MTU/分片）。
+        mtu_hit = any(str(i["type"]) == "3" and str(i["code"]) == "4"
+                      for i in st["icmp_detail"])
+        finding = _t("finding", "net.icmp", icmp_unreach=m["icmp_unreach"],
+                     icmp_timeout=m["icmp_timeout"])
+        if mtu_hit:
+            finding += _t("finding", "net.icmp_mtu")
         rows.append(_row(
-            "L3 网络层", "ICMP", "网络可达性",
-            f"收到 {m['icmp_unreach']} 条 ICMP 不可达、{m['icmp_timeout']} 条超时"
-            + ("，其中包含「需要分片」提示 → 典型 MTU/分片问题" if mtu_hit else ""),
+            "L3 网络层", "ICMP", "网络可达性", finding,
             "严重" if mtu_hit else "警告", detail,
-            "「端口不可达」= 网络通但服务没起；「主机/网络不可达」= 路由或防火墙拦截；"
-            "「需要分片」= 路径 MTU 小于报文长度，需在 VPN/隧道接口下调小 MTU（如 1400）或修正 MSS。"))
+            _t("advice", "L3.ICMP.ADVICE")))
     else:
         rows.append(_row("L3 网络层", "ICMP/IP", "网络可达性",
-                         "未收到 ICMP 不可达/超时，三层转发正常", "—", "—", "无需处理"))
+                         _t("finding", "net.icmp_ok"), "—", "—", _t("advice", "none")))
 
     if m["rtt_samples"] >= 5 and (m["rtt_avg_ms"] >= 300 or m["rtt_jitter_ms"] >= 80):
         rows.append(_row(
             "L3 网络层", "TCP/IP", "网络时延",
-            f"往返时延 RTT 平均 {m['rtt_avg_ms']:.0f}ms、P95 {m['rtt_p95_ms']:.0f}ms、"
-            f"最大 {m['rtt_max_ms']:.0f}ms，抖动 {m['rtt_jitter_ms']:.0f}ms",
+            _t("finding", "net.rtt", avg=m["rtt_avg_ms"], p95=m["rtt_p95_ms"],
+               max=m["rtt_max_ms"], jitter=m["rtt_jitter_ms"]),
             "警告" if m["rtt_avg_ms"] < 600 else "严重",
-            f"基于 {m['rtt_samples']} 个 ACK 采样",
-            "RTT 高且抖动小 → 物理距离/运营商路径长；RTT 抖动大 → 链路拥塞或无线信号不稳。"
-            "可用 tracert 定位是哪一跳开始变慢。"))
+            _t("evidence", "net.rtt", samples=m["rtt_samples"]),
+            _t("advice", "L3.RTT.ADVICE")))
 
     # ============ L7 域名解析 ============
     dns_q_total = sum(st["dns_q"].values())
     if dns_q_total == 0 and not st["dns_r"]:
         rows.append(_row("L7 应用层", "DNS", "域名解析",
-                         "未检测到 DNS 报文（可能全部走了 DoH/DoT 或使用 hosts 解析）",
-                         NO_SAMPLE_SEVERITY,
-                         "—", "如需验证 DNS，可在体检页直接测域名解析耗时"))
+                         _t("finding", "dns.no_sample"), NO_SAMPLE_SEVERITY,
+                         "—", _t("advice", "L7.DNS.ADVICE.NO_SAMPLE")))
     else:
         total = dns_q_total or sum(st["dns_r"].values())
         fail = m["dns_fail_rate"]
@@ -844,50 +874,51 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
             sev = "—"
         if sev != "—":
             top = st["dns_nx"].most_common(3)
-            detail = "；".join(f"{n} 失败 {c} 次" for n, c in top) or "-"
+            detail = "；".join(
+                _t("evidence", "dns.fail", name=n, count=c) for n, c in top) or "-"
             rows.append(_row(
                 "L7 应用层", "DNS", "域名解析",
-                f"域名解析失败率 {fail:.0f}%（NXDOMAIN {sum(st['dns_nx'].values())}/{total}）",
-                sev, detail,
-                "先确认 DNS 服务器地址是否写错、域名是否拼错；若配置正常且集中在随机域名，"
-                "再考虑 DNS 劫持或恶意程序。企业网内可对比 nslookup 与公共 DNS 的结果。"))
+                _t("finding", "dns.fail", rate=fail, nx=sum(st["dns_nx"].values()),
+                   total=total),
+                sev, detail, _t("advice", "L7.DNS.ADVICE.FAIL")))
         if m["dns_timeouts"] >= 3:
             rows.append(_row(
                 "L7 应用层", "DNS", "域名解析",
-                f"有 {m['dns_timeouts']} 次查询没有收到响应（超时）", "警告",
-                f"查询 {dns_q_total} 次 / 响应 {sum(st['dns_r'].values())} 次",
-                "DNS 丢包常见于：UDP 53 被中间设备限速、DNS 服务器过载、"
-                "或本地网络拥塞。可改用 TCP 查询或换备用 DNS 验证。"))
+                _t("finding", "dns.timeout", timeouts=m["dns_timeouts"]), "警告",
+                _t("evidence", "dns.timeout", queries=dns_q_total,
+                   responses=sum(st["dns_r"].values())),
+                _t("advice", "L7.DNS.ADVICE.TIMEOUT")))
         if m["dns_avg_ms"] and m["dns_avg_ms"] >= 300:
             rows.append(_row(
                 "L7 应用层", "DNS", "域名解析",
-                f"DNS 响应平均 {m['dns_avg_ms']:.0f}ms、最大 {m['dns_max_ms']:.0f}ms",
+                _t("finding", "dns.slow", avg=m["dns_avg_ms"], max=m["dns_max_ms"]),
                 "警告" if m["dns_avg_ms"] < 800 else "严重",
-                f"{len(st['dns_times'])} 个响应样本，DNS 服务器 "
-                f"{'、'.join(ip for ip, _ in st['dns_servers'].most_common(2)) or '-'}",
-                "打开网页前的第一段等待常来自这里。换更近的 DNS、开启本地缓存，"
-                "或检查 DNS 服务器到目标域名的递归解析是否绕行。"))
+                _t("evidence", "dns.slow", count=len(st["dns_times"]),
+                   servers="、".join(ip for ip, _ in st["dns_servers"].most_common(2)) or "-"),
+                _t("advice", "L7.DNS.ADVICE.SLOW")))
         rows.append(_row("L7 应用层", "DNS", "域名解析",
-                         f"解析正常（{dns_q_total or total} 次查询，平均 "
-                         f"{m['dns_avg_ms']:.0f}ms）", NEUTRAL_SEVERITY, "—", "无需处理"))
+                         _t("finding", "dns.ok", queries=dns_q_total or total,
+                            avg=m["dns_avg_ms"]),
+                         NEUTRAL_SEVERITY, "—", _t("advice", "none")))
 
     # ============ L7 HTTP 响应 ============
     if st["http_req"]:
         codes = st["http_codes"]
+        dist = "、".join(f"{k}×{v}" for k, v in codes.most_common(5))
         if m["http_err5"]:
             rows.append(_row(
                 "L7 应用层", "HTTP", "应用响应",
-                f"{m['http_err5']} 个请求返回 5xx（服务端错误，占 {m['http_err5_rate']:.0f}%）",
+                _t("finding", "http.5xx", http_err5=m["http_err5"],
+                   rate=m["http_err5_rate"]),
                 "严重" if m["http_err5_rate"] >= 10 else "警告",
-                "状态码分布：" + "、".join(f"{k}×{v}" for k, v in codes.most_common(5)),
-                "5xx 是服务端自己的问题，网络背锅不成立。按状态码查应用日志："
-                "500 看异常栈、502/504 看反向代理到后端的连通与超时、503 看是否过载/限流。"))
+                _t("evidence", "http.status_dist", dist=dist),
+                _t("advice", "L7.HTTP.ADVICE.5XX")))
         if m["http_err4"] and not m["http_err5"]:
             rows.append(_row(
                 "L7 应用层", "HTTP", "应用响应",
-                f"{m['http_err4']} 个请求返回 4xx（客户端/权限问题）", "提示",
-                "状态码分布：" + "、".join(f"{k}×{v}" for k, v in codes.most_common(5)),
-                "401/403 查认证与权限，404 查地址或路由，429 查限流。属于请求本身的问题，不是链路故障。"))
+                _t("finding", "http.4xx", http_err4=m["http_err4"]), "提示",
+                _t("evidence", "http.status_dist", dist=dist),
+                _t("advice", "L7.HTTP.ADVICE.4XX")))
         if m["http_avg_ms"] and (m["http_avg_ms"] >= 1000 or m["http_p95_ms"] >= 3000):
             slow = sorted([h for h in st["http_detail"] if h["ms"] > 0],
                           key=lambda x: -x["ms"])[:3]
@@ -895,32 +926,33 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                                for h in slow) or "-"
             rows.append(_row(
                 "L7 应用层", "HTTP", "应用响应",
-                f"HTTP 响应平均 {m['http_avg_ms']:.0f}ms、P95 {m['http_p95_ms']:.0f}ms、"
-                f"最慢 {m['http_max_ms']:.0f}ms", "警告", detail,
-                "先区分是「服务端算得慢」还是「网络传得慢」：看同一次请求的 TCP 握手 RTT，"
-                "若响应时间远大于 RTT，则是服务端处理慢（查慢查询、下游依赖、GC）。"))
+                _t("finding", "http.slow", avg=m["http_avg_ms"], p95=m["http_p95_ms"],
+                   max=m["http_max_ms"]), "警告", detail,
+                _t("advice", "L7.HTTP.ADVICE.SLOW")))
         rows.append(_row("L7 应用层", "HTTP", "应用响应",
-                         f"HTTP 响应正常（{st['http_req']} 个请求，平均 "
-                         f"{m['http_avg_ms']:.0f}ms）", NEUTRAL_SEVERITY, "—", "无需处理"))
+                         _t("finding", "http.ok", http_req=st["http_req"],
+                            avg=m["http_avg_ms"]),
+                         NEUTRAL_SEVERITY, "—", _t("advice", "none")))
     elif st["tls_sni"] or st["tls_alert"]:
         sev = "提示" if st["tls_alert"] >= 10 else "—"
-        rows.append(_row("L7 应用层", "TLS", "TLS 会话",
-                         f"检测到 TLS 流量（{sum(st['tls_sni'].values())} 个 SNI"
-                         + (f"，{st['tls_alert']} 条告警" if st["tls_alert"] else "") + "）",
-                         sev,
-                         "SNI：" + "、".join(n for n, _ in st["tls_sni"].most_common(3)) or "—",
-                         "少量 TLS 告警通常是正常的关闭通知。若告警量大或集中在单个站点，"
-                         "再查证书是否过期、域名是否匹配、协议/加密套件是否被中间设备拦截。"))
+        sni = sum(st["tls_sni"].values())
+        if st["tls_alert"]:
+            finding = _t("finding", "tls.session_alerts", sni=sni, alerts=st["tls_alert"])
+        else:
+            finding = _t("finding", "tls.session", sni=sni)
+        rows.append(_row("L7 应用层", "TLS", "TLS 会话", finding, sev,
+                         _t("evidence", "tls.sni",
+                            sni="、".join(n for n, _ in st["tls_sni"].most_common(3))),
+                         _t("advice", "L7.TLS.ADVICE")))
 
     # ============ L2 本地链路 ============
     no_reply = [ip for ip, n in st["arp_req"].items() if n >= 2 and ip not in st["arp_rep"]]
     if no_reply:
         rows.append(_row(
             "L2 本地链路", "ARP", "本地可达性",
-            f"{len(no_reply)} 个同网段地址的 ARP 请求没有得到应答", "警告",
+            _t("finding", "arp.no_reply", count=len(no_reply)), "警告",
             "、".join(no_reply[:5]),
-            "同网段内 ARP 不通，说明对方没开机、IP 冲突、或者接在了不同 VLAN。"
-            "如果这就是网关地址，那么整台机器的外网访问都会断。"))
+            _t("advice", "L2.ARP.ADVICE")))
 
     # ============ 安全观察（次要） ============
     sec: list[dict] = []
@@ -928,42 +960,51 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         ports = st["ext_ports"][ip]
         hit = [p for p in ports if _port(p) in SUSPICIOUS_PORTS]
         if hit:
-            desc = "、".join(f"{p}({SUSPICIOUS_PORTS[_port(p)]})" for p in sorted(hit, key=_port))
+            desc = "、".join(f"{p}({_t('suspicious_port', str(_port(p)))})"
+                             for p in sorted(hit, key=_port))
             sec.append(_row("安全观察", "TCP", "可疑外联",
-                            f"外联 {ip} 使用高危端口 {desc}，共 {pkts} 个报文", "警告",
-                            "帧 " + ",".join(f"#{f}" for f in st["ext_frames"][ip][:5]),
-                            "确认是否为业务需要；非业务用途时在防火墙阻断该方向，并在主机上定位进程。"))
+                            _t("finding", "sec.exfil", ip=ip, ports=desc, packets=pkts),
+                            "警告",
+                            _t("evidence", "sec.exfil",
+                               frames=",".join(f"#{f}" for f in st["ext_frames"][ip][:5])),
+                            _t("advice", "SEC.EXFIL.ADVICE")))
         elif len(ports) >= 15:
             sec.append(_row("安全观察", "TCP", "端口扫描",
-                            f"外联 {ip} 发散的端口达 {len(ports)} 个，疑似扫描", "提示",
-                            "帧 " + ",".join(f"#{f}" for f in st["ext_frames"][ip][:5]),
-                            "确认是否有资产测绘/漏扫任务在运行。"))
+                            _t("finding", "sec.scan", ip=ip, count=len(ports)), "提示",
+                            _t("evidence", "sec.scan",
+                               frames=",".join(f"#{f}" for f in st["ext_frames"][ip][:5])),
+                            _t("advice", "SEC.SCAN.ADVICE")))
     if st["basic_auth"]:
         it = st["basic_auth"][0]
         sec.append(_row("安全观察", "HTTP", "明文凭证",
-                        f"HTTP Basic 凭据明文传输（{it['host']}{it['uri'][:50]}）", "警告",
-                        f"帧 #{it['frame']}", "改用 HTTPS；该账号口令按已泄露处理。"))
+                        _t("finding", "sec.basic", host=it["host"], uri=it["uri"][:50]),
+                        "警告", _t("evidence", "sec.basic", frame=it["frame"]),
+                        _t("advice", "SEC.PLAINTEXT.ADVICE.BASIC")))
     if st["ftp_pass"]:
         it = st["ftp_pass"][0]
         sec.append(_row("安全观察", "FTP", "明文凭证",
-                        f"FTP 明文口令传输到 {it['dst']}", "警告",
-                        f"帧 #{it['frame']}", "改用 SFTP/FTPS，并重置口令。"))
+                        _t("finding", "sec.ftp", dst=it["dst"]), "警告",
+                        _t("evidence", "sec.ftp", frame=it["frame"]),
+                        _t("advice", "SEC.PLAINTEXT.ADVICE.FTP")))
     if st["uri_secret"]:
         it = st["uri_secret"][0]
         sec.append(_row("安全观察", "HTTP", "明文凭证",
-                        f"URL 参数携带敏感字段（{it['method']} {it['host']}{it['uri'][:50]}）",
-                        "提示", f"帧 #{it['frame']}", "改为 POST + HTTPS，避免凭据进入 URL 与日志。"))
+                        _t("finding", "sec.url", method=it["method"], host=it["host"],
+                           uri=it["uri"][:50]), "提示",
+                        _t("evidence", "sec.url", frame=it["frame"]),
+                        _t("advice", "SEC.PLAINTEXT.ADVICE.URL")))
     if st["telnet_frames"]:
         sec.append(_row("安全观察", "Telnet", "明文凭证",
-                        f"存在 Telnet 明文会话（{len(st['telnet_frames'])} 个报文）", "提示",
-                        "帧 " + ",".join(f"#{f}" for f in st["telnet_frames"][:5]),
-                        "管理设备改用 SSH。"))
+                        _t("finding", "sec.telnet", count=len(st["telnet_frames"])), "提示",
+                        _t("evidence", "sec.telnet",
+                           frames=",".join(f"#{f}" for f in st["telnet_frames"][:5])),
+                        _t("advice", "SEC.PLAINTEXT.ADVICE.TELNET")))
     if sec:
         rows.extend(sec)
     else:
         rows.append(_row("安全观察", "—", "安全观察",
-                         "未发现可疑外联与明文认证（此项为附带观察，不是本工具主线）",
-                         NEUTRAL_SEVERITY, "—", "无需处理"))
+                         _t("finding", "sec.none"), NEUTRAL_SEVERITY, "—",
+                         _t("advice", "none")))
 
     # ============ 阶段二：抑制自相矛盾的中性行 ============
     # 为什么不在产出的地方就地判断：中性行与故障行的产出顺序没有保证。
@@ -982,20 +1023,33 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
 
 
 def _cred_events(st: dict) -> list[dict]:
+    """把明文凭证事件整理成报告「技术明细」用的行（文案来自 copy 表）。
+
+    Args:
+        st: :func:`collect` 的统计字典；读取 ``basic_auth`` / ``ftp_pass`` /
+            ``uri_secret`` / ``telnet_frames`` 四类事件。
+
+    Returns:
+        list[dict]: 每项 ``{"type", "where", "detail", "frame"}``；口令只保留
+            前两位 + 星号，避免把明文写进报告。
+    """
     out: list[dict] = []
     for item in st.get("basic_auth", [])[:5]:
         out.append({"type": "HTTP Basic", "where": f"{item['host']}{item['uri'][:50]}",
-                    "detail": "Authorization 头 base64 明文", "frame": item["frame"]})
+                    "detail": _t("cred_event", "basic_detail"), "frame": item["frame"]})
     for item in st.get("ftp_pass", [])[:5]:
         arg = (item["arg"][:2] + "***") if item.get("arg") else "***"
         out.append({"type": "FTP PASS", "where": str(item["dst"]),
-                    "detail": f"口令 {arg}", "frame": item["frame"]})
+                    "detail": _t("cred_event", "ftp_detail", arg=arg),
+                    "frame": item["frame"]})
     for item in st.get("uri_secret", [])[:5]:
-        out.append({"type": "URL 敏感参数", "where": f"{item['host']}{item['uri'][:50]}",
+        out.append({"type": _t("cred_event", "url_type"),
+                    "where": f"{item['host']}{item['uri'][:50]}",
                     "detail": item.get("method", "GET"), "frame": item["frame"]})
     if st.get("telnet_frames"):
-        out.append({"type": "Telnet 会话", "where": "—",
-                    "detail": f"{len(st['telnet_frames'])} 个明文报文",
+        out.append({"type": _t("cred_event", "telnet_type"), "where": "—",
+                    "detail": _t("cred_event", "telnet_detail",
+                                 count=len(st["telnet_frames"])),
                     "frame": st["telnet_frames"][0]})
     return out
 
@@ -1143,7 +1197,7 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
     dns_q_total = sum(st["dns_q"].values())
     nx_total = sum(st["dns_nx"].values())
     summary = {
-        "target": target or "全网",
+        "target": target or _t("common", "all_network"),
         "pcap_file": str(pcap),
         "critical_count": critical,
         "warning_count": warning,
