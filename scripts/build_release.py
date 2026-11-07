@@ -239,7 +239,7 @@ def package_readme(version: str, mode: str) -> str:
             "这个包是内部离线包：含便携 Python 3.11.9 与 Wireshark 4.7.4（tshark），"
             "但**不含 Npcap 安装包**。请勿把它当作公开 Release 资产上传。"
         )
-        first_step = "双击 `自检.bat`：逐项检查 Python / tshark / Npcap / 管理员权限，并用示例抓包跑一次离线分析。"
+        first_step = "双击 `自检.bat`：逐项检查 Python / tshark / Npcap / 管理员权限，并用示例抓包跑一次「分析抓包文件」（离线分析）。"
         launch = "双击 `NetDiag.vbs`（推荐，无黑窗、自动提权）或 `start.bat`（带窗口，便于看日志）；浏览器自动打开 http://127.0.0.1:8787/ 。"
         py_tree = "  tools\\python\\      便携 Python 3.11.9（包内自带）"
     else:
@@ -248,7 +248,7 @@ def package_readme(version: str, mode: str) -> str:
             "Wireshark 4.7.4（tshark）与 npcap-1.79.exe。\n"
             "***** 只能用于组织内部 / 离线机器 **，禁止上传到公开仓库、公开 Release、网盘或外网。 *****"
         )
-        first_step = "双击 `自检.bat`：逐项检查 Python / tshark / Npcap / 管理员权限，并用示例抓包跑一次离线分析。"
+        first_step = "双击 `自检.bat`：逐项检查 Python / tshark / Npcap / 管理员权限，并用示例抓包跑一次「分析抓包文件」（离线分析）。"
         launch = "双击 `NetDiag.vbs`（推荐，无黑窗、自动提权）或 `start.bat`（带窗口，便于看日志）；浏览器自动打开 http://127.0.0.1:8787/ 。"
         py_tree = "  tools\\python\\      便携 Python 3.11.9（包内自带）"
 
@@ -258,27 +258,27 @@ def package_readme(version: str, mode: str) -> str:
             "   安装时勾选 Add python.exe to PATH，然后在包根目录用 python 命令。\n"
         )
         tshark_hint = (
-            "2) 离线分析：需要 tshark。安装 Wireshark https://www.wireshark.org/download.html\n"
+            "2) 分析抓包文件（离线分析）：需要 tshark。安装 Wireshark https://www.wireshark.org/download.html\n"
             "   （安装时勾选 TShark），或把环境变量 TSHARK_PATH 指向 tshark.exe。\n"
         )
         npcap_hint = (
-            "3) 实时抓包 / 被动监听：需要 Npcap 驱动，从 https://npcap.com/#download 下载安装；\n"
-            "   并需要管理员权限。离线分析不需要 Npcap。\n"
+            "3) 全网体检（全网扫描）/ 单目标诊断（定向抓包）/ 通信观察（被动监听）：需要 Npcap 驱动，从 https://npcap.com/#download 下载安装；\n"
+            "   并需要管理员权限。分析抓包文件（离线分析）不需要 Npcap。\n"
         )
     elif mode == MODE_INTERNAL:
         py_hint = "1) Python 3.11+：包内已带 tools\\python，无需另装。\n"
-        tshark_hint = "2) 离线分析：包内已带 tools\\WiresharkPortable\\...\\tshark.exe，无需另装。\n"
+        tshark_hint = "2) 分析抓包文件（离线分析）：包内已带 tools\\WiresharkPortable\\...\\tshark.exe，无需另装。\n"
         npcap_hint = (
-            "3) 实时抓包 / 被动监听：需要 Npcap 驱动。本包不含安装器，\n"
+            "3) 全网体检（全网扫描）/ 单目标诊断（定向抓包）/ 通信观察（被动监听）：需要 Npcap 驱动。本包不含安装器，\n"
             "   请从 https://npcap.com/#download 下载安装；并需要管理员权限。\n"
-            "   离线分析不需要 Npcap。\n"
+            "   分析抓包文件（离线分析）不需要 Npcap。\n"
         )
     else:
         py_hint = "1) Python 3.11+：包内已带 tools\\python，无需另装。\n"
-        tshark_hint = "2) 离线分析：包内已带 tools\\WiresharkPortable\\...\\tshark.exe，无需另装。\n"
+        tshark_hint = "2) 分析抓包文件（离线分析）：包内已带 tools\\WiresharkPortable\\...\\tshark.exe，无需另装。\n"
         npcap_hint = (
-            "3) 实时抓包 / 被动监听：包内带 tools\\npcap-1.79.exe，双击安装即可；\n"
-            "   并需要管理员权限。离线分析不需要 Npcap。\n"
+            "3) 全网体检（全网扫描）/ 单目标诊断（定向抓包）/ 通信观察（被动监听）：包内带 tools\\npcap-1.79.exe，双击安装即可；\n"
+            "   并需要管理员权限。分析抓包文件（离线分析）不需要 Npcap。\n"
             "   Npcap 免费版不允许对外再分发：这个安装器只能随本包在组织内部使用。\n"
         )
 
@@ -296,7 +296,7 @@ def package_readme(version: str, mode: str) -> str:
 ------------------------------------------------
 {first_step}
 看到 `RESULT: USABLE` 表示**核心功能可用**；若 `tshark` / `Npcap` / 管理员 显示 WARN，
-则对应能力暂不可用（离线分析 / 实时抓包 / 被动监听），按 WARN 提示补齐后重跑即可。
+则对应能力暂不可用（分析抓包文件、全网体检、单目标诊断、通信观察），按 WARN 提示补齐后重跑即可。
 {launch}
 
 运行前提
