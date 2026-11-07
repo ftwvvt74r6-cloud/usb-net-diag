@@ -143,6 +143,40 @@ def _flag(v) -> bool:
     return _parse_flag(v)
 
 
+def _flag_occurrences(v) -> int:
+    """tshark 逗号聚合值里「真」分段的个数。
+
+    ``tcp.analysis.duplicate_ack`` 的取值是 ``"1,1"`` 这种聚合串：它表示同一帧里
+    出现了两次重复 ACK。方向判定只看「帧数 > 0」，但排障证据需要区分
+    「2 帧 / 4 次」，所以这里单独数出现次数。
+
+    Args:
+        v: tshark 原始值，可能是 ``"1"`` / ``"1,1"`` / ``"0"`` / ``""`` / ``None``。
+
+    Returns:
+        int: 判为真的分段数（``"1,1"`` → 2；空值或全假 → 0）。
+    """
+    return sum(1 for part in str(v or "").split(",") if _parse_flag(part))
+
+
+def _new_direction_stats() -> dict:
+    """分方向统计的初始结构：``c2s`` / ``s2c`` 各四项，外加 ``unknown`` 帧数。
+
+    这是 :func:`collect` 的**内部中间结果**，只挂在 ``st["dir"]`` 上供
+    :func:`build_findings` 读取；**不进** ``meta`` / ``metrics``，所以不会改变
+    报告 JSON 的形状。
+
+    Returns:
+        dict: ``{"c2s": {...}, "s2c": {...}, "unknown": 0}``；每侧含
+            ``retrans``（数据重传帧数）/ ``dup_ack``（重复 ACK 帧数）/
+            ``dup_ack_occ``（重复 ACK 出现次数）/ ``packets``（该方向 TCP 帧数）。
+    """
+    def _side() -> dict:
+        return {"retrans": 0, "dup_ack": 0, "dup_ack_occ": 0, "packets": 0}
+
+    return {"c2s": _side(), "s2c": _side(), "unknown": 0}
+
+
 def _port(v) -> int:
     """端口转 int：tshark 偶尔给空值或逗号聚合值，别让一行脏数据毁掉整次分析。"""
     try:
@@ -335,6 +369,8 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
         "retrans": 0, "syn_retrans": 0, "fast_retrans": 0, "dup_ack": 0, "ooo": 0, "lost": 0,
         "zero_win": 0, "win_full": 0, "rst": 0, "syn": 0, "synack": 0, "fin": 0,
         "streams": {},
+        # 分方向统计（内部）：只进 build_findings 的重传文案，不进报告 JSON
+        "dir": _new_direction_stats(),
         "dns_q": Counter(), "dns_r": Counter(), "dns_nx": Counter(), "dns_rcode": Counter(),
         "dns_times": [], "dns_detail": [], "nx_frames": defaultdict(list),
         "dns_servers": Counter(),
@@ -351,6 +387,9 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
     }
 
     sink: dict = {}
+    # 每条流的方向基准：看到 SYN（客户端发起）或 SYN-ACK（服务端回应）后才确定。
+    # 此前抓到的帧属于「方向不明」，计入 st["dir"]["unknown"]，不用端口大小去猜。
+    dir_client: dict[str, str] = {}
     header: list[str] | None = None
     reader_lines = iter_lines(args, timeout=1800, sink=sink)
 
@@ -410,6 +449,14 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             is_rst, is_fin = _flag(r.get("tcp.flags.reset")), _flag(r.get("tcp.flags.fin"))
             tlen = int(_num(r.get("tcp.len")))
 
+            # 方向基准只认握手：客户端 SYN 的发起方、SYN-ACK 的目的方就是客户端。
+            # 抓包从中途开始（没看到握手）时保持未知，不拿端口启发式猜方向。
+            if is_syn:
+                if is_ack:
+                    dir_client.setdefault(sid, dst)
+                else:
+                    dir_client[sid] = src
+
             if not s["client"]:
                 try:
                     if int(sport or 0) > int(dport or 0):
@@ -448,7 +495,9 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             if is_fin:
                 st["fin"] += 1
                 s["fin"] += 1
-            if _flag(r.get("tcp.analysis.retransmission")):
+            is_retrans = _flag(r.get("tcp.analysis.retransmission"))
+            dup_raw = r.get("tcp.analysis.duplicate_ack", "")
+            if is_retrans:
                 if is_syn:
                     # SYN 重发说明对端没回应（连接建立问题），不能算作链路丢包
                     st["syn_retrans"] += 1
@@ -459,7 +508,7 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             if _flag(r.get("tcp.analysis.fast_retransmission")):
                 st["fast_retrans"] += 1
                 s["fast_retrans"] += 1
-            if _flag(r.get("tcp.analysis.duplicate_ack")):
+            if _flag(dup_raw):
                 st["dup_ack"] += 1
                 s["dup_ack"] += 1
             if _flag(r.get("tcp.analysis.out_of_order")):
@@ -474,6 +523,18 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
             if _flag(r.get("tcp.analysis.lost_segment")):
                 st["lost"] += 1
                 s["lost"] += 1
+
+            # 分方向累计：方向未定的帧只计 unknown，不参与重传/重复 ACK 归属。
+            if sid in dir_client:
+                bucket = st["dir"]["c2s" if src == dir_client[sid] else "s2c"]
+                bucket["packets"] += 1
+                if is_retrans and not is_syn:
+                    bucket["retrans"] += 1
+                if _flag(dup_raw):
+                    bucket["dup_ack"] += 1
+                    bucket["dup_ack_occ"] += _flag_occurrences(dup_raw)
+            else:
+                st["dir"]["unknown"] += 1
             rtt = _num(r.get("tcp.analysis.ack_rtt"))
             if rtt > 0:
                 s["rtt"].append(rtt * 1000.0)
@@ -748,11 +809,46 @@ def _metrics(st: dict, streams: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- 分层发现
 
+def _retrans_direction(st: dict) -> str | None:
+    """按重复 ACK 证据判定重传集中在哪个方向。
+
+    重复 ACK 是「对端看到了空洞」的信号：``s2c.dup_ack>0`` 说明上行缺段
+    （客户端在重传），``c2s.dup_ack>0`` 说明下行缺段（服务端在重传）。
+    重传本身只说明「本端重发了」，不能单独定向 —— 可能是本端上行丢，
+    也可能是对端 ACK 丢 —— 所以必须两侧证据同时成立才下方向结论。
+
+    判定只用**帧数 > 0**，不用出现次数：``"1,1"`` 会让出现次数变 2，
+    但方向是否存在与次数无关。
+
+    Args:
+        st: :func:`collect` 的统计字典；``st["dir"]`` 缺失（旧测试的合成 st）
+            时视为方向未定。
+
+    Returns:
+        str | None: ``"up"`` / ``"down"`` / ``"bidir"``；证据不足返回 ``None``，
+            调用方退回现有通用重传行，不添加方向结论。
+    """
+    dirs = st.get("dir") or {}
+    c2s = dirs.get("c2s") or {}
+    s2c = dirs.get("s2c") or {}
+    up = c2s.get("retrans", 0) > 0 and s2c.get("dup_ack", 0) > 0
+    down = s2c.get("retrans", 0) > 0 and c2s.get("dup_ack", 0) > 0
+    if up and down:
+        return "bidir"
+    if up:
+        return "up"
+    if down:
+        return "down"
+    return None
+
+
 def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
     """把统计聚合翻译成「按层归类的发现」，供 UI 与报告消费。
 
     Args:
-        st: :func:`collect` 的统计字典（各类计数器）。
+        st: :func:`collect` 的统计字典（各类计数器）。其中 ``st["dir"]`` 是分方向
+            统计（``c2s`` / ``s2c`` 的数据重传、重复 ACK、帧数与方向未定的
+            ``unknown`` 帧数）；缺失时（旧调用方的合成 st）退回通用重传行。
         m: :func:`_metrics` 算出的比率与时延指标（``retrans_rate`` / ``rtt_avg_ms`` 等）。
         streams: :func:`_stream_rows` 聚合出的会话列表。
 
@@ -774,6 +870,9 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
         ``layer`` / ``category`` / ``severity`` 三个字段是**结构化标识**（既被
         ``verdict`` / ``legacy_map`` 当键匹配，也直接进报告表格）：它们不是本轮
         可迁移的「文案」，改值会连带改变判定与映射，因此保留在代码里。
+
+        方向判定（见 :func:`_retrans_direction`）只换重传行的**文案与建议**，
+        不改严重度阈值，也不产生新行：没有重复 ACK 证据时仍是原来的通用行。
     """
     rows: list[dict] = []
 
@@ -849,12 +948,37 @@ def build_findings(st: dict, m: dict, streams: list[dict]) -> list[dict]:
                 _t("evidence", "transport.retrans", stream=x["stream"], client=x["client"],
                    server=x["server"], dport=x["dport"], retrans=x["retrans"])
                 for x in top) or "-"
+            # 方向只改文案与建议，不改严重度：没有 dup-ACK 证据时用原通用行。
+            dirs = st.get("dir") or {}
+            c2s = dirs.get("c2s") or {}
+            s2c = dirs.get("s2c") or {}
+            direction = _retrans_direction(st)
+            if direction == "bidir":
+                finding = _t("finding", "transport.retrans_bidir", retrans_rate=rr,
+                             c2s_retrans=c2s.get("retrans", 0),
+                             s2c_retrans=s2c.get("retrans", 0),
+                             c2s_dup_ack=c2s.get("dup_ack", 0),
+                             s2c_dup_ack=s2c.get("dup_ack", 0))
+                advice_key = "L4.RETRANS.ADVICE.BIDIR"
+            elif direction == "up":
+                finding = _t("finding", "transport.retrans_up", retrans_rate=rr,
+                             c2s_retrans=c2s.get("retrans", 0),
+                             s2c_dup_ack=s2c.get("dup_ack", 0))
+                advice_key = "L4.RETRANS.ADVICE.UP"
+            elif direction == "down":
+                finding = _t("finding", "transport.retrans_down", retrans_rate=rr,
+                             s2c_retrans=s2c.get("retrans", 0),
+                             c2s_dup_ack=c2s.get("dup_ack", 0))
+                advice_key = "L4.RETRANS.ADVICE.DOWN"
+            else:
+                # 通用行的实参与文案保持原样（V5：demo 逐字节不变）
+                finding = _t("finding", "transport.retrans", rate=rr,
+                             retrans=st["retrans"], tcp_packets=st["tcp_packets"],
+                             ooo=m["ooo_rate"], dup=m["dup_ack_rate"])
+                advice_key = "L4.RETRANS.ADVICE"
             rows.append(_row(
-                "L4 传输层", "TCP", "传输质量",
-                _t("finding", "transport.retrans", rate=rr, retrans=st["retrans"],
-                   tcp_packets=st["tcp_packets"], ooo=m["ooo_rate"], dup=m["dup_ack_rate"]),
-                sev, detail,
-                _t("advice", "L4.RETRANS.ADVICE")))
+                "L4 传输层", "TCP", "传输质量", finding, sev, detail,
+                _t("advice", advice_key)))
         else:
             rows.append(_row("L4 传输层", "TCP", "传输质量",
                              _t("finding", "transport.ok", rate=rr, ooo=m["ooo_rate"]),
