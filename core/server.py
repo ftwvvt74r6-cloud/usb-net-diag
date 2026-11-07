@@ -480,6 +480,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if self.close_connection:
+            # 早退 body 超过丢弃上限/分块传输时由 _discard_body 置位：
+            # 必须明确告诉客户端不再复用连接，否则 keep-alive 会读到残留字节。
+            self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-store")
         for k, v in self.SECURITY_HEADERS:
             self.send_header(k, v)
@@ -504,6 +508,17 @@ class Handler(BaseHTTPRequestHandler):
         """
         return
 
+    def _declared_body_length(self) -> int:
+        """当前请求声明的 ``Content-Length``（缺失或非法按 0）。
+
+        Returns:
+            int: 非负字节数；解析失败不抛异常。
+        """
+        try:
+            return max(0, int(self.headers.get("Content-Length") or 0))
+        except ValueError:
+            return 0
+
     def _read_json(self) -> dict:
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -518,6 +533,7 @@ class Handler(BaseHTTPRequestHandler):
             raise BodyTooLarge(f"请求体 {length} 字节，超过 {MAX_JSON_BODY // (1 << 20)}MB 上限")
         try:
             raw = self.rfile.read(length)
+            self._body_left = max(0, getattr(self, "_body_left", length) - len(raw))
             if not raw:
                 return {}
             data = json.loads(raw.decode("utf-8"))
@@ -525,17 +541,39 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError, UnicodeDecodeError):
             return {}
 
+    def _discard_body(self) -> None:
+        """丢弃本请求尚未读取的 body，防止残留字节被当成下一条请求执行。
+
+        早退（403 / 扩展名不符等）不读 body 时，``BaseHTTPRequestHandler`` 会把
+        残留字节解析成下一条 HTTP 请求（keep-alive 请求走私 / CSRF 绕过），所以
+        任何提前返回前都必须调用本方法。只消费 :meth:`_drain` 的有界上限；
+        body 过大或分块传输时强制关闭连接。
+
+        Returns:
+            None: 已读完或读失败都直接返回，不抛异常。
+        """
+        left = getattr(self, "_body_left", 0)
+        if left <= 0:
+            return
+        self._body_left = 0
+        if (self.headers.get("Transfer-Encoding") or "").strip():
+            self.close_connection = True
+            return
+        self._drain(left)
+
     def _drain(self, length: int) -> None:
-        """丢弃剩余请求体，最多 64MB，超出直接断开。"""
-        left = min(length, 64 << 20)
+        """丢弃剩余请求体，最多 64MB；超限或对端提前断开则关闭连接。"""
+        left = min(max(0, length), 64 << 20)
         try:
             while left > 0:
                 chunk = self.rfile.read(min(1 << 20, left))
                 if not chunk:
+                    self.close_connection = True
                     break
                 left -= len(chunk)
         except OSError:
-            pass
+            self.close_connection = True
+        self._body_left = 0
         if length > 64 << 20:
             self.close_connection = True
 
@@ -599,6 +637,8 @@ class Handler(BaseHTTPRequestHandler):
                 403（来源不合法）、404（路径不存在）、500（内部错误，栈只进日志）。
         """
         try:
+            self._body_left = self._declared_body_length()
+            self._discard_body()  # GET 不需要 body；有也必须丢弃，防请求走私
             self._route_get()
         except BodyTooLarge as exc:
             self._json({"ok": False, "error": str(exc)}, 413)
@@ -614,12 +654,16 @@ class Handler(BaseHTTPRequestHandler):
                 并且会把剩余字节读完再关 —— 否则客户端只会看到「连接被重置」。
         """
         try:
+            self._body_left = self._declared_body_length()
             self._route_post()
         except BodyTooLarge as exc:
             self._json({"ok": False, "error": str(exc)}, 413)
         except Exception as exc:  # noqa: BLE001
             diagnose._log_to_file(traceback.format_exc())
             self._json({"ok": False, "error": f"服务内部错误：{type(exc).__name__}: {exc}"}, 500)
+        finally:
+            # 兜底：任何没读完 body 的返回路径都不许把残留字节留给下一条请求。
+            self._discard_body()
 
     def _route_get(self):
         touch()
@@ -690,9 +734,11 @@ class Handler(BaseHTTPRequestHandler):
     def _route_post(self):
         touch()
         if not self._guard():
+            self._discard_body()  # 403 也要读掉 body，否则会被当成下一条请求
             return self._json({"ok": False, "error": "禁止外部页面访问本机服务"}, 403)
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/quit":
+            self._discard_body()
             request_quit("收到界面退出指令，正在停止本地服务…")
             return self._json({"ok": True, "message": "服务已停止，可以关闭本页面了"})
 
@@ -713,6 +759,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/passive":
             return self._json(passive_start(self._read_json()))
         if parsed.path == "/api/passive/stop":
+            self._discard_body()
             with LOCK:
                 PJOB["stop"] = True
             log("被动监听：收到停止指令，正在收尾…")
@@ -736,6 +783,7 @@ class Handler(BaseHTTPRequestHandler):
             raw_name = Path((q.get("name") or ["upload.pcapng"])[0]).name
             safe = "".join(c for c in raw_name if c.isalnum() or c in "._-") or "upload.pcapng"
             if not safe.lower().endswith((".pcap", ".pcapng", ".cap")):
+                self._discard_body()
                 return self._json({"ok": False, "error": "只接受 .pcap / .pcapng / .cap 文件"})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -744,6 +792,9 @@ class Handler(BaseHTTPRequestHandler):
             if length <= 0:
                 return self._json({"ok": False, "error": "空文件"})
             if length > MAX_UPLOAD:
+                # 2GB 量级读完不现实：直接关连接，keep-alive 不再复用（防走私）。
+                self._body_left = 0
+                self.close_connection = True
                 return self._json({"ok": False,
                                    "error": f"文件超过 {MAX_UPLOAD // (1 << 30)}GB 上限"}, 413)
             CAPTURES.mkdir(parents=True, exist_ok=True)
@@ -759,13 +810,16 @@ class Handler(BaseHTTPRequestHandler):
                         fh.write(chunk)
                         written += len(chunk)
                         remaining -= len(chunk)
+                        self._body_left = max(0, getattr(self, "_body_left", 0) - len(chunk))
             except OSError:
                 dest.unlink(missing_ok=True)
                 raise
             if written == 0:
                 dest.unlink(missing_ok=True)
+                self._discard_body()
                 return self._json({"ok": False, "error": "上传中断，未收到数据"})
             return self._json({"ok": True, "file": dest.name, "size": dest.stat().st_size})
+        self._discard_body()
         return self._send(404, b"not found", "text/plain; charset=utf-8")
 
 

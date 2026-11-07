@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -32,7 +33,7 @@ REPO_LOGS = ROOT / "logs"
 RUN_KEYS = {"mode", "params", "duration_ms", "level", "critical", "warning",
             "sufficiency_ok", "error_code", "tshark_version", "ok"}
 RUN_NAME = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{8}\.json$")
-CRASH_NAME = re.compile(r"^\d{8}-\d{6}(-\d+)?\.txt$")
+CRASH_NAME = re.compile(r"^\d{8}-\d{6}-\d+-\d+-[0-9a-f]{4}\.txt$")
 FAKE_VERDICT = {"level": "警告", "sufficiency": {"ok": True},
                 "layers": [], "points": [], "next_steps": [], "flags": {}}
 
@@ -308,6 +309,56 @@ class CrashTests(_TempLogCase):
         self.assertTrue(any("ZeroDivisionError" in t for t in texts),
                         "threading.excepthook 没写崩溃快照")
 
+    def test_record_crash_concurrent_threads_all_persist(self):
+        """60 线程同秒 ``record_crash``：恰好 60 个文件、内容互不覆盖（B3）。
+
+        修复前是「exists → write」竞态，60 个线程会看到同一个不存在的路径，
+        实测只落 1 个文件（丢 59 个）。
+        """
+        crashes = self.root / "crashes"
+        crashes.mkdir(parents=True, exist_ok=True)
+        calls = 60
+        barrier = threading.Barrier(calls)
+        errors: list[BaseException] = []
+        paths: list[Path] = []
+        paths_lock = threading.Lock()
+
+        def _crash(i: int) -> None:
+            try:
+                barrier.wait(timeout=30)
+                try:
+                    raise ValueError(f"crash-{i}")
+                except ValueError as exc:
+                    path = logstore.record_crash(type(exc), exc, exc.__traceback__)
+                if path is None:
+                    errors.append(RuntimeError(f"record_crash 返回 None: {i}"))
+                    return
+                with paths_lock:
+                    paths.append(path)
+            except BaseException as exc:  # noqa: BLE001  测试里收集所有线程错误
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_crash, args=(i,)) for i in range(calls)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=120)
+
+        self.assertEqual(errors, [])
+        files = sorted(crashes.glob("*.txt"))
+        self.assertEqual(len(files), calls,
+                         f"并发崩溃快照丢失：calls={calls} files={len(files)}")
+        self.assertEqual(len(paths), calls)
+        for path in paths:
+            self.assertRegex(path.name, CRASH_NAME)
+        messages = set()
+        for path in files:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("消息: crash-"):
+                    messages.add(line[len("消息: "):])
+        self.assertEqual(messages, {f"crash-{i}" for i in range(calls)},
+                         "崩溃快照内容被覆盖（不是 60 份独立现场）")
+
 
 class PruneTests(_TempLogCase):
     def setUp(self) -> None:
@@ -333,6 +384,40 @@ class PruneTests(_TempLogCase):
         self.assertEqual(left_runs, run_names[-3:])
         self.assertEqual(left_crashes, crash_names[-2:])
         self.assertGreaterEqual(stats["removed"], 8)
+
+    def test_prune_crashes_by_mtime_keeps_crash_txt_next_to_fatal(self):
+        """55 个 fatal + 2 个 txt：按 mtime 裁到 50 后必须留 2 个 txt 与 48 个 fatal（B2）。
+
+        修复前按文件名字典序排序：数字开头的 ``*.txt`` 永远排在 ``fatal-*`` 前面，
+        裁 50 个时 txt 会先被删光（实测 50 fatal / 0 txt）。
+        """
+        crashes = self.root / "crashes"
+        crashes.mkdir(parents=True, exist_ok=True)
+        base_ns = 2_000_000_000 * 1_000_000_000
+        for i in range(55):
+            path = crashes / f"fatal-20260101-{i:06d}.log"
+            path.write_bytes(b"")
+            os.utime(path, ns=(base_ns - (1000 + i) * 1_000_000_000,) * 2)
+        txt_paths = []
+        for i, name in enumerate(("20261001-100000.txt", "20261107-100000.txt")):
+            path = crashes / name
+            path.write_text("old crash\n", encoding="utf-8")
+            os.utime(path, ns=(base_ns + (10 + i) * 1_000_000_000,) * 2)
+            txt_paths.append(path)
+
+        with mock.patch.multiple(logstore, KEEP_CRASHES=50, MAX_FILE_BYTES=5 << 20,
+                                 MAX_TOTAL_BYTES=100 << 20):
+            logstore.prune()
+
+        left = [p for p in crashes.iterdir() if p.is_file()]
+        left_txt = sorted(p.name for p in left if p.suffix.lower() == ".txt")
+        left_fatal = sorted(p.name for p in left if p.name.startswith("fatal-"))
+        self.assertEqual(left_txt, sorted(p.name for p in txt_paths),
+                         "崩溃快照 *.txt 被 fatal 挤掉了（应按 mtime 而不是文件名裁剪）")
+        self.assertEqual(len(left_fatal), 48, f"应删 7 个最旧 fatal，实际留 {len(left_fatal)}")
+        self.assertEqual(len(left), 50)
+        for path in txt_paths:
+            self.assertTrue(path.exists())
 
     def test_prune_truncates_oversized_file_but_never_deletes_today(self):
         """单文件超限只截尾；当天正在写的文件不删除（V2 / 陷阱 4）。"""

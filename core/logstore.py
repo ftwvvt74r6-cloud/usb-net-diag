@@ -17,7 +17,7 @@
       diag-YYYYMMDD.log  诊断与服务运行日志
       env.json           本次启动的环境快照（覆盖写）
       runs/              每次分析一条 JSON（<ts>-<8位随机>.json）
-      crashes/           Python 异常快照（<ts>.txt）与 faulthandler（fatal-<ts>.log）
+      crashes/           Python 异常快照（<ts>-<pid>-<tid>-<rand>.txt）与 faulthandler（fatal-<ts>.log）
 
 原则：**日志失败绝不影响诊断** —— 每个落盘操作都吞掉 ``OSError``，只返回 ``None``。
 """
@@ -498,8 +498,34 @@ def record_run(record: dict) -> Path | None:
     return path if _write_json_atomic(path, dict(record or {})) else None
 
 
+def _create_crash_file(directory: Path) -> tuple[Path, int] | None:
+    """用 ``O_CREAT | O_EXCL`` 创建唯一的崩溃快照文件（并发同秒也不覆盖）。
+
+    文件名 = ``<ts>-<pid>-<线程 id>-<4 位随机十六进制>.txt``。撞名时换随机后缀
+    重试；**不能**用「先 ``exists()`` 再写」—— 多线程同秒崩溃会全部看到同一个
+    不存在的路径，最后只落 1 个文件。
+
+    Args:
+        directory: ``crashes/`` 目录（已由 :func:`ensure_dirs` 创建）。
+
+    Returns:
+        tuple[Path, int] | None: ``(路径, 已打开的 fd)``；连试 10 次都失败返回 ``None``。
+    """
+    base = f"{_stamp()}-{os.getpid()}-{threading.get_ident()}"
+    for _ in range(10):
+        path = directory / f"{base}-{secrets.token_hex(2)}.txt"
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            continue
+        except OSError:
+            return None
+        return path, fd
+    return None
+
+
 def record_crash(exc_type, exc, tb) -> Path | None:
-    """把一次未捕获异常写成 ``crashes/<ts>.txt``（类型/消息/traceback/环境摘要）。
+    """把一次未捕获异常写成 ``crashes/<ts>-<pid>-<tid>-<rand>.txt``（类型/消息/traceback/环境摘要）。
 
     Args:
         exc_type: 异常类（``sys.excepthook`` 的第一个参数）。
@@ -510,12 +536,10 @@ def record_crash(exc_type, exc, tb) -> Path | None:
         Path | None: 写成功返回文件路径；写盘失败返回 ``None``。
     """
     root = ensure_dirs()
-    stamp = _stamp()
-    path = root / "crashes" / f"{stamp}.txt"
-    n = 2
-    while path.exists():  # 同一秒内多次崩溃别互相覆盖
-        path = root / "crashes" / f"{stamp}-{n}.txt"
-        n += 1
+    opened = _create_crash_file(root / "crashes")
+    if opened is None:
+        return None
+    path, fd = opened
     name = getattr(exc_type, "__name__", str(exc_type))
     message = "" if exc is None else str(exc)
     if tb is not None:
@@ -543,8 +567,13 @@ def record_crash(exc_type, exc, tb) -> Path | None:
         "=" * 78,
     ]
     try:
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
     except OSError:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return None
     return path
 
@@ -630,13 +659,24 @@ def _is_today(path: Path) -> bool:
 
 
 def _trim_count(directory: Path, keep: int, suffixes: tuple) -> int:
-    """按文件名（含时间戳，天然有序）保留最新 ``keep`` 个，删掉更旧的。"""
+    """按 mtime（旧的最先删）保留最新 ``keep`` 个；mtime 相同再按文件名兜底。
+
+    不能按文件名字典序：``crashes/`` 里 ``fatal-*.log`` 以字母开头，永远排在
+    数字开头的 ``<ts>.txt`` 之后，会把真正的崩溃快照优先删光。
+    """
     try:
         files = [p for p in directory.iterdir()
                  if p.is_file() and p.suffix.lower() in suffixes]
     except OSError:
         return 0
-    files.sort(key=lambda p: p.name)
+
+    def _age(path: Path) -> tuple:
+        try:
+            return (path.stat().st_mtime_ns, path.name)
+        except OSError:
+            return (0, path.name)
+
+    files.sort(key=_age)
     removed = 0
     for path in files[: max(0, len(files) - max(0, int(keep)))]:
         try:

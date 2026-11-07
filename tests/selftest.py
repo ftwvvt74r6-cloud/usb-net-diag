@@ -413,7 +413,9 @@ def test_api() -> None:
         code, body = _http("GET", "/api/report?path=../../config/ai-config.json")
         check("报告路径穿越被挡", code == 404, f"HTTP {code}")
 
-        code, body = _http("POST", "/api/upload?name=evil.exe", b"MZ" + b"\x00" * 100,
+        # 4MB body：早退必须 drain。102B 时偶发 10053（概率低），4MB 能稳定放大
+        # 「server 不读 body 就关连接」的竞态（PR #13 复审 B1）。
+        code, body = _http("POST", "/api/upload?name=evil.exe", b"MZ" + b"\x00" * (4 << 20),
                            {"Content-Type": "application/octet-stream"})
         check("上传非 pcap 被拒", '"ok": false' in body, body[:100])
 
