@@ -37,8 +37,11 @@ CONFIG_PORT_PATTERN = re.compile(r'"server_port"\s*:\s*(\d+)')
 
 
 def _read(path: Path) -> str:
-    """读文本，坏字节替换掉 —— 契约检查不该因为一个乱码字符而崩。"""
-    return path.read_text(encoding="utf-8", errors="replace")
+    """读文本，兼容 WSH 的 UTF-16 LE BOM 与普通 UTF-8；坏字节替换掉。"""
+    raw = path.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8", errors="replace")
 
 
 class VbsLauncherContract(unittest.TestCase):
@@ -52,6 +55,11 @@ class VbsLauncherContract(unittest.TestCase):
 
         # ---- 2. vbs 里写死的相对路径必须能在磁盘上落地 ----
         with self.subTest("vbs 引用路径与磁盘一致"):
+            self.assertTrue(
+                VBS.read_bytes().startswith(b"\xff\xfe"),
+                "NetDiag.vbs 必须保存为 UTF-16 LE BOM：WSH 在中文系统上按 ANSI "
+                "读取无 BOM 的 UTF-8 会报“未结束的字符串常量”",
+            )
             refs = REF_PATTERN.findall(_read(VBS))
             self.assertGreaterEqual(
                 len(refs), 2,
@@ -66,11 +74,31 @@ class VbsLauncherContract(unittest.TestCase):
                     f"NetDiag.vbs 引用了不存在的路径：{ref}（双击后会静默失败）",
                 )
             # 上面跳过了 tools/，这里用纯文本断言补住这个盲区：
-            # 不需要磁盘上有该文件，只要求 vbs 仍然指向便携 Python 的 pythonw.exe。
+            # 不需要磁盘上有该文件，只要求 vbs 仍然优先指向便携 Python 的 pythonw.exe，
+            # 且保留系统 python / py -3 的回退链（lite 环境没有 tools/）。
+            vbs = _read(VBS)
             self.assertIn(
-                "tools\\python\\pythonw.exe", _read(VBS),
+                "tools\\python\\pythonw.exe", vbs,
                 "NetDiag.vbs 不再指向便携 Python 的 pythonw.exe",
             )
+            markers = [
+                "tools\\python\\pythonw.exe",
+                'cmd = "python """',
+                'cmd = "py -3 """',
+                "https://www.python.org/downloads/windows/",
+            ]
+            positions = []
+            for marker in markers:
+                idx = vbs.find(marker)
+                with self.subTest(marker=marker):
+                    self.assertGreaterEqual(
+                        idx, 0, f"NetDiag.vbs 缺少 Python 回退契约：{marker}")
+                positions.append(idx)
+            self.assertEqual(
+                positions, sorted(positions),
+                "NetDiag.vbs 的 Python 回退顺序不是 包内 pythonw -> python -> py -3")
+            self.assertIn("sys.version_info", vbs,
+                          "NetDiag.vbs 的回退没有校验 Python 3.11+")
 
         # ---- 3. 停止器依赖的两个约定 ----
         with self.subTest("server.py 保留 /api/quit 与 netdiag.pid"):
