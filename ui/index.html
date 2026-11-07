@@ -729,12 +729,19 @@ $("#run").addEventListener("click", async () => {
   $("#run").disabled = true;
   $("#run").innerHTML = '<span class="spin"></span>诊断中…';
   runningResult("正在采集并分析报文", "抓包结束后会自动给出分层结论，通常几十秒内完成。");
-  const r = await fetch("/api/scan", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }).then((x) => x.json());
+  let r;
+  try {
+    r = await fetch("/api/scan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((x) => x.json());
+  } catch (e) {
+    r = { ok: false, error: String(e) };
+  }
   if (!r.ok) {
-    appendLog("错误：" + (r.error || "启动失败"), true);
+    const why = r.error || "启动失败";
+    appendLog("错误：" + why, true);
+    failedResult("诊断未能启动", why);
     stopRun();
     return;
   }
@@ -753,6 +760,14 @@ function runningResult(title, sub) {
   $("#result-chip").textContent = "运行中";
   $("#result").innerHTML = '<div class="empty"><div class="ic">◌</div><b>' + esc(title)
     + '</b><p>' + esc(sub) + '</p></div>';
+}
+
+/* 失败也必须离开「运行中」：状态章复位、错误进结果区（日志仍保留）。 */
+function failedResult(title, detail) {
+  const why = detail || "未知错误";
+  $("#result-chip").textContent = "失败";
+  $("#result").innerHTML = '<div class="empty"><div class="ic">!</div><b>' + esc(title)
+    + '</b><p>' + esc(why) + '</p></div>';
 }
 
 function appendLog(m, err) {
@@ -774,7 +789,12 @@ async function poll() {
   (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
   lastLogCount = (s.logs || []).length;
   if (s.state === "done") { stopRun(); render(s.result); }
-  else if (s.state === "error") { stopRun(); appendLog("诊断失败：" + s.error, true); }
+  else if (s.state === "error") {
+    const why = s.error || "未知错误";
+    stopRun();
+    appendLog("诊断失败：" + why, true);
+    failedResult("诊断失败", why);
+  }
 }
 
 /* ---------- 被动监听 ---------- */
@@ -806,7 +826,9 @@ async function startPassive(){
     }),
   }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
   if (!r.ok) {
-    appendLog("监听启动失败：" + (r.error || "未知错误"), true);
+    const why = r.error || "未知错误";
+    appendLog("监听启动失败：" + why, true);
+    failedResult("监听未能启动", why);
     stopPassiveUI();
     return;
   }
@@ -839,8 +861,10 @@ async function pollPassive(){
     $("#hint").textContent = "监听完成，可继续分析或再抓一次。";
     renderPassive(p.result);
   } else if (p.state === "error") {
-    appendLog("监听失败：" + p.error, true);
-    $("#hint").textContent = "监听失败：" + p.error;
+    const why = p.error || "未知错误";
+    appendLog("监听失败：" + why, true);
+    $("#hint").textContent = "监听失败：" + why;
+    failedResult("监听失败", why);
   }
 }
 
