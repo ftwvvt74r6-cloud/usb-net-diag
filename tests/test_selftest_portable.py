@@ -41,12 +41,18 @@ class _SelftestCase(unittest.TestCase):
         self.checked = 0
         self._orig_check = selftest.check
         self._orig_skip = selftest.skip
+        self._orig_section = selftest.section
         selftest.check = self._check
         selftest.skip = self._skip
+        # selftest 的段标题是中文，且用 ``print`` 写 stdout。CI 的 Windows 控制台
+        # 是 cp1252 且 stdout 为 strict，直接打印会 UnicodeEncodeError（实测踩过）。
+        # 段标题对 unittest 没有价值，直接静音。
+        selftest.section = lambda title: None
 
     def tearDown(self) -> None:
         selftest.check = self._orig_check
         selftest.skip = self._orig_skip
+        selftest.section = self._orig_section
 
     def _check(self, name: str, cond: bool, detail: str = "") -> None:
         self.checked += 1
@@ -55,7 +61,9 @@ class _SelftestCase(unittest.TestCase):
 
     def _skip(self, name: str, why: str) -> None:
         self.skips.append((name, why))
-        print(f"  [SKIP] {name} — {why}", flush=True)
+        # 走 stderr：Python 的 stderr 默认是 backslashreplace，cp1252 控制台也能安全打印；
+        # stdout 是 strict，中文会直接炸掉整个用例。
+        print(f"  [SKIP] {name} — {why}", file=sys.stderr, flush=True)
 
     def assert_section_clean(self, section: str) -> None:
         """断言某一段没有 ``cond=False`` 的项。"""
