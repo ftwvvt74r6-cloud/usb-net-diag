@@ -1992,10 +1992,67 @@ $("#pstop").onclick = async () => {
   $("#hint").textContent = "正在停止…";
 };
 
+function renderPassiveEmpty(res){
+  hideQuestion();
+  const spec = UI.cards.empty_sessions || {};
+  const title = spec.title || "未观察到任何 TCP/IP 会话";
+  const tried = (res.tried || []).map((t) =>
+    '<li><span class="mono">#' + esc(t.index) + ' ' + esc(t.name) + '</span> · '
+    + esc(t.packets) + ' 个报文</li>').join("");
+  const reasons = [
+    "抓包点可能看不到业务流量：VPN / 代理 / TUN 虚拟网卡（如 mihomo 的 Meta）会改写路由，物理网卡上可能没有业务报文。",
+    "这段时间内本来没有 TCP/UDP 会话（例如应用只在点击时短暂连接）。",
+    res.auto === false
+      ? "你手动指定了网卡 " + esc(res.interface || "-") + "：已按指定停在这块，不自动换卡。"
+      : "自动选择只验证了「这块网卡有报文」，没有验证它承载的正是你要观察的业务。",
+  ].map((x) => '<li>' + x + '</li>').join("");
+  const steps = (res.next_steps || []).map((x) => '<li>' + esc(x) + '</li>').join("");
+  const chips = [
+    '<span class="chip">网卡 <b>' + esc(res.interface || "-") + '</b></span>',
+    '<span class="chip">监听时长 <b>' + esc(res.duration || 0) + 's</b></span>',
+    '<span class="chip">引擎 <b>' + esc(res.engine || "-") + '</b></span>',
+    '<span class="chip">过滤器 <b>' + esc(res.bpf || "全部流量") + '</b></span>',
+  ];
+  if ((res.tried || []).length > 1) {
+    chips.push('<span class="chip">尝试候选 <b>' + (res.tried || []).length
+      + '/' + esc(res.attempts || (res.tried || []).length) + ' 块</b></span>');
+  }
+
+  $("#result-title").textContent = title;
+  $("#result-sub").textContent = "通信观察没有抓到任何 TCP/IP 会话，按「0 会话」给出结论卡";
+  $("#result-chip").textContent = "0 条会话";
+  $("#result").innerHTML =
+    '<div class="vcard 警告" data-card="empty_sessions">'
+    + '<div class="vkind">采集有效性 · 降级</div>'
+    + '<div class="vtop"><span class="vt">未捕获会话</span><span class="vlay">采集有效性</span>'
+    + '<h3>' + esc(title) + '</h3></div>'
+    + '<p class="vplain">' + esc(res.advice || res.headline || "") + '</p>'
+    + '<div class="chips">' + chips.join("") + '</div></div>'
+    + '<div class="sectitle">为什么没观察到会话</div>'
+    + '<div class="point"><div class="vl"><ol class="steps">' + reasons + '</ol></div></div>'
+    + '<div class="sectitle">试过的候选网卡（自动换卡最多 3 块）</div>'
+    + '<div class="point"><div class="vl"><ul class="facts">'
+    + (tried || "<li>—</li>") + '</ul></div></div>'
+    + '<div class="sectitle">接下来怎么做（建议按顺序执行）</div>'
+    + '<ol class="steps">' + steps + '</ol>'
+    + '<div class="toolbar" style="margin-top:12px">'
+    + '<button class="btn ghost" id="pempty-retry">再观察一次</button>'
+    + '<button class="btn ghost" id="pempty-probe">去连通与速度测试</button></div>';
+  const retry = $("#pempty-retry");
+  if (retry) retry.onclick = () => {
+    if (isLocked("passive")) { showPermModal(); return; }
+    startPassive();
+  };
+  const probe = $("#pempty-probe");
+  if (probe) probe.onclick = () => setMode("probe");
+  scrollMainTop();
+}
+
 function renderPassive(res){
   if (!res || !res.ok) return;
-  hideQuestion();
   const s = res.summary || {};
+  if (!(s.flows || 0)) { renderPassiveEmpty(res); return; }
+  hideQuestion();
   const st = (k, v) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`;
   const dist = (s.by_proto || []).slice(0, 8).map((p) => {
     const w = Math.max(3, Math.round(p.flows / Math.max(1, s.flows) * 100));
