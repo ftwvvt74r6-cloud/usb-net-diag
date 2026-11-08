@@ -132,6 +132,7 @@ da0c69b8b05eb52517c0550040cb5feef7d19b2580a335ed17a60f8a898e2e0e  NetDiag-0.3.2-
 > 解压实测与 zip 清单一致：187 文件、3,301,772 B；解压后目录与包内 `VERSION` 均为 `0.3.2`。
 > 包内 `reports/faults_demo.md` / `.json` 的 SHA-256 分别为
 > `870E7E38…399E5` / `F545E70F…EDE7C`，与仓库 `reports/` 当前快照一致。
+> （`F545…` 为 CRLF checkout / zip archive 口径；git blob 哈希为 `1417…`，两者对应同一内容，仅换行口径不同。）
 
 ## 6. 红线
 
@@ -164,9 +165,11 @@ v0.3.1 已经声明过 E 批次例外：报告 JSON `verdict` 新增
 | 测试 | **955**（v0.3.1 基线 722，未减少） |
 | 代码 / UI / 测试 / CI / 依赖 / scaffold | 本 PR 零改动；`scripts/build_release.py` 只改 `PACKAGE_EXCLUDE` 常量 |
 
-> `ec374a0..e0004c9` 的差异只有 F / G / H 功能与版本进位 + 文档（CHANGELOG、README、build、
-> HANDOVER）；报告相关代码的改动只影响实时路径（tracert 文案、探针自记计数），
-> 不回写离线报告，因此本红线成立。
+> `ec374a0..e0004c9` 的差异**只有版本进位 + 文档**（共 6 文件：`VERSION`、`core/__init__.py`、
+> `CHANGELOG.md`、`README.md`、`docs/build.md`、`docs/HANDOVER-AI.md`）；**F / G / H 功能在版本进位前
+> 已分别合并**（#34 `4528b41`、#35 `7c2d41c`、#36 `ec374a0`），不属于 `ec374a0..e0004c9` 的范围。
+> F/G/H 中与报告相关的代码改动只影响实时路径（tracert 文案、探针自记计数），不回写离线报告，
+> 因此本红线成立。
 
 ### 6.3 复审遗留（不阻塞发版，已记录）
 
