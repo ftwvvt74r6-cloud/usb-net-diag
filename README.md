@@ -129,13 +129,13 @@ python core\server.py
 python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\netdiag-demo
 ```
 
-启动器会按 **① `tools\python\python.exe` → ② 系统 `python` → ③ `py -3`** 的顺序找运行时；
+启动器会按 **① `tools\python\pythonw.exe` / `python.exe` → ② 系统 `python` → ③ `py -3`** 的顺序找运行时；
 都没有时会给出明确提示和 Python 官网链接。源码目录没有 `tools/`，因此自动走 ② / ③。
 
 ### ② 公开 lite 包（需自装 Python / Wireshark）
 
-从 [Releases](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.2.0) 下载
-`NetDiag-0.2.0-lite.zip`（142 个受控文件，669,357 B），解压后**推荐直接双击 `NetDiag.exe`**
+从 [Releases](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases) 下载 v0.3.0 lite 源码包
+`NetDiag-0.3.0-lite.zip`（包大小 / SHA-256 发布后补充），解压后**推荐直接双击 `NetDiag.exe`**
 （首次运行先做五项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 
 ```bat
@@ -143,8 +143,10 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 python core\server.py
 ```
 
-lite 包**不含**便携 Python、Wireshark、Npcap。需要 Python 3.11+；分析抓包文件另装 Wireshark；
-全网体检 / 单目标诊断 / 通信观察另装 Npcap 并以管理员运行。`自检.bat` 会逐项告诉你缺什么、去哪装。
+lite 包**不含**便携 Python、Wireshark、Npcap；包内 `NetDiag.exe` 是构建时用系统 csc 编译的启动器，
+**双击不请求提权**，实时抓包 / 通信观察在界面里按需提权。需要 Python 3.11+；分析抓包文件另装
+Wireshark；全网体检 / 单目标诊断 / 通信观察另装 Npcap。`自检.bat` 会逐项告诉你缺什么、去哪装；
+启动、提权与首屏自检的细节见 [`docs/startup.md`](docs/startup.md)。
 
 ### ③ internal 包（自带运行时，双击即用）
 
@@ -172,13 +174,13 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 
 | 项目 | 实测值 | 出处 / 复现方式 |
 |---|---|---|
-| 自动化测试 | **235** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=19)` | `python -m unittest discover -s tests` |
-| 测试文件 | **18** 个（17 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
+| 自动化测试 | **620** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
+| 测试文件 | **32** 个（31 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
 | CI | **2 个 job**：Windows 语法 + 启动器契约；Ubuntu 注释覆盖率 + 文档同步 | [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) |
-| 注释覆盖率 | **204 / 204 = 100.0%**，29 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
+| 注释覆盖率 | **292 / 292 = 100.0%**，32 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
 | 判定可复现 | demo + 9 个确定性样本 = **20 / 20** 个产物逐字节相同 | `captures/faults_demo.pcap` + `scaffold/tests/fixtures/gen_pcap.py` |
-| API 契约 | **10 个 POST + 2 个 GET** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
-| 发布包 | v0.2.0 lite：**142 个受控文件 / 669,357 B** | [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) §2–§3 |
+| API 契约 | **12 个 POST + 13 个 GET** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
+| 发布包 | v0.2.0 lite：**142 个受控文件 / 669,357 B**（v0.3.0 实测值见 `docs/release-v0.3.0.md`，发布后回写） | [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) §2–§3 |
 | MCP | **7** 个工具，零第三方依赖 | [`mcp/wireshark-mcp/server.py`](mcp/wireshark-mcp/server.py) 的 `TOOLS` |
 | 运行时依赖 | 核心 **0 个 pip 依赖**（仅标准库） | 源码 import 检查；CI 不装第三方包 |
 
@@ -207,11 +209,11 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 NetDiag/
 ├── NetDiag.exe                  # lite 包入口（构建产物，不入库；源码在 launcher/）
 ├── start.bat / NetDiag.vbs      # Python 回退 / 兼容入口：优先包内 Python，回退系统 python / py -3
-├── core/                        # 28 个 Python 模块：采集 / 解析 / 判定 / 报告 / 服务
+├── core/                        # 31 个 Python 模块：采集 / 解析 / 判定 / 报告 / 服务
 ├── ui/index.html                # 单文件控制台（无构建链、无前端框架）
 ├── mcp/wireshark-mcp/server.py  # MCP stdio 服务，7 个工具
-├── scripts/                     # 发布打包 / API 文档生成 / 特征导出 / 图标生成
-├── tests/                       # 18 个测试文件，235 条用例
+├── scripts/                     # 发布打包 / 启动器编译 / API 文档生成 / 特征导出 / 图标生成
+├── tests/                       # 32 个测试文件，620 条用例
 ├── captures/faults_demo.pcap    # 首次试跑样本
 ├── reports/faults_demo.md|json  # 入库报告快照
 ├── docs/                        # 交接、API、日志、许可、构建、发布记录
@@ -228,12 +230,15 @@ NetDiag/
 | [`docs/logging.md`](docs/logging.md) | 日志目录、字段、轮转与保留策略 |
 | [`docs/log-collection.md`](docs/log-collection.md) | 诊断包三个入口、脱敏规则、raw 警告 |
 | [`docs/build.md`](docs/build.md) | lite / internal / internal-npcap 三种包怎么构建与验包 |
+| [`docs/startup.md`](docs/startup.md) | 三个启动入口、启动不提权、按需提权权限卡、首屏自检、常见启动失败 |
 | [`docs/licensing.md`](docs/licensing.md) | 第三方许可、公开/内部分发边界 |
 | [`docs/api-reference.md`](docs/api-reference.md) | 自动生成的公开符号与签名（禁止手改） |
 | [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) | v0.2.0 发布资产、包内容与红线证据 |
+| `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容与红线证据（发布后补充） |
 
 ## Roadmap
 
+- [x] **v0.3.0**：UI 2.0 / B2 命名与反馈 / B3 清尾修复与联动 / D+ 路径剖面与取证 / C 启动体验（`NetDiag.exe`、按需提权、首屏自检）
 - [x] **v0.2.0**：四层定位、方向归因、证据充分性、诊断包脱敏、品牌与发布
 - [ ] 报告模板可定制
 - [ ] 判定阈值可配置

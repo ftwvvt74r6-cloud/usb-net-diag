@@ -15,11 +15,15 @@
 
 | 模式 | 命令（仓库根目录） | 产物 | zip 体积 | 解压后 | 包内第三方二进制 | 能发给谁 |
 |---|---|---|---|---|---|---|
-| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-0.2.0-lite.zip` | 约 **0.7 MB** | 约 **1.7 MB** | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
-| **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-0.2.0-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
-| **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-0.2.0-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
+| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | 约 **0.7 MB** | 约 **1.7 MB** | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
+| **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-<VERSION>-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
+| **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
 
-> 精确体积 / 条目数 / 是否含 Npcap 的实测见 §9。
+> `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.0`）。
+> 表中的 zip 体积 / 解压后大小是 **v0.2.0 实测记录**；v0.3.0 的精确体积 / 条目数 / 哈希见
+> `docs/release-v0.3.0.md`（PR-B 发布后填实际值），本文件不预写。
+> 精确条目数与「是否含 Npcap」的实测见 §9。
+
 > `--with-npcap` 隐含 `--with-tools`；构建时会在开始和结束各打印一次醒目警告。
 
 ---
@@ -81,6 +85,7 @@ python scripts\build_launcher.py --out %TEMP%\netdiag-launcher
   `/win32manifest:launcher\NetDiag.exe.manifest` `/codepage:65001`
   （源码是 UTF-8；不加会让中文文案在中文系统变乱码）。
 - 产物最小校验：文件存在且 **> 8 KB**；manifest 必须是 `asInvoker`（解析 XML 断言，不是 grep 注释）。
+  v0.3.0 本机实测约 **32 KB**（32,256 B），以实际编译为准。
 - 发版后人工复核：`NetDiag.exe --dry-run --report <临时文件>` 只输出 Python 路径，
   不启动服务、不开浏览器。
 - 启动器详细行为（Python 定位顺序 / 退出码 / 提权边界）见 [`startup.md`](startup.md)。
@@ -88,9 +93,9 @@ python scripts\build_launcher.py --out %TEMP%\netdiag-launcher
 成功时最后一行是 **`BUILD OK`**，产物在 `logs\dist\`：
 
 ```
-logs\dist\NetDiag-0.2.0-lite.zip
-logs\dist\NetDiag-0.2.0-internal.zip
-logs\dist\NetDiag-0.2.0-internal-npcap.zip
+logs\dist\NetDiag-<VERSION>-lite.zip
+logs\dist\NetDiag-<VERSION>-internal.zip
+logs\dist\NetDiag-<VERSION>-internal-npcap.zip
 logs\dist\SHA256SUMS.txt          # 每次构建只记录本次产物，后构建会覆盖
 ```
 
@@ -118,7 +123,8 @@ python scripts\build_release.py --with-npcap --out logs\dist\internal-npcap
 
 ## 4. 脚本做了什么（8 步）
 
-1. `git archive HEAD` → 暂存目录 `NetDiag\`：只含 **141 个受控文件**（约 1.5 MB，以 `git ls-files` 为准）。
+1. `git archive HEAD` → 暂存目录 `NetDiag\`：只含受控文件（**v0.2.0 实测 141 个 / 约 1.5 MB**；
+   当前以 `git ls-files` 为准，v0.3.0 实测见 `docs/release-v0.3.0.md`）。
    `.git`、`harness/`、`logs/`、`config/ai-config.json`、`reports/` 里非示例文件天然不在里面；
    `docs/release-v0.2.0.md`（发布记录，记录的是 zip 自己的哈希）被显式排除，避免自指。
 2. **按模式处理 `tools\`**：
@@ -197,7 +203,7 @@ tools\npcap-1.79.exe                        # 仅 --with-npcap 有
 | 检查 | lite | `--with-tools` / `--with-npcap` |
 |---|---|---|
 | 自检 Python | **系统 Python**（构建脚本的解释器） | **包内** `tools\python\python.exe` |
-| 全套测试 | `Ran N tests ... OK`（N 以实际为准，脚本只断言 ≥ 235） | 同左 |
+| 全套测试 | `Ran N tests ... OK`（N 以实际为准；脚本只断言 ≥ `MIN_TEST_COUNT`＝235，是下限不是用例总数） | 同左 |
 | 启动器契约 | `Ran 8 tests ... OK` | `Ran 8 tests ... OK` |
 | 启动器 / 提权契约 | `test_launcher_exe.py` + `test_elevate_api.py`；无 csc 的机器上编译类用例 skip | 同左（编译类用例在包内也会跑） |
 | `NetDiag.exe` | 存在且 > 8 KB（manifest = `asInvoker`） | 不存在（内部包继续用 VBS / start.bat） |
@@ -208,8 +214,9 @@ tools\npcap-1.79.exe                        # 仅 --with-npcap 有
 
 > **skipped 为什么有两个数**：带 `tools/` 的包有 tshark + scapy，只跳过
 > 「需要管理员 + Npcap 的真实抓包」和「需要本机 openssl 的 TLS 自检」= **2**；
-> lite 没有 tshark / scapy，会多跳过约 17 项。两者都正常。
-> 脚本只断言 `Ran N tests`（N ≥ 235）且结果为 `OK`，不把测试数/skipped 数写死 ——
+> lite 没有 tshark / scapy，会多跳过二十多项（v0.2.0 记录 19；v0.3.0 干净 checkout 实测 27，
+> 见 `docs/HANDOVER-AI.md` §6.5），具体数值随本机 tshark / openssl 环境变化。两者都正常。
+> 脚本只断言 `Ran N tests`（N ≥ `MIN_TEST_COUNT`）且结果为 `OK`，不把测试数/skipped 数写死 ——
 > 它们随环境与新增用例变化，写死会在别的机器误报。
 
 ---
@@ -219,10 +226,13 @@ tools\npcap-1.79.exe                        # 仅 --with-npcap 有
 ### 7.1 lite（必做）
 
 ```powershell
+# 0) 版本号（产物文件名用得到）
+$V = (Get-Content VERSION).Trim()
+
 # 1) 解压到空目录
 $dst = "$env:TEMP\netdiag-lite-verify"
 Remove-Item $dst -Recurse -Force -ErrorAction SilentlyContinue
-Expand-Archive logs\dist\NetDiag-0.2.0-lite.zip -DestinationPath $dst
+Expand-Archive "logs\dist\NetDiag-$V-lite.zip" -DestinationPath $dst
 
 # 2) 启动器只定位 Python（不启动服务、不开浏览器）
 & "$dst\NetDiag\NetDiag.exe" --dry-run --report "$env:TEMP\netdiag-launcher.json"
@@ -239,10 +249,10 @@ Push-Location "$dst\NetDiag"
 $env:NETDIAG_LOG_DIR = "$env:TEMP\netdiag-lite-logs"
 python -m unittest discover -s tests
 Pop-Location
-# 期望：Ran N tests ... OK（skipped≈19，取决于本机 Python / openssl）
+# 期望：Ran N tests ... OK（skipped 随本机 Python / openssl；v0.3.0 干净 checkout 实测 27）
 
 # 5) 校验和 + 启动器确实在 zip 根
-Get-FileHash logs\dist\NetDiag-0.2.0-lite.zip -Algorithm SHA256
+Get-FileHash "logs\dist\NetDiag-$V-lite.zip" -Algorithm SHA256
 Get-Content logs\dist\SHA256SUMS.txt
 (Get-Item "$dst\NetDiag\NetDiag.exe").Length
 # 期望：> 8192 字节
@@ -251,9 +261,10 @@ Get-Content logs\dist\SHA256SUMS.txt
 ### 7.2 内部包（发布时不需要做，改了打包逻辑时做）
 
 ```powershell
+$V = (Get-Content VERSION).Trim()
 $dst = "$env:TEMP\netdiag-internal-verify"
 Remove-Item $dst -Recurse -Force -ErrorAction SilentlyContinue
-Expand-Archive logs\dist\NetDiag-0.2.0-internal.zip -DestinationPath $dst
+Expand-Archive "logs\dist\NetDiag-$V-internal.zip" -DestinationPath $dst
 & "$dst\NetDiag\自检.bat" --no-pause
 # 期望：PASS 5 / WARN 2（本机无 Npcap、未提权） / FAIL 0 → USABLE
 # 有 --with-npcap 时 Npcap 那一条会提示包内安装器路径
@@ -262,8 +273,9 @@ Expand-Archive logs\dist\NetDiag-0.2.0-internal.zip -DestinationPath $dst
 清单抽查：
 
 ```powershell
+$V = (Get-Content VERSION).Trim()
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [IO.Compression.ZipFile]::OpenRead("$PWD\logs\dist\NetDiag-0.2.0-lite.zip")
+$zip = [IO.Compression.ZipFile]::OpenRead("$PWD\logs\dist\NetDiag-$V-lite.zip")
 $zip.Entries | Where-Object { $_.FullName -match '^(\.git/|harness/|logs/.+|config/ai-config\.json$|reports/.+)$' } |
     Select-Object FullName
 $zip.Entries | Where-Object { $_.FullName -match 'npcap|tools/' } | Select-Object FullName
@@ -276,41 +288,49 @@ $zip.Dispose()
 
 ## 8. 发版（GitHub Release，只发 lite）
 
-发布件先在**干净目录**生成、验证通过后再上传；**tag 指向 `main` HEAD**
-（`v0.2.0` = `6015614`）：
+> 下面这套命令以 **v0.2.0** 为样例（tag 曾指向 `6015614…`），版本号已参数化；
+> **v0.3.0 发版时**把 `$V` 换成 `VERSION` 的值、`$SHA` 换成 `main` HEAD 的完整 40 位 SHA。
+> v0.3.0 的资产、包大小与 SHA-256 见 `docs/release-v0.3.0.md`（PR-B 发布后填实际值），
+> 本文件不预写。
+
+发布件先在**干净目录**生成、验证通过后再上传：
 
 ```powershell
+$V = (Get-Content VERSION).Trim()     # 当前 0.3.0
+$SHA = (git rev-parse HEAD)           # tag 指向的 main HEAD（必须完整 40 位 SHA）
+
 # 1) 生成公开 lite 包到独立目录（避免 SHA256SUMS 混入内部包）
 python scripts\build_release.py --out logs\dist\release
 
-# 2) 生成 release notes：CHANGELOG 的 v0.2.0 段 + 自行安装说明
+# 2) 生成 release notes：CHANGELOG 的 v$V 段 + 自行安装说明
 #    （见 §8.1 的脚本）
 
 # 3) 只上传 lite + SHA256SUMS
-gh release create v0.2.0 `
-  logs\dist\release\NetDiag-0.2.0-lite.zip `
+gh release create "v$V" `
+  "logs\dist\release\NetDiag-$V-lite.zip" `
   logs\dist\release\SHA256SUMS.txt `
-  --target 601561426ffd8a4d569ec8b9e6242e1052df0ed5 `
-  --title "NetDiag · 网络矩阵 v0.2.0（lite 源码包）" `
+  --target $SHA `
+  --title "NetDiag · 网络矩阵 v$V（lite 源码包）" `
   --notes-file logs\dist\release\release-notes.md
 ```
 
-> `--target` 必须用**完整 40 位 SHA**：实测短 SHA `6015614` 会被 GitHub 拒绝
+> `--target` 必须用**完整 40 位 SHA**：v0.2.0 实测短 SHA `6015614` 会被 GitHub 拒绝
 > （`HTTP 422 Release.target_commitish is invalid`）。
 
 ```powershell
 # 4) 核对：附件里绝不能出现 npcap / tools / Wireshark
-gh release view v0.2.0
-gh api repos/ftwvvt74r6-cloud/usb-net-diag/releases/tags/v0.2.0 --jq '.assets[].name'
+gh release view "v$V"
+gh api "repos/ftwvvt74r6-cloud/usb-net-diag/releases/tags/v$V" --jq '.assets[].name'
 ```
 
 ### 8.1 release notes 生成（参考实现）
 
 ```powershell
+$V = (Get-Content VERSION).Trim()
 $changelog = Get-Content CHANGELOG.md -Raw -Encoding UTF8
-$start = $changelog.IndexOf("## v0.2.0")
-$end = $changelog.IndexOf("## v0.1.0")
-$section = $changelog.Substring($start, $end - $start).Trim()
+$start = $changelog.IndexOf("## v$V")
+$next  = $changelog.IndexOf("## v", $start + 4)   # 下一个版本段
+$section = $changelog.Substring($start, $next - $start).Trim()
 @"
 $section
 
@@ -318,15 +338,15 @@ $section
 
 ## 安装前置（本包不含第三方二进制）
 
-- 本 Release 只发 ``NetDiag-0.2.0-lite.zip``（源码 / 文档 / 测试），**不含** Python、Wireshark、Npcap。
+- 本 Release 只发 ``NetDiag-$V-lite.zip``（源码 / 文档 / 测试），**不含** Python、Wireshark、Npcap。
 - 运行需要 **Python 3.11+**：https://www.python.org/downloads/windows/
 - 分析抓包文件需要 **tshark**：安装 Wireshark https://www.wireshark.org/download.html ，或设置 ``TSHARK_PATH``。
-- 全网体检 / 单目标诊断 / 通信观察需要 **Npcap**：https://npcap.com/#download 和管理员权限。
-- 解压后先双击 ``自检.bat``；lite 包用 ``python core\server.py`` 启动。
+- 全网体检 / 单目标诊断 / 通信观察需要 **Npcap**：https://npcap.com/#download ；启动不提权，界面里按需提权。
+- 解压后推荐双击 ``NetDiag.exe``（启动器，首次运行做五项准备检查）；需要排障时用 ``自检.bat`` 或 ``python core\server.py``。
 "@ | Set-Content logs\dist\release\release-notes.md -Encoding UTF8
 ```
 
-**发版前必须确认**：`v0.2.0` 这个 tag 不存在（`git ls-remote --tags origin`）；
+**发版前必须确认**：目标 tag（如 `v0.2.0`；v0.3.0 用 `v0.3.0`）不存在（`git ls-remote --tags origin`）；
 附件清单只有 lite + `SHA256SUMS.txt`；产物（zip / SHA256SUMS）**不入库**、不 `git add -f`。
 
 > ⚠️ **不要**把 `--with-tools` / `--with-npcap` 的包上传到公开 Release。
@@ -345,6 +365,10 @@ $section
 
 > 详细证据（构建完整输出、空目录 `自检.bat`、Release 附件核对）见
 > `review/chore-release-packaging-WRITER.md` 的「法务修正回合」一节。
+
+> **v0.3.0 实测记录**（zip 文件名 / 体积 / 条目数 / 构建自检输出 / SHA-256）
+> 见 `docs/release-v0.3.0.md`，由 PR-B 在 Lead 完成 tag/Release 后按实际值填写；
+> 本节保留 v0.2.0 的历史数字，不作为 v0.3.0 的预期值。
 
 ---
 

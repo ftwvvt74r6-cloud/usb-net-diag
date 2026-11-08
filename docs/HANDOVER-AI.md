@@ -1,7 +1,7 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.3.0`；写作基线 `main` = `27140ae`（PR #27 版本进位合并后）。
+> **对齐版本**：`VERSION` = `0.3.0`；写作基线 `main` = `bbc7ecd`（PR #28 C 启动体验合并后）。
 > **时效性**：文中数字是 2026-11-08 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
@@ -203,7 +203,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | 路由 | 请求体 / 参数 | 成功响应（关键键） |
 |---|---|---|
 | `POST /api/quit` | 无 | `{ok: true, message}`；0.3s 后关监听并清理 `logs/netdiag.pid` |
-| `POST /api/elevate` | 无请求体（C2 可带 `restart: true`） | `{ok, restarted, error?}`；成功时由 Timer 安排旧服务退出；用户取消/策略禁止时 `{ok:false, error}` 且**不杀当前进程** |
+| `POST /api/elevate` | 无请求体（路由会丢弃 body，不接受参数） | `{ok, restarted, message}`；已是管理员时 `{ok:true, restarted:false, already_admin:true}`；用户取消/策略禁止时 `{ok:false, restarted:false, error}` 且**不杀当前进程** |
 | `POST /api/selfcheck/ack` | 无请求体 | `{ok, writable, path?, error?}`；写 `config/ui-first-run.json`，写失败返回 `ok:false` 但 HTTP 仍 200，**不阻塞界面** |
 | `POST /api/ai` | AI 配置局部更新：`provider/base_url/api_key/model/temperature/timeout/verify_ssl` | `{ok: true, config}`（Key 已脱敏） |
 | `POST /api/ai/test` | 同配置，或 `{overrides: {...}}` | `test_connection()` 结果（连通性/模型/耗时） |
@@ -413,7 +413,7 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 
 | 步骤 | 命令 | 作用 |
 |---|---|---|
-| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 281/281 = 100.0%（31 模块） |
+| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 292/292 = 100.0%（32 模块） |
 | 文档与源码同步 | `python scripts/gen_api_doc.py` + `git diff --exit-code docs/api-reference.md docs/docstring-gaps.md` | 禁止手改生成文档 |
 
 ### 7.3 CI 里会 skip 什么
@@ -494,7 +494,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/build_release.py` | 三种发布包；lite 包现场编译 `NetDiag.exe` 并放进 zip 根 |
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
-| `ui/index.html` | 单文件控制台（3,500+ 行；无构建链、无前端框架；首屏自检/权限卡/表单保留都在这一个文件里） |
+| `ui/index.html` | 单文件控制台（3,300+ 行；无构建链、无前端框架；首屏自检/权限卡/表单保留都在这一个文件里） |
 | `tests/` | 31 个 `test_*.py`（620 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
@@ -511,7 +511,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `AGENTS.md` | 硬约束清单（不推 main、不改模块边界等） | ⚠️ 部分目录表是目标架构 |
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
-| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 31/281 |
+| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 32/292 |
 | `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（C 批次更新启动器） |
 | `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
 | `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检五项 / 表单保留 / 常见启动失败 | ✅ 当前（C2） |
