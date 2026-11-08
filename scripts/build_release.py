@@ -69,7 +69,11 @@ FORBIDDEN_PREFIXES = (".git/", "harness/")
 FORBIDDEN_EXACT = ("config/ai-config.json",)
 #: 维护者发布记录：记录的是「这个 zip 自己的哈希」，放进包里会造成自指，
 #: 因此所有模式都排除（它仍在 git 里，随仓库源码走）。
-PACKAGE_EXCLUDE = ("docs/release-v0.2.0.md", "docs/release-v0.3.0.md")
+PACKAGE_EXCLUDE = (
+    "docs/release-v0.2.0.md",
+    "docs/release-v0.3.0.md",
+    "docs/release-v0.3.1.md",
+)
 #: 所有模式都必须存在的入口 / 文档 / 示例。
 REQUIRED_COMMON = (
     "VERSION",

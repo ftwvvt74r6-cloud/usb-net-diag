@@ -15,14 +15,15 @@
 
 | 模式 | 命令（仓库根目录） | 产物 | zip 体积 | 解压后 | 包内第三方二进制 | 能发给谁 |
 |---|---|---|---|---|---|---|
-| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **974,570 B**（0.93 MiB） | **2,590,174 B**（2.47 MiB） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
+| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **1,031,112 B**（0.98 MiB） | **2,771,469 B**（2.64 MiB） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-<VERSION>-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
 | **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
 
 > `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.1`）。
-> 表中 **lite 行是 v0.3.0 实测**（2026-11-08 发布件：169 文件 / 974,570 B / 解压后 2,590,174 B）；
-> **internal 两行仍是 v0.2.0 历史实测**（v0.3.0 未重建内部包，不作为 v0.3.0 的预期值）。
-> v0.3.0 的精确条目数 / 哈希 / 构建自检见 `docs/release-v0.3.0.md`。
+> 表中 **lite 行是 v0.3.1 实测**（2026-11-08 发布件：174 文件 / 1,031,112 B / 解压后 2,771,469 B）；
+> v0.3.0 历史值为 169 文件 / 974,570 B / 解压后 2,590,174 B。
+> **internal 两行仍是 v0.2.0 历史实测**（v0.3.0 / v0.3.1 未重建内部包，不作为当前版本预期值）。
+> v0.3.1 的精确条目数 / 哈希 / 构建自检见 `docs/release-v0.3.1.md`。
 > 精确条目数与「是否含 Npcap」的实测见 §9。
 
 > `--with-npcap` 隐含 `--with-tools`；构建时会在开始和结束各打印一次醒目警告。
@@ -86,7 +87,7 @@ python scripts\build_launcher.py --out %TEMP%\netdiag-launcher
   `/win32manifest:launcher\NetDiag.exe.manifest` `/codepage:65001`
   （源码是 UTF-8；不加会让中文文案在中文系统变乱码）。
 - 产物最小校验：文件存在且 **> 8 KB**；manifest 必须是 `asInvoker`（解析 XML 断言，不是 grep 注释）。
-  v0.3.0 本机实测约 **32 KB**（32,256 B），以实际编译为准。
+  v0.3.1 本机实测 **32,256 B**（v0.3.0 同为 32,256 B），以实际编译为准。
 - 发版后人工复核：`NetDiag.exe --dry-run --report <临时文件>` 只输出 Python 路径，
   不启动服务、不开浏览器。
 - 启动器详细行为（Python 定位顺序 / 退出码 / 提权边界）见 [`startup.md`](startup.md)。
@@ -124,11 +125,12 @@ python scripts\build_release.py --with-npcap --out logs\dist\internal-npcap
 
 ## 4. 脚本做了什么（8 步）
 
-1. `git archive HEAD` → 暂存目录 `NetDiag\`：只含受控文件（**v0.3.0 成品包实测 169 个 /
-   解压后 2,590,174 B**，含构建生成的 `README.txt` 与 `NetDiag.exe`；当前以 `git ls-files` 为准）。
+1. `git archive HEAD` → 暂存目录 `NetDiag\`：只含受控文件（**v0.3.1 成品包实测 174 个 /
+   解压后 2,771,469 B**，含构建生成的 `README.txt` 与 `NetDiag.exe`；当前以 `git ls-files` 为准。
+   v0.3.0 历史值为 169 个 / 2,590,174 B）。
    `.git`、`harness/`、`logs/`、`config/ai-config.json`、`reports/` 里非示例文件天然不在里面；
-   `docs/release-v0.2.0.md` 与 `docs/release-v0.3.0.md`（发布记录，记录的是 zip 自己的哈希）
-   被显式排除，避免自指。
+   `docs/release-v0.2.0.md`、`docs/release-v0.3.0.md` 与 `docs/release-v0.3.1.md`（发布记录，
+   记录的是 zip 自己的哈希）被显式排除，避免自指。
 2. **按模式处理 `tools\`**：
    - lite：**跳过**，包里没有任何第三方二进制；
    - `--with-tools`：原样复制，只跳过 `__pycache__` / `*.pyc`，并**排除 `npcap-*.exe`**；
@@ -216,9 +218,9 @@ tools\npcap-1.79.exe                        # 仅 --with-npcap 有
 
 > **skipped 为什么有两个数**：带 `tools/` 的包有 tshark + scapy，只跳过
 > 「需要管理员 + Npcap 的真实抓包」和「需要本机 openssl 的 TLS 自检」= **2**；
-> lite 没有 tshark / scapy，会多跳过二十多项（v0.3.0 干净 checkout 实测 27、解压包内 28；
-> v0.2.0 历史记录 19），具体数值随本机 tshark / openssl 环境变化。两者都正常。
-> v0.3.0 构建自检记录 `skipped=3`（构建机解释器自带 scapy/tshark 条件），**不是**通用预期值；
+> lite 没有 tshark / scapy，会多跳过二十多项（v0.3.1 干净 checkout 实测 27、解压包内 28；
+> v0.3.0 历史同为 27 / 28；v0.2.0 历史记录 19），具体数值随本机 tshark / openssl 环境变化。两者都正常。
+> v0.3.1 构建自检记录 `skipped=3`（构建机解释器自带 scapy/tshark 条件；v0.3.0 同为 3），**不是**通用预期值；
 > 脚本只断言 `Ran N tests`（N ≥ `MIN_TEST_COUNT`）且结果为 `OK`，不把测试数/skipped 数写死 ——
 > 它们随环境与新增用例变化，写死会在别的机器误报。
 
@@ -252,7 +254,7 @@ Push-Location "$dst\NetDiag"
 $env:NETDIAG_LOG_DIR = "$env:TEMP\netdiag-lite-logs"
 python -m unittest discover -s tests
 Pop-Location
-# 期望：Ran N tests ... OK（skipped 随本机 Python / openssl；v0.3.0 干净 checkout 实测 27）
+# 期望：Ran N tests ... OK（skipped 随本机 Python / openssl；v0.3.1 干净 checkout 实测 27）
 
 # 5) 校验和 + 启动器确实在 zip 根
 Get-FileHash "logs\dist\NetDiag-$V-lite.zip" -Algorithm SHA256
@@ -291,9 +293,11 @@ $zip.Dispose()
 
 ## 8. 发版（GitHub Release，只发 lite）
 
-> 下面这套命令版本号已参数化（v0.2.0 曾指向短 SHA `6015614…`，v0.3.0 指向 `e3f2c97…`）；
+> 下面这套命令版本号已参数化（v0.2.0 曾指向短 SHA `6015614…`，v0.3.0 指向 `e3f2c97…`，
+> v0.3.1 指向 `d4b13dc…`）；
 > 发版时把 `$V` 换成 `VERSION` 的值、`$SHA` 换成 `main` HEAD 的完整 40 位 SHA。
-> **v0.3.0 已发布**：资产、包大小与 SHA-256 见 `docs/release-v0.3.0.md`，本文件不重复预写。
+> **v0.3.1 已发布**：资产、包大小与 SHA-256 见 `docs/release-v0.3.1.md`，本文件不重复预写；
+> v0.3.0 历史数值见 `docs/release-v0.3.0.md`。
 
 发布件先在**干净目录**生成、验证通过后再上传：
 
@@ -348,7 +352,7 @@ $section
 "@ | Set-Content logs\dist\release\release-notes.md -Encoding UTF8
 ```
 
-**发版前必须确认**：目标 tag（如 `v0.2.0`；v0.3.0 用 `v0.3.0`）不存在（`git ls-remote --tags origin`）；
+**发版前必须确认**：目标 tag（如 `v0.2.0`；v0.3.0 用 `v0.3.0`、v0.3.1 用 `v0.3.1`）不存在（`git ls-remote --tags origin`）；
 附件清单只有 lite + `SHA256SUMS.txt`；产物（zip / SHA256SUMS）**不入库**、不 `git add -f`。
 
 > ⚠️ **不要**把 `--with-tools` / `--with-npcap` 的包上传到公开 Release。
@@ -359,17 +363,26 @@ $section
 
 ## 9. 实测记录
 
-### 9.1 v0.3.0（当前发布件，只构建了 lite）
+### 9.1 v0.3.1（当前发布件，只构建了 lite）
+
+| 模式 | zip | zip 体积 | 条目数（文件） | Npcap 在包内 | 构建自检 |
+|---|---|---|---|---|---|
+| lite | `NetDiag-0.3.1-lite.zip` | **1,031,112 B**（0.98 MiB） | **174** | **否** | 722 tests `OK (skipped=3)` + 8 contract；`NetDiag.exe` 32,256 B |
+
+> 解压后 **2,771,469 B**；SHA-256 `09fc93f4…8d53`；独立解压复跑 722 tests `OK (skipped=28)`。
+> 完整证据（构建输出、空目录 `NetDiag.exe --dry-run`、Release 附件核对、红线与干净 checkout）见
+> `docs/release-v0.3.1.md`。v0.3.1 **未重建**内部包，下面 9.3 的 internal 数字是历史值。
+
+### 9.2 v0.3.0（历史 · 只构建了 lite）
 
 | 模式 | zip | zip 体积 | 条目数（文件） | Npcap 在包内 | 构建自检 |
 |---|---|---|---|---|---|
 | lite | `NetDiag-0.3.0-lite.zip` | **974,570 B**（0.93 MiB） | **169** | **否** | 620 tests `OK (skipped=3)` + 8 contract；`NetDiag.exe` 32,256 B |
 
 > 解压后 **2,590,174 B**；SHA-256 `c3687b91…d905`；独立解压复跑 620 tests `OK (skipped=28)`。
-> 完整证据（构建输出、空目录 `NetDiag.exe --dry-run`、Release 附件核对）见
-> `docs/release-v0.3.0.md`。v0.3.0 **未重建**内部包，下面 9.2 的 internal 数字是历史值。
+> v0.3.0 **未重建**内部包，**不作为 v0.3.1 的预期值**。完整证据见 `docs/release-v0.3.0.md`。
 
-### 9.2 v0.2.0（历史 · 法务修正回合）
+### 9.3 v0.2.0（历史 · 法务修正回合）
 
 | 模式 | zip | zip 体积 | 条目数（文件） | Npcap 在包内 | 构建自检 |
 |---|---|---|---|---|---|
@@ -377,7 +390,7 @@ $section
 | `--with-tools` | `NetDiag-0.2.0-internal.zip` | 约 **147 MB** | 约 **2056** | **否** | 包内 Python：235 tests `OK (skipped=2)` + 8 contract |
 | `--with-npcap` | `NetDiag-0.2.0-internal-npcap.zip` | 约 **149 MB** | 约 **2057** | **是**（仅内部） | 包内 Python：235 tests `OK (skipped=2)` + 8 contract |
 
-> 以上是 v0.2.0 的历史数字，**不作为 v0.3.0 的预期值**。详细证据（构建完整输出、
+> 以上是 v0.2.0 的历史数字，**不作为 v0.3.0 / v0.3.1 的预期值**。详细证据（构建完整输出、
 > 空目录 `自检.bat`、Release 附件核对）见 `review/chore-release-packaging-WRITER.md`
 > 的「法务修正回合」一节。
 
@@ -398,7 +411,7 @@ $section
 | `NetDiag.exe` 只有几 KB / 不是 PE | csc 编译失败但返回 0 的异常环境；重跑 `build_launcher.py` 看 stderr，发布脚本也会按 > 8 KB 拦下 |
 | lite 包双击 `NetDiag.exe` 提示找不到 Python | lite 不含 `tools\python`；装 Python 3.11+ 并勾选 Add python.exe to PATH，或用内部离线包 |
 | lite 包双击 `start.bat` 报找不到 Python | `start.bat` 会回退系统 python / `py -3`；都没有时按提示安装 Python 3.11+ |
-| 包内测试 `skipped=2` 而不是 27/28 | 正常，见 §6：带 `tools/` 的包少跳过约 24 项（v0.2.0 历史为 2 vs 19） |
+| 包内测试 `skipped=2` 而不是 27/28 | 正常，见 §6：带 `tools/` 的包少跳过约 24 项（v0.3.1 为 3 vs 28 / 干净 checkout 27；v0.2.0 历史为 2 vs 19） |
 
 ---
 
