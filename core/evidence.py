@@ -1,7 +1,7 @@
 """通用「取证请求单」：把本次诊断结论翻译成一张可直接转发的取证清单。
 
 **解决什么问题**：诊断只能看到终端这一侧。当结论指向无线、接入交换机、出口、
-DNS、代理或服务端时，一线需要向对应部门要证据，但往往说不清「要什么、为什么、
+DNS、代理或服务端时，使用者需要向对应部门要证据，但往往说不清「要什么、为什么、
 在哪看、多少算正常」。本模块把「还需要谁提供什么」变成一页可转发的清单。
 
 **谁调用它**：:func:`core.report.render_markdown`（报告内区块）、
@@ -447,7 +447,7 @@ def render_checklist_markdown(checklist: dict, include_conclusion: bool = True) 
         checklist: :func:`build_checklist` 的返回值。
         include_conclusion: 是否在清单前输出结论边界块；报告正文第一节已经
             输出过同一块时也**保留**（报告末尾的取证单是「整块可转发」的副本，
-            复制给二线时结论和边界不会丢）。
+            复制给协作方时结论和边界不会丢）。
 
     Returns:
         str: 以 ``copy.evidence_checklist.section_title`` 开头、以换行结尾的 Markdown；
@@ -486,7 +486,7 @@ def render_checklist_text(checklist: dict, include_conclusion: bool = True) -> s
     """把清单渲染成纯文本（方便直接发微信/工单，不含 Markdown 表格符号）。
 
     E1 起若 ``checklist`` 带 ``conclusion`` 边界对象，则在清单前输出同一结论+
-    边界块的**纯文本版**（复制给二线时结论与边界一起走）。
+    边界块的**纯文本版**（复制给协作方时结论与边界一起走）。
 
     Args:
         checklist: :func:`build_checklist` 的返回值。

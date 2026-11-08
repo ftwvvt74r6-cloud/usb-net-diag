@@ -567,7 +567,7 @@ def build_flows(recs: list[dict]) -> tuple[list[dict], dict]:
 def _fanout(flows: list[dict], min_peers: int = 8) -> list[dict]:
     """找出「同一本地端口同时连很多对端」的会话。
 
-    一线最常见的现象是「机器莫名卡/带宽被占满」，而抓包只看到大量短会话。
+    使用者最常见的现象是「机器莫名卡/带宽被占满」，而抓包只看到大量短会话。
     P2P、视频分发、云盘同步、CDN 探测都会这样，值得单独提示一句。
     """
     acc: dict[tuple, dict] = {}

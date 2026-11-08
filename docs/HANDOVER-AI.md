@@ -28,9 +28,9 @@ git ls-files 'core/*.py'                        # 核心模块清单（注意用
 git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，见下方说明）
 ```
 
-> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **61 行**
+> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **76 行**
 > （含 docstring / 注释 / 示例 URL），**不等于路由数量**；精确路由清单看 **§4 的表**
-> （**12 个 POST + 13 个 GET = 25 个 API**，另有静态页 `/`）。
+> （**13 个 POST + 15 个 GET = 28 个 API**，另有静态页 `/`）。
 
 > 仓库里有多份**历史文档**（`docs/START-HERE.md`、`docs/plan-review.md`、`docs/code-index.md`、
 > `docs/t00-findings.md`、`docs/handoff-MANIFEST.json`）描述的是 v0.1.0 或目标架构，
@@ -187,7 +187,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 被占则顺延最多 10 个端口。请求处理有三道边界：`Host` 只接受 `127.0.0.1`/`localhost`/`::1`；
 写请求检查 `Origin`（无 Origin 的本机程序放行）；JSON body 上限 8 MB、上传上限 2 GB。
 
-> **路由计数**：**12 个 POST + 13 个 GET = 25 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
+> **路由计数**：**13 个 POST + 15 个 GET = 28 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
 > `do_GET` 另外还服务静态首页，完整清单见 4.2/4.3。
 
 ### 4.1 响应信封的现状（重要）
@@ -203,11 +203,12 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 `/api/v1/*` 只存在于 `contracts.py` 的 docstring 里（未实现）。
 新写接口时先决定是否启用信封；**不要假设现有响应带 `schema_version` 或 `trace_id`**。
 
-### 4.2 12 个 POST 路由
+### 4.2 13 个 POST 路由
 
 | 路由 | 请求体 / 参数 | 成功响应（关键键） |
 |---|---|---|
 | `POST /api/quit` | 无 | `{ok: true, message}`；0.3s 后关监听并清理 `logs/netdiag.pid` |
+| `POST /api/last-run/clear` | 无请求体 | `{ok: true}`；清空内存 `LAST_RUN` 与已完成任务的展示槽（`JOB` 回 `idle`），**不删** `logs/runs/` 历史；G5 加法接口 |
 | `POST /api/elevate` | 无请求体（路由会丢弃 body，不接受参数） | `{ok, restarted, message}`；已是管理员时 `{ok:true, restarted:false, already_admin:true}`；用户取消/策略禁止时 `{ok:false, restarted:false, error}` 且**不杀当前进程** |
 | `POST /api/selfcheck/ack` | 无请求体 | `{ok, writable, path?, error?}`；写 `config/ui-first-run.json`，写失败返回 `ok:false` 但 HTTP 仍 200，**不阻塞界面** |
 | `POST /api/ai` | AI 配置局部更新：`provider/base_url/api_key/model/temperature/timeout/verify_ssl` | `{ok: true, config}`（Key 已脱敏） |
@@ -220,14 +221,16 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `POST /api/diagpack` | `{raw?: bool, include_reports?: bool}` | `{ok: true, path, size, entries}`（默认脱敏） |
 | `POST /api/upload` | 原始字节 + `?name=x.pcap`；只收 `.pcap/.pcapng/.cap` | `{ok: true, file, size}`（落到 `captures/`） |
 
-### 4.3 GET 路由（2 个核心 + 11 个只读 + 静态页）
+### 4.3 GET 路由（2 个核心 + 13 个只读 + 静态页）
 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|
 | `GET /api/ping` | 单实例/存活探测 | `ok/app/version/pid/url/started_at` |
-| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/checks/capabilities` |
+| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/checks/capabilities`；`ui_copy` 从 G5 起含 `last_run` / `settings`（加法字段） |
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
 | `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed`；完成时另加 `conclusion`（7 键结论对象）、`result.conclusion_text` / `conclusion_markdown` / `conclusion_export`、`ui_copy.conclusion`（E2 加法字段） |
+| `GET /api/last-run` | 上次运行摘要（G5；内存优先，进程重启后用 `logs/runs/*.json` 最近一条诊断记录兜底） | `{ok, last: 摘要或 null, ui_copy.last_run}`；摘要键 `time/epoch/mode/target/level/ok/duration_ms/critical/warning/full_result/source` |
+| `GET /api/last-run/result` | 上次运行的完整结果（G5；只在内存里） | `{ok, result（与 `/api/status` 同源，含结论字段）, summary, link_actions}`；内存没有时 **404** + `{ok:false,error}`（不抛异常） |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
 | `GET /api/captures` | 已有抓包 | `files[{name,size,mtime}]`（最多 50） |
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |

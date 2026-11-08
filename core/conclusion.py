@@ -1,7 +1,7 @@
 """结论边界结构化渲染器：把一次诊断的「结论 + 依据 + 覆盖 / 未覆盖 + 置信」做成一份对象。
 
 **解决什么问题**：以前的结论只有一个 ``headline``。它被口头转述或复制到工单时，
-「基于哪些样本」「哪些路径没测」「最关键的边界是什么」会全部丢失，二线只能把
+「基于哪些样本」「哪些路径没测」「最关键的边界是什么」会全部丢失，协作方只能把
 「未发现异常」误读成「网络没问题」。本模块把结论与边界绑成同一个结构化对象，
 六个出口（报告 / CLI / 诊断包 / 取证单 / UI / MCP，后两者在 E2 接入）都消费它。
 
@@ -20,7 +20,7 @@ UI / MCP。所有出口只允许调用 :func:`build_conclusion`，禁止各自�
       ``conclusion`` / ``basis`` / ``coverage`` / ``not_covered`` /
       ``confidence`` / ``confidence_level`` / ``key_limit``。
     * :func:`render_conclusion_markdown` / :func:`render_conclusion_text`：
-      上述对象 → 给人看的整块文本（报告 / 复制给二线）。
+      上述对象 → 给人看的整块文本（报告 / 复制给协作方）。
 
 **降级规则**：任何一个占位符填充失败，该项输出「未知（原因：…）」并把结论级
 ``confidence`` 降为 :data:`CONFIDENCE_INDIRECT`（等级「低」）；**禁止空串、禁止
@@ -845,12 +845,12 @@ def render_conclusion_markdown(block: dict, report_id: str | None = None) -> str
 
 
 def render_conclusion_text(block: dict, report_id: str | None = None) -> str:
-    """把结论边界对象渲染成纯文本整块（复制给二线 / 发微信 / 工单）。
+    """把结论边界对象渲染成纯文本整块（复制给协作方 / 发微信 / 工单）。
 
     与 :func:`render_conclusion_markdown` 同源，但不含 Markdown 符号
     （无 ``#`` 标题、无 ``|`` 表格），并显式列出「结论 + 依据 + 本次覆盖 +
     明确未覆盖 + 置信等级/关键边界」。传 ``report_id`` 时在末尾追加报告标识，
-    让二线能手查到对应的 `.md` / `.json` 报告。
+    让协作方能手查到对应的 `.md` / `.json` 报告。
 
     Args:
         block: :func:`build_conclusion` 的返回值（或结构相同的对象）。

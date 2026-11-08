@@ -170,6 +170,15 @@
   .qcard .qpoints li{margin:1px 0}
   .qcard .qex{margin-top:9px;font-size:12px;line-height:1.68;color:#475569;
     background:#eff6ff;border-left:3px solid #60a5fa;border-radius:6px;padding:7px 10px}
+  /* 上次结果提示条（G5）：刷新/重开页面时明确告诉用户「这是上次的结果」，不是卡住 */
+  .lastrun{margin:0 0 12px;border:1px solid #bfdbfe;background:var(--accent-soft);
+    border-radius:11px;padding:9px 12px;display:flex;align-items:center;gap:10px;
+    flex-wrap:wrap;font-size:12.5px;line-height:1.6;color:#1e3a8a;box-shadow:var(--sh)}
+  .lastrun .lr-text{min-width:0;word-break:break-word}
+  .lastrun .lr-actions{margin-left:auto;display:flex;gap:7px;flex:none}
+  .lastrun .lr-actions .btn{width:auto;padding:5px 12px;font-size:11.5px}
+  .lastrun .lr-actions .btn:disabled{opacity:.55;cursor:not-allowed}
+  .lastrun .lr-note{width:100%;font-size:11px;color:#475569}
   /* 侧栏固定在底部：字段区独立滚动，「开始」按钮永远可见 */
   .side-actions{flex:none;padding:9px 0 2px;margin-top:6px;border-top:1px solid var(--line);
     background:#fff}
@@ -792,6 +801,14 @@
 
   <main class="main">
     <div class="main-scroll" id="main-scroll">
+    <div class="lastrun hidden" id="lastrun-banner" role="status" aria-live="polite">
+      <div class="lr-text" id="lastrun-text"></div>
+      <div class="lr-actions">
+        <button class="btn ghost" id="lastrun-view">查看</button>
+        <button class="btn ghost" id="lastrun-new">开始新任务</button>
+      </div>
+      <div class="lr-note hidden" id="lastrun-note"></div>
+    </div>
     <div class="resultbar">
       <div>
         <h2 id="result-title">全网体检（全网扫描）</h2>
@@ -864,6 +881,18 @@
         <p class="viewintro">网卡、tshark、Npcap、Scapy、权限与端口信息。抓包选错网卡是「0 包」最常见的原因，
           可以在这里确认哪块网卡真的在线。</p>
         <div id="sysinfo-grid" class="infogrid"></div>
+        <div class="sectitle" style="margin-top:16px" id="settings-service-title">后台服务</div>
+        <div class="infogrid">
+          <div class="infocard" style="grid-column:1/-1">
+            <span id="settings-idle-label">后台空闲退出：</span>
+            <b id="idle-exit-info" style="white-space:normal;line-height:1.55">检测中…</b>
+          </div>
+        </div>
+        <div class="hint" id="idle-exit-hint"></div>
+        <div class="toolbar" style="margin-top:10px">
+          <button class="btn ghost" id="quit-background"
+                  style="width:auto;padding:6px 14px">立即退出后台</button>
+        </div>
         <div class="sectitle" style="margin-top:16px">网卡列表</div>
         <div id="sysinfo-ifaces"></div>
         <div class="toolbar" style="margin-top:12px">
@@ -1117,7 +1146,7 @@
         "按 L2 链路 → L3 网络 → L4 传输 → L7 应用四层给结论",
         "适合「不知道问题在哪」时先做一次基线"
       ],
-      "example": "例：同事说「整层楼都上不了网」→ 全网体检 → 报告会指出是本机网卡、网关，还是某个外部服务在拖慢。",
+      "example": "例：用户反馈「整层楼都上不了网」→ 全网体检 → 报告会指出是本机网卡、网关，还是某个外部服务在拖慢。",
       "term": "术语：实时抓包 = 从网卡现抓；这里不设目标，目标框被有意隐藏，填了也会被后端忽略。",
       "hint": "全网体检不设目标过滤，建议 30~60 秒；运行中可以切到「连通与速度测试」但建议等结果。",
       "idle_desc": "不设目标，抓本机网卡上的全部流量，再从 L2 到 L7 分层分析。适合完全不知道问题在哪的第一步。"
@@ -1144,7 +1173,7 @@
         "域名会先解析；私网 / fake-ip 目标自动抓全网，再在分析阶段筛",
         "适合「只有某个网站或系统打不开」的定向排查"
       ],
-      "example": "例：同事说「打不开 OA」→ 单目标诊断 → 报告会指出卡在 DNS 解析、TCP 建连还是 TLS 握手。",
+      "example": "例：用户反馈「打不开 OA」→ 单目标诊断 → 报告会指出卡在 DNS 解析、TCP 建连还是 TLS 握手。",
       "term": "术语：定向抓包 = 只保留跟目标有关的报文；私网 IP / 私网网段不设抓包过滤（抓全网后在分析阶段筛），避免漏抓。",
       "hint": "私网 IP / 私网网段不下抓包过滤（先抓全网，分析阶段再筛）；域名解析到 fake-ip 时也会自动抓全网。",
       "idle_desc": "只盯一个目标 IP / 网段 / 域名。域名会先解析；解析到 fake-ip / 私网时自动改为抓全网，避免 0 包。"
@@ -1216,7 +1245,7 @@
         "支持 .pcap / .pcapng / .cap 格式",
         "适合现场没权限抓包，或复盘历史故障"
       ],
-      "example": "例：网络同事发来一个 pcap → 分析抓包文件 → 直接得到四层结论、问题清单和处理建议。",
+      "example": "例：对方发来一个 pcap → 分析抓包文件 → 直接得到四层结论、问题清单和处理建议。",
       "term": "术语：离线分析 = 分析已有的 pcap 文件，不访问网卡、不需要管理员权限；和上面的「实时抓包」是两回事。",
       "hint": "分析抓包文件只读取 pcap 文件，不需要管理员权限，适合权限受限的目标机器。",
       "idle_desc": "选择或拖入一个已有 pcap / pcapng 文件，直接离线分析；不会碰网卡。"
@@ -1993,6 +2022,163 @@ function showIdle(mode) {
     + '</div></div>';
 }
 
+/* ---------- 上次结果提示条：纯函数（Node 单测直接跑这一段，不碰 DOM） ---------- */
+function lastRunPad2(n) {
+  return (n < 10 ? "0" : "") + n;
+}
+
+/* 本地时区人类可读：今天 14:32 / 昨天 09:10 / 11-07 14:32 / 2025-12-31 14:32 */
+function lastRunTimeText(iso, nowMs, copy) {
+  const c = copy || {};
+  const t = Date.parse(String(iso || ""));
+  if (!isFinite(t)) return c.time_unknown || "时间未知";
+  const d = new Date(t);
+  const now = new Date(isFinite(nowMs) ? nowMs : Date.now());
+  const hm = lastRunPad2(d.getHours()) + ":" + lastRunPad2(d.getMinutes());
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return (c.today || "今天") + " " + hm;
+  const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth()
+      && d.getDate() === y.getDate()) {
+    return (c.yesterday || "昨天") + " " + hm;
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return lastRunPad2(d.getMonth() + 1) + "-" + lastRunPad2(d.getDate()) + " " + hm;
+  }
+  return d.getFullYear() + "-" + lastRunPad2(d.getMonth() + 1) + "-"
+    + lastRunPad2(d.getDate()) + " " + hm;
+}
+
+function lastRunModeLabel(mode, copy, modes) {
+  const cfg = (modes || {})[mode];
+  if (cfg && cfg.label) return cfg.label;
+  return (copy || {}).mode_unknown || "上次任务";
+}
+
+/* 无记录返回空串（不渲染提示条，绝不误报）；有记录按 copy 模板拼「时间 · 模式 · 目标」。 */
+function lastRunBannerText(last, nowMs, copy, modes) {
+  if (!last || typeof last !== "object" || !last.time) return "";
+  const c = copy || {};
+  const text = (c.banner || "检测到上次结果（{time} · {mode} · {target}）")
+    .replace("{time}", lastRunTimeText(last.time, nowMs, c))
+    .replace("{mode}", lastRunModeLabel(last.mode, c, modes))
+    .replace("{target}", String(last.target || "").trim() || c.target_all || "全网");
+  return last.ok === false ? text + (c.failed_suffix || " · 未成功") : text;
+}
+
+/* full_result=false（只有 runs/ 摘要）时「查看」必须禁用：不允许点了没反应。 */
+function lastRunCanView(last) {
+  return !!(last && typeof last === "object" && last.full_result);
+}
+
+function lastRunNote(last, copy) {
+  if (!last || typeof last !== "object" || last.full_result) return "";
+  return (copy || {}).summary_only || "";
+}
+/* ---------- 上次结果提示条结束 ---------- */
+
+/* ---------- 上次结果提示条：DOM 接线（G5） ---------- */
+let LAST_RUN = null;          // 最近一次 /api/last-run 的 last 摘要（null = 无记录）
+let LAST_RUN_COPY = {};       // copy/zh-CN.json 的 last_run section（随接口下发）
+let SETTINGS_COPY = {};       // copy/zh-CN.json 的 settings section
+let LAST_RUN_BUSY = false;
+
+function hideLastRun() {
+  const bar = $("#lastrun-banner");
+  if (bar) bar.classList.add("hidden");
+}
+
+function paintLastRun(last) {
+  LAST_RUN = (last && typeof last === "object") ? last : null;
+  const bar = $("#lastrun-banner");
+  const text = lastRunBannerText(LAST_RUN, Date.now(), LAST_RUN_COPY, UI.modes || {});
+  if (!bar || !text) { hideLastRun(); return; }
+  $("#lastrun-text").textContent = text;
+  const view = $("#lastrun-view");
+  const canView = lastRunCanView(LAST_RUN);
+  view.disabled = !canView;
+  view.textContent = canView ? (LAST_RUN_COPY.view || "查看")
+    : (LAST_RUN_COPY.view_disabled || "只能看摘要");
+  view.title = canView ? "" : (LAST_RUN_COPY.summary_only || "");
+  const note = lastRunNote(LAST_RUN, LAST_RUN_COPY);
+  const noteBox = $("#lastrun-note");
+  noteBox.textContent = note;
+  noteBox.classList.toggle("hidden", !note);
+  $("#lastrun-new").textContent = LAST_RUN_COPY.new_task || "开始新任务";
+  bar.classList.remove("hidden");
+}
+
+async function syncLastRun() {
+  if (LAST_RUN_BUSY) return;
+  LAST_RUN_BUSY = true;
+  try {
+    const r = await fetch("/api/last-run").then((x) => x.json()).catch(() => null);
+    if (!r) return;                       // 后端没响应：保持现状，不误报
+    if (r.ui_copy && r.ui_copy.last_run) LAST_RUN_COPY = r.ui_copy.last_run;
+    if (r.last) paintLastRun(r.last); else { LAST_RUN = null; hideLastRun(); }
+  } finally {
+    LAST_RUN_BUSY = false;
+  }
+}
+
+async function viewLastRun() {
+  if (!lastRunCanView(LAST_RUN)) return;   // 只有摘要：按钮已禁用，双保险
+  const btn = $("#lastrun-view");
+  btn.disabled = true;
+  btn.textContent = LAST_RUN_COPY.restoring || "正在恢复上次结果…";
+  try {
+    const r = await fetch("/api/last-run/result")
+      .then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (!r || !r.ok || !r.result) {
+      appendLog((LAST_RUN_COPY.restore_failed || "读取上次结果失败：{reason}")
+        .replace("{reason}", (r && r.error) || "未知错误"), "e");
+      return;
+    }
+    if (r.result.ui_copy && r.result.ui_copy.conclusion) {
+      CONCLUSION_COPY = r.result.ui_copy.conclusion;
+    }
+    hideLastRun();
+    if (r.result.degraded) renderDegraded(r.result, r.link_actions || []);
+    else render(r.result, r.link_actions || []);
+  } finally {
+    btn.disabled = !lastRunCanView(LAST_RUN);
+    btn.textContent = lastRunCanView(LAST_RUN) ? (LAST_RUN_COPY.view || "查看")
+      : (LAST_RUN_COPY.view_disabled || "只能看摘要");
+  }
+}
+
+async function startNewTask() {
+  const btn = $("#lastrun-new");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/last-run/clear", { method: "POST" })
+      .then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (!r || !r.ok) {
+      appendLog((LAST_RUN_COPY.clear_failed || "清空上次结果失败：{reason}")
+        .replace("{reason}", (r && r.error) || "未知错误"), "e");
+      return;
+    }
+  } finally {
+    btn.disabled = false;
+  }
+  LAST_RUN = null;
+  LAST_RESULT = null;
+  RUN_MODE = null;
+  lastLogCount = 0;
+  hideLastRun();
+  setMode("scan");                     // 回默认首屏（不受能力锁影响，与首次进入一致）
+  appendLog(LAST_RUN_COPY.cleared || "已清空上次结果，可以开始新任务。", "s");
+}
+
+if ($("#lastrun-view")) $("#lastrun-view").onclick = viewLastRun;
+if ($("#lastrun-new")) $("#lastrun-new").onclick = startNewTask;
+/* bfcache 还原（浏览器后退/重开标签页）不会重新执行脚本，必须靠 pageshow 再同步一次；
+   全新加载走 DOMContentLoaded。两边都以服务端 /api/last-run 为准，不靠旧 DOM 猜。 */
+document.addEventListener("DOMContentLoaded", syncLastRun);
+window.addEventListener("pageshow", (e) => { if (e.persisted) syncLastRun(); });
+/* ---------- 上次结果提示条：DOM 接线结束 ---------- */
+
 /* 空状态里的快捷入口 */
 document.addEventListener("click", (e) => {
   const q = e.target.closest("[data-quick]");
@@ -2094,6 +2280,31 @@ async function loadSysInfo() {
         + esc(i.short || i.name) + '</td><td class="mono">' + esc(i.name) + '</td></tr>').join("")
       + '</tbody></table></div>'
     : '<div class="msg bad">没有枚举到网卡（Npcap 未安装或 tshark 不可用）</div>';
+  paintServicePanel(app);
+}
+
+/* 设置 → 网卡与运行信息：后台空闲退出说明 + 「立即退出后台」（G5）。
+   文案唯一来源是 copy/zh-CN.json 的 settings section（随 /api/app 下发）。 */
+function paintServicePanel(info) {
+  const r = info || APP_INFO || {};
+  const copy = SETTINGS_COPY || {};
+  const idle = Number(r.idle_exit_min || 0);
+  const title = $("#settings-service-title");
+  if (title) title.textContent = copy.service_title || "后台服务";
+  const label = $("#settings-idle-label");
+  if (label) label.textContent = copy.idle_exit_label || "后台空闲退出：";
+  const box = $("#idle-exit-info");
+  if (box) {
+    box.textContent = idle > 0
+      ? (copy.idle_exit || "{minutes} 分钟（可在 config 改 idle_exit_min）")
+        .replace("{minutes}", String(idle))
+      : (copy.idle_exit_off || "已关闭（config 的 idle_exit_min=0）");
+    box.className = idle > 0 ? "ok" : "";
+  }
+  const hint = $("#idle-exit-hint");
+  if (hint) hint.textContent = copy.idle_exit_hint || "";
+  const quit = $("#quit-background");
+  if (quit) quit.textContent = copy.quit_background || "立即退出后台";
 }
 
 function paintAIPanel() {
@@ -2130,6 +2341,14 @@ async function boot() {
     if (app && app.ui_copy && app.ui_copy.startup) {
       UI_COPY = app.ui_copy.startup;
       applyCopy();
+    }
+    /* G5：提示条与设置页文案也随 /api/app 下发；两处都以 copy 表为唯一来源。 */
+    if (app && app.ui_copy && app.ui_copy.last_run) {
+      LAST_RUN_COPY = app.ui_copy.last_run;
+    }
+    if (app && app.ui_copy && app.ui_copy.settings) {
+      SETTINGS_COPY = app.ui_copy.settings;
+      paintServicePanel(app);
     }
     const sel = $("#iface");
     (r.interfaces || []).forEach((i) => {
@@ -2409,6 +2628,7 @@ async function startCapture() {
   RUN_MODE = MODE;
   RUN_DURATION = MODE === "offline" ? 0 : Number(payload.duration || 0);
   lastLogCount = 0;
+  hideLastRun();                       // 新任务开始：上次结果的提示条不再适用
   $("#console").innerHTML = "";
   $("#run").disabled = true;
   $("#run").innerHTML = '<span class="spin"></span>' + esc(cfg.btn || "运行") + '中…';
@@ -2773,6 +2993,7 @@ async function startPassive(){
   $("#duration").value = dur;
   RUN_MODE = "passive";
   RUN_DURATION = dur;
+  hideLastRun();                       // 新任务开始：上次结果的提示条不再适用
   $("#run").disabled = true;
   $("#run").innerHTML = '<span class="spin"></span>监听中…';
   $("#pstop").classList.remove("hidden");
@@ -3374,7 +3595,7 @@ function conclusionCard(res) {
     + list(copy.ui_not_covered_heading || "明确未覆盖", "not_covered", d.not_covered, false)
     + '<div class="cf" data-concl="confidence">' + esc(confLine) + '</div>'
     + '<div class="toolbar">'
-    + '<button class="btn ghost" id="conclusion-copy">' + esc(copy.btn_copy || "复制给二线") + '</button>'
+    + '<button class="btn ghost" id="conclusion-copy">' + esc(copy.btn_copy || "复制给协作方") + '</button>'
     + '<button class="btn ghost" id="conclusion-export-md">' + esc(copy.btn_export_md || "导出结论（含边界）（.md）") + '</button>'
     + '<button class="btn ghost" id="conclusion-export-json">' + esc(copy.btn_export_json || "导出结论（含边界）（.json）") + '</button>'
     + '</div></section>';
@@ -3480,7 +3701,7 @@ function render(res, actions) {
       + vd.next_steps.map(s => '<li>' + esc(s) + '</li>').join("") + '</ol>'
     : "";
 
-  /* ---- 会话明细：一线最需要的「哪个对端、什么问题」 ---- */
+  /* ---- 会话明细：使用者最需要的「哪个对端、什么问题」 ---- */
   const streams = m.streams_top || [];
   const streamTable = streams.length
     ? '<div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table>'
@@ -3769,6 +3990,7 @@ async function runProbe(){
   const target = $("#probe-target").value.trim();
   if(!target){ $("#probe-target").focus(); return; }
   const btn = $("#probe-run"), out = $("#probe-out");
+  hideLastRun();                       // 新任务开始：上次结果的提示条不再适用
   hideQuestion();
   btn.disabled = true; btn.textContent = "测试中…";
   $("#result-chip").textContent = "测试中…";
@@ -4042,12 +4264,17 @@ function mdLite(src) {
 }
 
 /* ---------------- 退出应用 ---------------- */
-async function quitApp() {
+/* 顶部「退出」与设置页「立即退出后台」共用同一条路径（POST /api/quit），
+   只把「正在停止」画在被点的那颗按钮上；测试只断言收到请求，不真杀进程。 */
+async function quitService(btn) {
+  const button = btn || $("#quit-app");
   const running = timer !== null || timerP !== null;
   if (running && !confirm("还有任务在跑，退出会中断它。确定退出吗？")) return;
-  const btn = $("#quit-app");
-  btn.disabled = true;
-  btn.textContent = "正在停止…";
+  if (!running && button && button.id === "quit-background"
+      && !confirm(SETTINGS_COPY.quit_confirm
+        || "立即停止本机后台服务？正在运行的任务会被中断，浏览器页面可以随后关闭。")) return;
+  button.disabled = true;
+  button.textContent = SETTINGS_COPY.quitting || "正在停止…";
   try {
     const r = await fetch("/api/quit", { method: "POST" }).then((x) => x.json());
     document.body.innerHTML =
@@ -4055,17 +4282,22 @@ async function quitApp() {
          color:#475569;text-align:center;padding:40px">
          <div>
            <div style="font-size:34px;margin-bottom:10px">✓</div>
-           <h2 style="margin:0 0 6px;color:#0f172a">本地服务已停止</h2>
+           <h2 style="margin:0 0 6px;color:#0f172a">${esc(SETTINGS_COPY.quit_done_title || "本地服务已停止")}</h2>
            <p style="margin:0">${esc(r.message || "可以直接关闭这个页面了")}</p>
            <p style="margin:16px 0 0;font-size:12px;color:#94a3b8">
-             下次使用请双击工具目录下的 <b>NetDiag.vbs</b>（无控制台窗口自动打开）</p>
+             ${esc(SETTINGS_COPY.quit_done_hint || "下次使用请重新双击工具目录下的启动器。")}</p>
          </div>
        </div>`;
   } catch (e) {
-    btn.disabled = false;
-    btn.textContent = "退出";
+    button.disabled = false;
+    button.textContent = button.id === "quit-background"
+      ? (SETTINGS_COPY.quit_background || "立即退出后台") : "退出";
     alert("停止失败：" + e + "\n可双击 NetDiag-stop.vbs 强制结束。");
   }
+}
+
+async function quitApp() {
+  return quitService($("#quit-app"));
 }
 
 async function loadAppInfo() {
@@ -4083,6 +4315,9 @@ async function loadAppInfo() {
       $("#quit-app").title =
         `停止本机后台服务；${r.idle_exit_min} 分钟无人使用会自动退出`;
     }
+    if (r.ui_copy && r.ui_copy.settings) SETTINGS_COPY = r.ui_copy.settings;
+    if (r.ui_copy && r.ui_copy.last_run) LAST_RUN_COPY = r.ui_copy.last_run;
+    paintServicePanel(r);
   }
 }
 
@@ -4133,9 +4368,10 @@ $("#sysinfo-refresh").onclick = loadSysInfo;
 $("#sysinfo-startup").onclick = () => { initStartup({ manual: true, force: true }); };
 
 $("#quit-app").onclick = quitApp;
+$("#quit-background").onclick = () => quitService($("#quit-background"));
 
 wireFormPersistence();
-boot().then(poll).then(loadAI).then(loadAppInfo).then(initStartup);
+boot().then(poll).then(loadAI).then(loadAppInfo).then(initStartup).then(syncLastRun);
 </script>
 </body>
 </html>

@@ -6,7 +6,7 @@
   服务端预渲染的 ``conclusion_text`` / ``conclusion_markdown`` / ``conclusion_export``；
 * 结论卡在正常 / 故障 / 降级 / 失败四条路径都渲染，同一卡片连续展示
   「结论 → 依据 → 本次覆盖 → 明确未覆盖 → 置信等级/关键边界」，**不可折叠**；
-* 「复制给二线」复制服务端 ``render_conclusion_text`` 整块（含报告标识），
+* 「复制给协作方」复制服务端 ``render_conclusion_text`` 整块（含报告标识），
   不是只复制结论句；`.json` 导出 = CLI ``--json`` 的 conclusion + 元信息；
 * 旧 payload 没有边界字段时显式降级为「未知（原因：旧数据缺少边界字段）」+ 低等级。
 

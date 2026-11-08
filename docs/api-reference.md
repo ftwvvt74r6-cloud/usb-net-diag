@@ -601,12 +601,12 @@ def render_conclusion_text(block: dict, report_id: str | None=None) -> str
 ```
 
 ```text
-把结论边界对象渲染成纯文本整块（复制给二线 / 发微信 / 工单）。
+把结论边界对象渲染成纯文本整块（复制给协作方 / 发微信 / 工单）。
 
 与 :func:`render_conclusion_markdown` 同源，但不含 Markdown 符号
 （无 ``#`` 标题、无 ``|`` 表格），并显式列出「结论 + 依据 + 本次覆盖 +
 明确未覆盖 + 置信等级/关键边界」。传 ``report_id`` 时在末尾追加报告标识，
-让二线能手查到对应的 `.md` / `.json` 报告。
+让协作方能手查到对应的 `.md` / `.json` 报告。
 
 Args:
     block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
@@ -2225,7 +2225,7 @@ Args:
     checklist: :func:`build_checklist` 的返回值。
     include_conclusion: 是否在清单前输出结论边界块；报告正文第一节已经
         输出过同一块时也**保留**（报告末尾的取证单是「整块可转发」的副本，
-        复制给二线时结论和边界不会丢）。
+        复制给协作方时结论和边界不会丢）。
 
 Returns:
     str: 以 ``copy.evidence_checklist.section_title`` 开头、以换行结尾的 Markdown；
@@ -2242,7 +2242,7 @@ def render_checklist_text(checklist: dict, include_conclusion: bool=True) -> str
 把清单渲染成纯文本（方便直接发微信/工单，不含 Markdown 表格符号）。
 
 E1 起若 ``checklist`` 带 ``conclusion`` 边界对象，则在清单前输出同一结论+
-边界块的**纯文本版**（复制给二线时结论与边界一起走）。
+边界块的**纯文本版**（复制给协作方时结论与边界一起走）。
 
 Args:
     checklist: :func:`build_checklist` 的返回值。
@@ -5300,31 +5300,31 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 132 | ✅ |
-| `request_quit` | function | 137 | ✅ |
-| `cleanup_pid` | function | 185 | ✅ |
-| `BodyTooLarge` | class | 195 | ✅ |
-| `doctor_cached` | function | 274 | ✅ |
-| `log` | function | 370 | ✅ |
-| `evidence_payload` | function | 466 | ✅ |
-| `conclusion_report_id` | function | 590 | ✅ |
-| `build_status_conclusion` | function | 621 | ✅ |
-| `start_job` | function | 764 | ✅ |
-| `report_index` | function | 825 | ✅ |
-| `request_elevation` | function | 859 | ✅ |
-| `engine_info` | function | 898 | ✅ |
-| `passive_start` | function | 941 | ✅ |
-| `passive_status` | function | 976 | ✅ |
-| `link_actions` | function | 1050 | ✅ |
-| `Handler` | class | 1120 | ✅ |
-| `Handler.handle_one_request` | method | 1146 | ✅ |
-| `Handler.log_message` | method | 1182 | ✅ |
-| `Handler.do_GET` | method | 1320 | ✅ |
-| `Handler.do_POST` | method | 1337 | ✅ |
-| `DiagServer` | class | 1595 | ✅ |
-| `DiagServer.handle_error` | method | 1606 | ✅ |
-| `create_server` | function | 1634 | ✅ |
-| `main` | function | 1681 | ✅ |
+| `touch` | function | 144 | ✅ |
+| `request_quit` | function | 149 | ✅ |
+| `cleanup_pid` | function | 197 | ✅ |
+| `BodyTooLarge` | class | 207 | ✅ |
+| `doctor_cached` | function | 286 | ✅ |
+| `log` | function | 382 | ✅ |
+| `evidence_payload` | function | 478 | ✅ |
+| `conclusion_report_id` | function | 602 | ✅ |
+| `build_status_conclusion` | function | 633 | ✅ |
+| `start_job` | function | 980 | ✅ |
+| `report_index` | function | 1041 | ✅ |
+| `request_elevation` | function | 1075 | ✅ |
+| `engine_info` | function | 1114 | ✅ |
+| `passive_start` | function | 1157 | ✅ |
+| `passive_status` | function | 1192 | ✅ |
+| `link_actions` | function | 1266 | ✅ |
+| `Handler` | class | 1336 | ✅ |
+| `Handler.handle_one_request` | method | 1362 | ✅ |
+| `Handler.log_message` | method | 1398 | ✅ |
+| `Handler.do_GET` | method | 1536 | ✅ |
+| `Handler.do_POST` | method | 1553 | ✅ |
+| `DiagServer` | class | 1852 | ✅ |
+| `DiagServer.handle_error` | method | 1863 | ✅ |
+| `create_server` | function | 1891 | ✅ |
+| `main` | function | 1938 | ✅ |
 
 ### `touch`
 
@@ -5448,7 +5448,7 @@ def conclusion_report_id(result: dict) -> str
 ```
 
 ```text
-生成给人看的「报告标识」（复制给二线 / 导出时用于追溯）。
+生成给人看的「报告标识」（复制给协作方 / 导出时用于追溯）。
 
 优先用真实落盘文件名（``.md`` / ``.json``），退化为抓包文件名 + 生成时间；
 都没有时返回「本次诊断（未落盘报告）」。只在状态响应/导出里出现，不写进报告。
