@@ -12,6 +12,7 @@ API:
   GET  /api/report?path=    读取报告文件
   GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
+  GET  /api/preflight       启动器/首屏共用能力快照（与 /api/selfcheck 同源，无 first_run）
   GET  /api/selfcheck       首屏准备检查（六项只读环境检查 + 首次运行标记）
   POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
   GET  /api/last-run        上次运行摘要（内存优先；进程重启后用 runs/ 历史兜底）
@@ -42,7 +43,6 @@ import threading
 import time
 import traceback
 import urllib.parse
-import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -61,6 +61,9 @@ ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
 
 import ai  # noqa: E402
+# H1：浏览器打开权的唯一判定（browser_disabled）与唯一打开入口（open_browser）
+# 都在 app 里；server 不再直接碰 webbrowser，避免第二套逻辑。
+import app  # noqa: E402
 import bootstrap  # noqa: E402
 import conclusion  # noqa: E402
 import copytext  # noqa: E402
@@ -1145,6 +1148,49 @@ def request_elevation() -> dict:
     return {"ok": True, "restarted": True, "message": "已请求管理员权限，服务将重启"}
 
 
+def preflight_payload() -> dict:
+    """启动器与界面共用的能力快照（H6：``GET /api/preflight``）。
+
+    与 ``GET /api/selfcheck`` **同源**：内部只调 :func:`selfcheck.collect_cached`，
+    不复制任何判定逻辑。唯一的语义差别是 preflight 不带 ``first_run`` / ack ——
+    那是首屏面板的一次性提醒，不是「这台机器现在能不能用」的一部分。
+
+    为什么让启动器也读这个接口（而不是自己再实现一套 Python/tshark/Npcap 判断）：
+    C# 里重复判定迟早和 Python 分叉（版本号解析、scapy 可选、端口语义都会漂移）。
+    启动器在服务未起时只显示 Python/端口两个本地占位，服务起来后以本接口为准。
+
+    Returns:
+        dict: 键 ``ok``（六项是否全过）/ ``version`` / ``checks``（固定 6 项，字段与
+            selfcheck 完全一致，含 ``fix_kind`` / ``fix_url`` / ``fix_command`` /
+            ``impact``）/ ``capabilities``（能力矩阵）/ ``ui_copy``（``{"startup": {...}}``
+            文案）/ ``fix_urls``（**仅未通过**且带官网链接的项 → URL，启动器按钮
+            直接取用；全绿时为空）/ ``source``（固定 ``"selfcheck"``，明示同源）。
+
+    Example:
+        >>> payload = preflight_payload()
+        >>> [item["key"] for item in payload["checks"]][:2]
+        ['python', 'tshark']
+    """
+    snap = selfcheck.collect_cached()
+    checks = snap.get("checks") or []
+    # S7：修复索引只收**未通过**的检查项。通过的项即使带 fix_url（历史数据/未来
+    # 增加「查看官网」等字段）也不该被启动器当成「需要修复」，否则全绿时按钮仍亮。
+    fix_urls = {
+        str(item.get("key")): str(item.get("fix_url"))
+        for item in checks
+        if isinstance(item, dict) and item.get("fix_url") and not item.get("ok")
+    }
+    return {
+        "ok": bool(snap.get("ok")),
+        "version": snap.get("version", ""),
+        "checks": checks,
+        "capabilities": snap.get("capabilities") or {},
+        "ui_copy": snap.get("ui_copy") or {},
+        "fix_urls": fix_urls,
+        "source": "selfcheck",
+    }
+
+
 # ---------------------------------------------------------------- 通信观察
 def engine_info() -> dict:
     """当前可用的采集引擎（第一步就告诉用户「能不能用 Scapy」）。
@@ -1749,6 +1795,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(evidence_payload(latest, full=full, fmt=fmt))
         if path == "/api/doctor":
             return self._json(doctor_cached())
+        if path == "/api/preflight":
+            # H6：启动器 splash 与 UI 首屏共用这一份（同一 collect_cached 缓存），
+            # 不带 first_run/ack 语义；旧前端继续用 /api/selfcheck 也仍然同源。
+            return self._json(preflight_payload())
         if path == "/api/selfcheck":
             # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程；短 TTL 缓存
             # 让紧接着的 /api/app 或「重新检测」复用同一份结果。
@@ -2021,8 +2071,10 @@ def main() -> int:
     if httpd is None:
         print("[错误] 端口被占用，无法启动本地服务", file=sys.stderr)
         return 1
-    if cfg.get("auto_open_browser", True):
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    if cfg.get("auto_open_browser", True) and not app.browser_disabled():
+        # H1/S2：走 app.open_browser() 这一受控入口（内部再判一次 env），
+        # 不再直接调 webbrowser.open —— 否则「所有打开点都走这里」就有第二套逻辑。
+        threading.Timer(0.8, lambda: app.open_browser(url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

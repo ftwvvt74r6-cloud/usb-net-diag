@@ -34,8 +34,62 @@ MB_ICONINFO = 0x40
 #: 缺组件/启动失败时的排查文档（相对仓库根；日志里给出可复制路径，不写死盘符）。
 DOCS_STARTUP = "docs/startup.md"
 
+#: 浏览器打开权归属的环境变量（H1）。
+#:
+#: 双击 ``NetDiag.exe`` 时，启动器是**唯一**打开浏览器的地方：它给本进程设
+#: ``NETDIAG_NO_BROWSER=1``，本文件与 :mod:`core.server` 的所有 ``webbrowser.open``
+#: 都必须让路，否则用户会看到两个标签页（launcher 开一个 + app/server 各开一个）。
+#: 直接 ``python core\\app.py`` 不设这个变量，保持「自己开浏览器」的兼容行为。
+NO_BROWSER_ENV = "NETDIAG_NO_BROWSER"
+
+#: 视为「已接管」的取值（大小写不敏感）。只认显式真值，拼错/空值不改变默认行为。
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
 
 # ----------------------------------------------------------------- 基础工具
+def browser_disabled() -> bool:
+    """本进程是否已被启动器接管浏览器打开（H1 单次打开的开关）。
+
+    Returns:
+        bool: 环境变量 :data:`NO_BROWSER_ENV` 为 ``1/true/yes/on`` 时 True。
+            读不到环境变量（极简运行环境）时按 False 处理，保持兼容。
+
+    Example:
+        >>> os.environ["NETDIAG_NO_BROWSER"] = "1"
+        >>> browser_disabled()
+        True
+    """
+    try:
+        return (os.environ.get(NO_BROWSER_ENV) or "").strip().lower() in _TRUE_VALUES
+    except Exception:  # noqa: BLE001  环境变量读取失败按「未接管」处理
+        return False
+
+
+def open_browser(url: str) -> bool:
+    """打开默认浏览器（受 :func:`browser_disabled` 控制的唯一入口）。
+
+    所有打开点都走这里，而不是直接调 ``webbrowser.open``：这样「谁启动、谁决定
+    是否开浏览器」只有一处判断，测试也只需要 mock 一个函数。
+
+    Args:
+        url: 要打开的本地界面地址；空串直接忽略。
+
+    Returns:
+        bool: True 表示已调用系统浏览器；被环境变量接管、URL 为空或调用失败时 False。
+
+    Example:
+        >>> os.environ["NETDIAG_NO_BROWSER"] = "1"
+        >>> open_browser("http://127.0.0.1:8787/")
+        False
+    """
+    if not url or browser_disabled():
+        return False
+    try:
+        return bool(webbrowser.open(url))
+    except Exception:  # noqa: BLE001  打不开浏览器只降级，不阻塞服务
+        return False
+
+
 def redirect_output() -> None:
     """pythonw 下 sys.stdout/stderr 是 None，任何 print 都会炸，先兜住。
 
@@ -86,6 +140,11 @@ def is_admin() -> bool:
 def relaunch_as_admin() -> bool:
     """用 UAC 提权重启自己。
 
+    提权只重启**服务进程**，界面标签页已经开着；所以提权后的新进程必须继承
+    ``NETDIAG_NO_BROWSER=1``（H1：否则用户会在提权后再被弹出第二个标签页）。
+    ``ShellExecuteW`` 创建的子进程继承当前进程环境，这里在调用前显式置位，
+    也覆盖「直接从命令行启动、没经过 launcher」的情况。
+
     Returns:
         bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
             False 表示用户点了「否」或调用失败 —— 此时**不要**退出，
@@ -98,6 +157,8 @@ def relaunch_as_admin() -> bool:
         pythonw = Path(exe).with_name("pythonw.exe")
         if pythonw.is_file():
             exe = str(pythonw)
+        # 提权后不自动开浏览器（同源：H1 统一打开点）。子进程继承本进程环境。
+        os.environ[NO_BROWSER_ENV] = "1"
         # pythonw 提权后仍无控制台；__file__ 用绝对路径，工作目录设为 ROOT
         params = f'"{Path(__file__).resolve()}" --elevated'
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, str(ROOT), 1)
@@ -106,11 +167,37 @@ def relaunch_as_admin() -> bool:
         return False
 
 
+def _port_open(port: int, timeout: float = 0.15) -> bool:
+    """``127.0.0.1:<port>`` 上有没有进程在监听（只做 TCP 连接，不发 HTTP）。
+
+    为什么需要它（H2 实测）：``urllib`` 打到一个**没人监听**的端口会等满
+    ``timeout`` 才失败；10 个端口 = 7 秒，占冷启动的一半以上。先做一次
+    TCP 连接探测（关闭端口本机立即拒绝，约 1ms），只对真正在监听的端口发
+    ``/api/ping``，把「找自己」从 7 秒降到几十毫秒。
+
+    Args:
+        port: 要探测的本地端口。
+        timeout: 连接超时（秒）；本机回环通常毫秒级返回。
+
+    Returns:
+        bool: 有进程在监听返回 True；拒绝/超时/异常都返回 False（不抛）。
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(max(0.01, float(timeout)))
+        return sock.connect_ex(("127.0.0.1", int(port))) == 0
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
 def find_running() -> str:
     """探测本机是否已有实例在跑（单实例保护）。
 
     逐个试 8787~8796 的 ``/api/ping``，并核对 ``app`` 字段是本程序，
-    避免把别的服务误认成自己。
+    避免把别的服务误认成自己。先用 :func:`_port_open` 过滤没人监听的端口，
+    不对关闭端口发 HTTP（H2：否则 10 个端口会白等 7 秒）。
 
     Returns:
         str: 已运行实例的界面地址（如 ``http://127.0.0.1:8787/``）；没有则空串。
@@ -122,6 +209,8 @@ def find_running() -> str:
     except Exception:  # noqa: BLE001
         base = 8787
     for port in range(base, base + 10):
+        if not _port_open(port):
+            continue
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=0.7) as resp:
                 data = json.loads(resp.read().decode("utf-8", "replace"))
@@ -178,6 +267,9 @@ def main() -> int:
     redirect_output()
     elevated = "--elevated" in sys.argv
     no_elevate = "--no-elevate" in sys.argv
+    # H1：浏览器打开权的唯一判定。launcher 会设 NETDIAG_NO_BROWSER=1 并由它开；
+    # --elevated 是「界面已开着」的提权重启，再开一个标签页只会让用户困惑。
+    auto_open = not browser_disabled() and not elevated
 
     # 1. 已有一个实例在跑：直接开浏览器，不重复起服务。
     #    例外：本次是「界面点提权重启」拉起的 --elevated 新进程，旧实例会主动退出，
@@ -190,7 +282,11 @@ def main() -> int:
             if not url:
                 break
     if url:
-        webbrowser.open(url)
+        if auto_open:
+            open_browser(url)
+        else:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 已有实例但浏览器由启动器/提权流程接管，"
+                  f"本次不自动打开：{url}")
         return 0
 
     # 2. 启动不提权：需要管理员的功能（实时抓包 / 通信观察）由界面按需请求
@@ -243,12 +339,15 @@ def main() -> int:
 
     def _open() -> None:
         time.sleep(0.4)  # 等 serve_forever 起来，避免瞬间 502
-        try:
-            webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            pass
+        open_browser(url)   # 内层再判一次 env：线程启动后环境被改也不会误开
 
-    threading.Thread(target=_open, daemon=True).start()
+    if auto_open:
+        threading.Thread(target=_open, daemon=True).start()
+    else:
+        # env=1（launcher 唯一打开点）或 --elevated：**连线程都不启动**，
+        # 避免测量/测试里出现迟到的浏览器窗口。
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 浏览器打开由启动器接管，"
+              f"本次不自动打开（{NO_BROWSER_ENV}={os.environ.get(NO_BROWSER_ENV, '') or '0'}）")
 
     try:
         httpd.serve_forever()
