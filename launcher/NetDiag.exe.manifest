@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NetDiag.exe 的权限声明：asInvoker（启动器自身永远不提权）。
+
+  为什么必须是 asInvoker：
+    * 双击启动只是「拉起 Python + 打开浏览器」，不需要管理员；
+    * 需求明确「启动不提权」，需要实时抓包/通信观察时由界面按需请求 UAC；
+    * 如果这里写 requireAdministrator，双击就会弹 UAC，正是本批要修掉的体验问题，
+      而且会让非管理员机器连离线分析都进不去。
+
+  用户右键「以管理员身份运行」时，Windows 会以管理员令牌启动本 exe（exe 天然能力），
+  启动器内部不做任何二次提权。
+-->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="NetDiag.Launcher" type="win32" />
+  <description>NetDiag · 网络矩阵启动器（启动不提权）</description>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <!-- Windows 10/11 优先；保留 7/8/8.1 只为让旧系统别进兼容模式。 -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}" />
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}" />
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}" />
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

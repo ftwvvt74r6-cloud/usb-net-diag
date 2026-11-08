@@ -1,7 +1,7 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.3.0`；写作基线 `main` = `7bc9e14`（PR #26 合并后）。
+> **对齐版本**：`VERSION` = `0.3.0`；写作基线 `main` = `27140ae`（PR #27 版本进位合并后）。
 > **时效性**：文中数字是 2026-11-08 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
@@ -28,9 +28,9 @@ git ls-files 'core/*.py'                        # 核心模块清单（注意用
 git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，见下方说明）
 ```
 
-> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **45 行**
+> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **61 行**
 > （含 docstring / 注释 / 示例 URL），**不等于路由数量**；精确路由清单看 **§4 的表**
-> （10 个 POST + 2 个 GET = 12 个核心 API）。
+> （**12 个 POST + 13 个 GET = 25 个 API**，另有静态页 `/`）。
 
 > 仓库里有多份**历史文档**（`docs/START-HERE.md`、`docs/plan-review.md`、`docs/code-index.md`、
 > `docs/t00-findings.md`、`docs/handoff-MANIFEST.json`）描述的是 v0.1.0 或目标架构，
@@ -41,16 +41,17 @@ git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，
 ## 2. 项目是什么 + 能力边界
 
 **一句话**：放进 U 盘/任意目录就能跑的 Windows 便携网络诊断工具。插上 → 双击
-`NetDiag.vbs`（或 `start.bat`）→ 浏览器打开 `127.0.0.1:8787`，把「慢、卡、丢包、连不上、
+`NetDiag.exe`（推荐；`start.bat` 是 Python 回退入口，`NetDiag.vbs` 是兼容入口）→
+浏览器打开 `127.0.0.1:8787`，把「慢、卡、丢包、连不上、
 时通时不通」定位到 **L2 链路 → L3 网络 → L4 传输 → L7 应用** 的某一层，并回答四问：
 **哪一层坏了 / 哪个协议 / 哪个对端 / 下一步做什么**。安全观察（明文凭证、可疑外联）
-只是附带项，不参与主判定。
+只是附带项，不参与主判定。**启动不提权**；实时抓包 / 通信观察需要管理员时在界面按需请求。
 
 ### 2.1 四个入口
 
 | 入口 | 怎么进 | 前提 | 自动化覆盖 |
 |---|---|---|---|
-| **UI** | `NetDiag.vbs`（静默、自动提权）/ `start.bat`（带窗口）/ `core\server.py` | 便携 Python；实时抓包另需 Npcap + 管理员 | HTTP 路由有 `test_http_drain.py` 等；UI 本身无浏览器 E2E |
+| **UI** | **`NetDiag.exe`（推荐，双击不提权）** / `start.bat`（Python 回退，`--admin` 才提权）/ `NetDiag.vbs`（兼容）/ `core\server.py` | 便携 Python 或系统 Python 3.11+；实时抓包另需 Npcap + 管理员 | 启动器 `test_launcher_exe.py`；HTTP 路由有 `test_http_drain.py` 等；首屏自检/权限卡/表单保留用 `test_selfcheck.py` + `test_startup_ui.py` 静态契约，CI 不跑浏览器（本机 headless 证据见 `review/`） |
 | **CLI** | `core\diagnose.py --pcap ...` | tshark（分析抓包文件也要） | `test_cli_report_out.py` 等 |
 | **MCP** | `mcp\wireshark-mcp\server.py`（stdio）+ `config\mcp-wireshark.json` | 一个 MCP 客户端；实时能力同 UI | 只做「文件存在 + 可编译」契约检查，**无协议级测试** |
 | **诊断包** | 界面按钮 / `导出诊断包.bat` / `diagnose.py --export-diag` | 无（纯本地打包） | `test_diagpack.py`、`test_sanitize.py` |
@@ -181,8 +182,8 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 被占则顺延最多 10 个端口。请求处理有三道边界：`Host` 只接受 `127.0.0.1`/`localhost`/`::1`；
 写请求检查 `Origin`（无 Origin 的本机程序放行）；JSON body 上限 8 MB、上传上限 2 GB。
 
-> **路由计数**：**核心 API = 10 个 POST + 2 个 GET**（`/api/ping`、`/api/app`）。
-> `do_GET` 另外还服务 9 个只读端点与静态页，完整清单见 4.2/4.3。
+> **路由计数**：**12 个 POST + 13 个 GET = 25 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
+> `do_GET` 另外还服务静态首页，完整清单见 4.2/4.3。
 
 ### 4.1 响应信封的现状（重要）
 
@@ -197,11 +198,13 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 `/api/v1/*` 只存在于 `contracts.py` 的 docstring 里（未实现）。
 新写接口时先决定是否启用信封；**不要假设现有响应带 `schema_version` 或 `trace_id`**。
 
-### 4.2 10 个 POST 路由
+### 4.2 12 个 POST 路由
 
 | 路由 | 请求体 / 参数 | 成功响应（关键键） |
 |---|---|---|
 | `POST /api/quit` | 无 | `{ok: true, message}`；0.3s 后关监听并清理 `logs/netdiag.pid` |
+| `POST /api/elevate` | 无请求体（C2 可带 `restart: true`） | `{ok, restarted, error?}`；成功时由 Timer 安排旧服务退出；用户取消/策略禁止时 `{ok:false, error}` 且**不杀当前进程** |
+| `POST /api/selfcheck/ack` | 无请求体 | `{ok, writable, path?, error?}`；写 `config/ui-first-run.json`，写失败返回 `ok:false` 但 HTTP 仍 200，**不阻塞界面** |
 | `POST /api/ai` | AI 配置局部更新：`provider/base_url/api_key/model/temperature/timeout/verify_ssl` | `{ok: true, config}`（Key 已脱敏） |
 | `POST /api/ai/test` | 同配置，或 `{overrides: {...}}` | `test_connection()` 结果（连通性/模型/耗时） |
 | `POST /api/ai/analyze` | `{result?, question?}`；省略 result 用最近一次 `JOB.result` | AI 结论 + `model` + `latency_ms` + 可选 `markdown`（写 `reports/<stem>.ai.md`） |
@@ -212,18 +215,20 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `POST /api/diagpack` | `{raw?: bool, include_reports?: bool}` | `{ok: true, path, size, entries}`（默认脱敏） |
 | `POST /api/upload` | 原始字节 + `?name=x.pcap`；只收 `.pcap/.pcapng/.cap` | `{ok: true, file, size}`（落到 `captures/`） |
 
-### 4.3 GET 路由（2 个核心 + 9 个只读 + 静态页）
+### 4.3 GET 路由（2 个核心 + 11 个只读 + 静态页）
 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|
 | `GET /api/ping` | 单实例/存活探测 | `ok/app/version/pid/url/started_at` |
-| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/auto_open_browser` |
+| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser` |
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
 | `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed` |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
 | `GET /api/captures` | 已有抓包 | `files[{name,size,mtime}]`（最多 50） |
+| `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |
 | `GET /api/report?path=` | 读报告 | 文件原文；只取 `Path(name).name`，防目录穿越 |
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
+| `GET /api/selfcheck` | 首屏准备检查（五项只读环境检查，含首次运行标记） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command}]/ui_copy.startup` |
 | `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
 | `GET /api/probe?target=&port=&count=&proto=&path=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果；`path=0` 关闭逐跳（默认开） |
@@ -265,7 +270,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    快照；v0.3.0 声明例外是 `reports/faults_demo.md` **末尾已带 D+ 追加的「取证请求单」区块**
    （纯后缀，`reports/faults_demo.json` 逐字节未变）。除该已入库的后缀外 `reports/` 零改动；
    测试/实验用 `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 565 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+3. **测试只增不减**：当前 **620 条**（v0.3.0 基线 565；C1 启动器 +14；C2 首屏自检/权限卡/表单 +41）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -356,7 +361,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 565，但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> 测试数为 620（C1 前 565；C1 +14、C2 +41），但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
 > （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
@@ -401,7 +406,7 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 565 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 620 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
@@ -429,7 +434,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 ---
 
-## 8. 代码地图（`core/` 30 个 .py + 外围）
+## 8. 代码地图（`core/` 31 个 .py + 外围）
 
 > 每个文件一句话职责。行数/签名细节看 `docs/api-reference.md`（自动生成，签名永远是真的）。
 
@@ -437,9 +442,10 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 | 文件 | 职责 |
 |---|---|
-| `NetDiag.vbs` | 日常静默入口：`pythonw` 拉起、自动提权、单实例、打开浏览器 |
+| `NetDiag.exe` | **推荐入口**（构建产物，不入 git）：C# 启动器，`asInvoker`，定位 Python → 隐藏启动 `core\app.py --no-elevate` → 轮询 `/api/ping` → 开浏览器；支持 `--dry-run --report` |
+| `NetDiag.vbs` | 兼容入口：`pythonw` 隐藏启动；优先包内 `tools\python`，回退系统 Python / `py -3`；**不再自动提权** |
 | `NetDiag-stop.vbs` | 界面点不了时的兜底：先 `/api/quit`，失败按 `logs/netdiag.pid` 强杀 |
-| `start.bat` | 带窗口入口：提权 → bootstrap 自检 → Npcap 兜底 → 起 `core/server.py`（`start.bat ai` 可选拉 Harness） |
+| `start.bat` | Python 回退入口（带窗口）：bootstrap 自检 → Npcap 交互式安装 → 起 `core/server.py`；默认不提权，`start.bat --admin` 才请求 UAC（`start.bat ai` 可选拉 Harness） |
 | `doctor.bat` | 只做环境自检，不起服务 |
 | `导出诊断包.bat` | 双击导出脱敏诊断包（优先便携 Python，回落系统 Python） |
 
@@ -449,7 +455,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 |---|---|
 | `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.0"`（升级时与 `VERSION` 同步） |
 | `core/analyzer.py` | 抓包分析引擎：一次 tshark 流式解析 → `meta/metrics/rows` + `findings_v2` + `provenance` |
-| `core/app.py` | 静默启动器：pythonw、单实例探测、UAC 提权、空闲退出、错误弹窗 |
+| `core/app.py` | 静默启动器：pythonw、单实例探测、空闲退出、错误弹窗；**启动不提权**（`--no-elevate`），提权只剩 `/api/elevate` 的 `--elevated` 新进程路径 |
 | `core/bootstrap.py` | 盘符自适应：按当前路径重写 MCP/Harness 配置 + 环境自检（`--check`/`--npcap`） |
 | `core/config.py` | 统一配置加载：app/ai/thresholds/copy + `config_sha256()` |
 | `core/contracts.py` | 唯一数据契约：Enum/dataclass、`SCHEMA_VERSION=2.1`、`to_jsonable`、envelope |
@@ -471,6 +477,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/rules/__init__.py` | 规则包标记（渐进迁移中） |
 | `core/rules/legacy_map.py` | 旧 `rows[]` → `Finding` 的迁移桥（临时件；当前唯一规则相关实现） |
 | `core/sanitize.py` | 诊断包脱敏：IP/域名/用户名/MAC/路径 → 不可还原伪名（幂等） |
+| `core/selfcheck.py` | 首屏准备检查：五项只读环境检查（Python/tshark/Npcap/端口/管理员）+ `config/ui-first-run.json` 标记读写；不触发 UAC、不抓包 |
 | `core/server.py` | 本地 Web UI + HTTP API：路由、Host/Origin 校验、任务槽、单实例、退出 |
 | `core/tshark.py` | tshark/dumpcap 定位与执行封装（`TSHARK_PATH`、便携路径、网卡探测） |
 | `core/verdict.py` | 判定：`rows/meta/metrics/summary` → level/四层状态/问题明细/证据充分性 |
@@ -483,10 +490,12 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 |---|---|
 | `mcp/wireshark-mcp/server.py` | MCP stdio 服务：7 个工具，零第三方依赖，JSON-RPC |
 | `scripts/gen_api_doc.py` | AST 扫 `core/` + `mcp/` → `api-reference.md` / `docstring-gaps.md`；`--check 0.95` |
+| `scripts/build_launcher.py` | 系统 csc 编译 `launcher/NetDiagLauncher.cs` → `NetDiag.exe`；`--check` 只读校验（ubuntu CI 可跑） |
+| `scripts/build_release.py` | 三种发布包；lite 包现场编译 `NetDiag.exe` 并放进 zip 根 |
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
-| `ui/index.html` | 单文件控制台（1,451 行；无构建链、无前端框架） |
-| `tests/` | 27 个 `test_*.py`（565 条）+ `tests/selftest.py` 人工自检脚本 |
+| `ui/index.html` | 单文件控制台（3,500+ 行；无构建链、无前端框架；首屏自检/权限卡/表单保留都在这一个文件里） |
+| `tests/` | 31 个 `test_*.py`（620 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -503,6 +512,9 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
 | `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 31/281 |
+| `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（C 批次更新启动器） |
+| `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
+| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检五项 / 表单保留 / 常见启动失败 | ✅ 当前（C2） |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/path-probe.md` | 路径剖面（MTR）：逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2） |
@@ -548,7 +560,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 565 条，OK (skipped≈27，取决于环境)
+python -m unittest discover -s tests        # 期望 620 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -642,7 +654,7 @@ python -m unittest discover -s tests        # 期望 565 条，OK (skipped≈27�
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 564 tests ... OK (skipped≈27，取决于环境)
+# 期望：Ran 620 tests ... OK (skipped≈27，取决于环境)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：

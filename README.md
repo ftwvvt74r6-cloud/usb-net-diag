@@ -135,7 +135,8 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 ### ② 公开 lite 包（需自装 Python / Wireshark）
 
 从 [Releases](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.2.0) 下载
-`NetDiag-0.2.0-lite.zip`（142 个受控文件，669,357 B），解压后：
+`NetDiag-0.2.0-lite.zip`（142 个受控文件，669,357 B），解压后**推荐直接双击 `NetDiag.exe`**
+（首次运行先做五项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 
 ```bat
 自检.bat
@@ -155,7 +156,9 @@ python scripts\build_release.py --with-npcap
 ```
 
 `--with-tools` 内含便携 Python 3.11.9 + Wireshark 4.7.4（tshark）；`--with-npcap` 另含
-Npcap 安装器。双击 `NetDiag.vbs`（静默、自动提权）或 `start.bat`（带窗口）即可启动。
+Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（带窗口）即可启动；
+启动不提权，实时抓包 / 通信观察会在界面按需请求管理员权限。lite 包提供 `NetDiag.exe`
+双击入口（见 [`docs/startup.md`](docs/startup.md)）。
 **公开仓库 / 公开 Release 只发 lite 代码包，永远不带 Npcap / Wireshark / Python 二进制**，
 原因见 [`docs/licensing.md`](docs/licensing.md)。
 
@@ -202,7 +205,8 @@ Npcap 安装器。双击 `NetDiag.vbs`（静默、自动提权）或 `start.bat`
 
 ```text
 NetDiag/
-├── start.bat / NetDiag.vbs      # 启动器：优先包内 Python，回退系统 python / py -3
+├── NetDiag.exe                  # lite 包入口（构建产物，不入库；源码在 launcher/）
+├── start.bat / NetDiag.vbs      # Python 回退 / 兼容入口：优先包内 Python，回退系统 python / py -3
 ├── core/                        # 28 个 Python 模块：采集 / 解析 / 判定 / 报告 / 服务
 ├── ui/index.html                # 单文件控制台（无构建链、无前端框架）
 ├── mcp/wireshark-mcp/server.py  # MCP stdio 服务，7 个工具

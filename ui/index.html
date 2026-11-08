@@ -460,6 +460,22 @@
   .msg.wait{background:#f8fafc;border:1px solid var(--line);color:var(--muted)}
   .toolbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
   .toolbar .btn{width:auto;padding:6px 11px;font-size:12px}
+  /* 首屏「准备检查」：一行一项，失败项带修复入口 */
+  .startup-checks{display:flex;flex-direction:column;gap:8px;margin:12px 0 2px}
+  .startup-check{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);
+    border-radius:10px;padding:9px 11px;background:#fbfcfe}
+  .startup-check .ico{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+    font-size:12px;font-weight:700;flex:0 0 auto;margin-top:1px}
+  .startup-check.ok .ico{background:var(--ok-bg);color:#047857;border:1px solid var(--ok-line)}
+  .startup-check.bad .ico{background:var(--crit-bg);color:#b91c1c;border:1px solid var(--crit-line)}
+  .startup-check b{font-size:12.5px;display:block;color:var(--text)}
+  .startup-check p{margin:2px 0 0;font-size:11.8px;line-height:1.6;color:var(--text-2)}
+  .startup-check .fix{margin-top:5px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .startup-check .fix a,.startup-check .fix button{font:inherit;font-size:11.8px;color:var(--accent-2);
+    background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}
+  .startup-check .fix code{font-family:var(--mono);font-size:11px;background:#eef2f7;border-radius:4px;
+    padding:1px 5px;word-break:break-all}
+  #startup-msg:empty{display:none}
   .json{background:#0b1220;color:#a7f3d0;border-radius:9px;padding:10px;font:11.5px/1.55 var(--mono);
     overflow:auto;margin-top:9px;max-height:220px}
   .fname{font-family:var(--mono);font-size:11.5px}
@@ -721,7 +737,10 @@
           </div>
         </div>
       </details>
-      <button class="btn" id="probe-run">开始测试</button>
+      <div class="toolbar" style="margin-top:2px">
+        <button class="btn" id="probe-run">开始测试</button>
+        <button class="btn ghost" id="probe-reset" data-copy="form_reset">重置表单</button>
+      </div>
       <div class="hint">建连后先不发声，读服务端首包判断协议，再只发该协议该发的报文。
         不需要管理员权限，也不产生抓包文件。</div>
     </div>
@@ -730,6 +749,7 @@
     <div class="side-actions" id="side-actions">
       <button class="btn" id="run">开始扫描</button>
       <button class="btn ghost hidden" id="pstop" style="margin-top:7px">停止监听</button>
+      <button class="btn ghost" id="form-reset" style="margin-top:7px" data-copy="form_reset">重置表单</button>
       <div class="hint" id="hint"></div>
     </div>
 
@@ -861,25 +881,45 @@
 
 
 
+<div class="mask hidden" id="startup-mask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="startup-title">
+    <div class="mhead">
+      <div>
+        <b id="startup-title" data-copy="panel_title">准备检查</b>
+        <em id="startup-sub" data-copy="panel_sub"></em>
+      </div>
+    </div>
+    <div class="mbody">
+      <p id="startup-hint" data-copy="panel_hint"
+         style="margin:2px 0 4px;font-size:12.5px;line-height:1.7;color:var(--text-2)"></p>
+      <div id="startup-checks" class="startup-checks"></div>
+      <div id="startup-msg"></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="startup-recheck" data-copy="recheck">重新检测</button>
+      <button class="btn" id="startup-limited" data-copy="limited_enter">受限进入</button>
+    </div>
+  </div>
+</div>
+
 <div class="mask hidden" id="perm-mask">
   <div class="modal small" role="dialog" aria-modal="true" aria-label="需要管理员权限">
     <div class="mhead">
       <div>
-        <b>该功能需要管理员权限</b>
-        <em>全网体检 / 单目标诊断 / 通信观察要打开 Npcap 驱动，必须由管理员授权</em>
+        <b id="perm-title" data-copy="elevate_title">该功能需要管理员权限</b>
+        <em id="perm-sub" data-copy="elevate_sub">全网体检 / 单目标诊断 / 通信观察要打开 Npcap 驱动，必须由管理员授权</em>
       </div>
       <button class="xbtn" id="perm-close" title="关闭">✕</button>
     </div>
     <div class="mbody">
-      <p style="margin:2px 0 10px;font-size:12.5px;line-height:1.75;color:var(--text-2)">
-        「以管理员身份重启」会弹一次 Windows 授权窗口。重启后是新的页面实例，<b>请重新选择模式与目标</b>；
-        当前表单不会自动带过去。如果选择取消，分析抓包文件和连通与速度测试仍然可用。
-      </p>
+      <p id="perm-hint" data-copy="elevate_hint"
+         style="margin:2px 0 10px;font-size:12.5px;line-height:1.75;color:var(--text-2)"></p>
+      <div class="hint" id="perm-safe" data-copy="elevate_safe"></div>
       <div id="perm-msg"></div>
     </div>
     <div class="mfoot">
-      <button class="btn ghost" id="perm-cancel">取消</button>
-      <button class="btn" id="perm-elevate">以管理员身份重启</button>
+      <button class="btn ghost" id="perm-cancel" data-copy="elevate_cancel">取消</button>
+      <button class="btn" id="perm-elevate" data-copy="elevate_button">以管理员身份重启</button>
     </div>
   </div>
 </div>
@@ -1143,6 +1183,267 @@ let SYS_IFACES = [];
 let RUN_DURATION = 0;
 const LOCKED = new Set(UI.locked_modes || []);
 const FIELD_IDS = ["field-target", "field-duration", "field-iface", "field-engine", "field-offline"];
+/* 提权重启后要恢复的表单：sessionStorage 是「同一标签页」的临时存储，刷新/提权后都在。 */
+const FORM_KEY = "netdiag.form.v1";
+const FORM_FIELDS = [
+  "#target", "#duration", "#iface", "#engine", "#pcap-select",
+  "#probe-target", "#probe-port", "#probe-count", "#probe-proto",
+  "#shadow-toggle", "#probe-path-toggle",
+];
+let UI_COPY = {};          // copy/zh-CN.json 的 startup section（由 /api/selfcheck 下发）
+let STARTUP_DATA = null;   // 最近一次 /api/selfcheck 结果（重新检测时复用）
+let FORM_CACHE = null;     // 最近一次读/写的表单快照
+
+/* ---------- 文案 / 首次运行 / 表单（C2） ---------- */
+function applyCopy() {
+  /* 页面上标了 data-copy 的短文案统一从 copy 表取，不在 HTML 里抄第二份长文案。 */
+  document.querySelectorAll("[data-copy]").forEach((el) => {
+    const key = el.getAttribute("data-copy");
+    if (UI_COPY[key]) el.textContent = UI_COPY[key];
+  });
+}
+
+function paintPermCopy() {
+  applyCopy();
+  const b = $("#perm-elevate");
+  if (b && !b.disabled) b.textContent = UI_COPY.elevate_button || "以管理员身份重启";
+}
+
+function readForm() {
+  const val = (sel) => {
+    const el = $(sel);
+    return el ? el.value : "";
+  };
+  const checked = (sel) => {
+    const el = $(sel);
+    return el ? !!el.checked : false;
+  };
+  return {
+    mode: MODE || "scan",
+    target: String(val("#target") || "").trim(),
+    duration: val("#duration"),
+    interface: val("#iface"),
+    pcap: val("#pcap-select"),
+    shadow: checked("#shadow-toggle"),
+    probe: {
+      target: String(val("#probe-target") || "").trim(),
+      port: val("#probe-port"),
+      count: val("#probe-count"),
+      proto: val("#probe-proto"),
+      path: checked("#probe-path-toggle"),
+    },
+    passive: { duration: val("#duration"), interface: val("#iface") },
+  };
+}
+
+function isDefaultForm(data) {
+  return data.mode === "scan" && !data.target && !data.interface && !data.pcap
+    && String(data.duration) === "30" && data.shadow
+    && !data.probe.target && !data.probe.port && !data.probe.proto
+    && String(data.probe.count) === "4" && data.probe.path;
+}
+
+function saveForm() {
+  /* 输入变化就写；全部是默认值时清掉 key，避免「用户已清空却还留着旧值」。 */
+  try {
+    const data = readForm();
+    if (isDefaultForm(data)) {
+      sessionStorage.removeItem(FORM_KEY);
+      FORM_CACHE = null;
+      return;
+    }
+    sessionStorage.setItem(FORM_KEY, JSON.stringify(data));
+    FORM_CACHE = data;
+  } catch (e) {
+    /* 隐私模式 / 组策略禁用 sessionStorage：表单保留降级，不影响主流程 */
+  }
+}
+
+function loadForm() {
+  try {
+    const raw = sessionStorage.getItem(FORM_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data && typeof data === "object" ? data : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearFormStorage() {
+  try {
+    sessionStorage.removeItem(FORM_KEY);
+  } catch (e) {
+    /* 同上：清不掉也不影响主流程 */
+  }
+  FORM_CACHE = null;
+}
+
+function restoreForm() {
+  const data = loadForm();
+  if (!data) return;
+  FORM_CACHE = data;
+  if (data.mode && UI.modes[data.mode]) MODE = data.mode;
+  if (typeof data.target === "string") $("#target").value = data.target;
+  if (data.duration !== undefined && data.duration !== null) $("#duration").value = data.duration;
+  if (data.interface) $("#iface").value = data.interface;
+  if (data.pcap && $("#pcap-select")) $("#pcap-select").value = data.pcap;
+  if (typeof data.shadow === "boolean") $("#shadow-toggle").checked = data.shadow;
+  const probe = data.probe || {};
+  if (typeof probe.target === "string") $("#probe-target").value = probe.target;
+  if (probe.port !== undefined && probe.port !== null) $("#probe-port").value = probe.port;
+  if (probe.count !== undefined && probe.count !== null) $("#probe-count").value = probe.count;
+  if (typeof probe.proto === "string") $("#probe-proto").value = probe.proto;
+  if (typeof probe.path === "boolean") $("#probe-path-toggle").checked = probe.path;
+}
+
+function clearForm() {
+  clearFormStorage();
+  $("#target").value = "";
+  $("#duration").value = "30";
+  $("#iface").value = "";
+  $("#engine").value = "auto";
+  if ($("#pcap-select")) $("#pcap-select").value = "";
+  $("#probe-target").value = "";
+  $("#probe-port").value = "";
+  $("#probe-count").value = "4";
+  $("#probe-proto").value = "";
+  $("#shadow-toggle").checked = true;
+  $("#probe-path-toggle").checked = true;
+  $("#hint").textContent = UI_COPY.form_reset_done || "";
+}
+
+function wireFormPersistence() {
+  FORM_FIELDS.forEach((sel) => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener("input", saveForm);
+    el.addEventListener("change", saveForm);
+  });
+  $("#form-reset").onclick = clearForm;
+  $("#probe-reset").onclick = clearForm;
+}
+
+function setStartupMsg(html, cls) {
+  const box = $("#startup-msg");
+  if (!box) return;
+  box.innerHTML = html ? '<div class="msg ' + (cls || "wait") + '">' + html + '</div>' : "";
+}
+
+function renderStartup(data) {
+  const checks = Array.isArray(data && data.checks) ? data.checks : [];
+  $("#startup-checks").innerHTML = checks.map((c, index) => {
+    const ok = !!c.ok;
+    let fix = "";
+    if (!ok) {
+      if (c.fix_kind === "url" && c.fix_url) {
+        fix += '<a href="' + esc(c.fix_url) + '" target="_blank" rel="noopener">'
+          + esc(UI_COPY.fix_url || "打开下载页") + "</a>";
+      }
+      if (c.fix_kind === "command" && c.fix_command) {
+        fix += '<code>' + esc(c.fix_command) + '</code>'
+          + '<button type="button" data-fix-copy="' + index + '">'
+          + esc(UI_COPY.fix_command || "复制命令") + "</button>";
+      }
+      if (c.fix_kind === "elevate") {
+        fix += '<button type="button" data-startup-elevate="1">'
+          + esc(UI_COPY.fix_elevate || "以管理员身份重启") + "</button>";
+      }
+    }
+    return '<div class="startup-check ' + (ok ? "ok" : "bad") + '" data-check="'
+      + esc(c.key || "") + '"><span class="ico">' + (ok ? "✓" : "✗")
+      + '</span><div><b>' + esc(c.name || c.key || "") + '</b><p>' + esc(c.detail || "")
+      + '</p>' + (fix ? '<div class="fix">' + fix + "</div>" : "") + "</div></div>";
+  }).join("");
+}
+
+function showStartup() { $("#startup-mask").classList.remove("hidden"); }
+function hideStartup() { $("#startup-mask").classList.add("hidden"); }
+
+async function ackFirstRun() {
+  try {
+    return await fetch("/api/selfcheck/ack", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }).then((x) => x.json());
+  } catch (e) {
+    return { ok: false, writable: false, error: String(e) };
+  }
+}
+
+async function finishStartup(allPassed) {
+  /* 先放行：ack 是写标记的本地请求，不能因为它慢/写失败把用户挡在面板里。 */
+  if (allPassed) {
+    setTimeout(hideStartup, 1200);
+  } else {
+    hideStartup();
+  }
+  const ack = await ackFirstRun();
+  if (!ack || ack.ok === false) {
+    /* 标记写失败（U 盘只读）不阻塞：提示一句，照常进入主界面。 */
+    const note = UI_COPY.ack_failed || "";
+    if (note) {
+      setStartupMsg(esc(note), "bad");
+      appendLog(note, false);
+    }
+  }
+}
+
+async function initStartup() {
+  let data = null;
+  try {
+    data = await fetch("/api/selfcheck", { cache: "no-store" }).then((x) => x.json());
+  } catch (e) {
+    data = null;
+  }
+  if (data && data.ui_copy && data.ui_copy.startup) {
+    UI_COPY = data.ui_copy.startup;
+    applyCopy();
+    paintPermCopy();
+  }
+  /* 旧后端没有 first_run 字段：不显示面板（不能把老载荷当成首次运行）。 */
+  if (!data || typeof data !== "object" || data.first_run !== true) {
+    hideStartup();
+    return;
+  }
+  STARTUP_DATA = data;
+  renderStartup(data);
+  const checks = Array.isArray(data.checks) ? data.checks : [];
+  const failed = checks.filter((c) => !c.ok).length;
+  showStartup();
+  if (!failed && checks.length === 5) {
+    setStartupMsg(esc(UI_COPY.all_ok || ""), "ok");
+    await finishStartup(true);
+    return;
+  }
+  setStartupMsg(esc(copyFill(UI_COPY.some_failed || "", { count: failed })), "wait");
+}
+
+function waitForElevatedReload() {
+  /* 提权后的新进程监听同一个端口：当前标签页自己轮询到新 PID 后刷新，
+     这样 sessionStorage 里的表单还在（浏览器另开新标签时不一定能共享）。 */
+  const oldPid = APP_INFO && APP_INFO.pid;
+  let tries = 0;
+  const tick = async () => {
+    tries += 1;
+    try {
+      const p = await fetch("/api/ping", { cache: "no-store" }).then((x) => x.json());
+      if (p && p.ok && p.pid !== oldPid) {
+        location.reload();
+        return;
+      }
+    } catch (e) {
+      /* 旧服务已退出、新服务还没起来：继续等 */
+    }
+    if (tries < 60) {
+      setTimeout(tick, 1000);
+      return;
+    }
+    $("#perm-msg").innerHTML = '<div class="msg bad">'
+      + esc(UI_COPY.elevate_refresh_later || "") + '</div>';
+  };
+  setTimeout(tick, 1200);
+}
+
 
 /* ---------- 导航 / 模式 ---------- */
 function isLocked(mode) { return LOCKED.has(mode) && IS_ADMIN === false; }
@@ -1239,6 +1540,7 @@ function setMode(mode) {
   $("#result-chip").textContent = isProbe ? "待测试" : "就绪";
   paintQuestion(mode);
   paintLocks();
+  saveForm();
 
   if (isProbe) {
     setTimeout(() => $("#probe-target").focus(), 60);
@@ -1404,6 +1706,10 @@ async function boot() {
     ]);
     APP_INFO = app;
     IS_ADMIN = app && typeof app.admin === "boolean" ? app.admin : !!r.admin;
+    if (app && app.ui_copy && app.ui_copy.startup) {
+      UI_COPY = app.ui_copy.startup;
+      applyCopy();
+    }
     const sel = $("#iface");
     (r.interfaces || []).forEach((i) => {
       const o = document.createElement("option");
@@ -1411,6 +1717,7 @@ async function boot() {
       o.textContent = `${i.index}. ${i.short || i.name}`;
       sel.appendChild(o);
     });
+    restoreForm();
     const badges = [];
     badges.push(r.npcap
       ? '<span class="badge good" title="Npcap 驱动已就绪">Npcap ✓</span>'
@@ -1453,6 +1760,8 @@ async function loadCaptures() {
     o.textContent = `${f.name}  (${(f.size / 1024).toFixed(0)} KB · ${f.mtime})`;
     sel.appendChild(o);
   });
+  const wanted = (FORM_CACHE && FORM_CACHE.pcap) || "";
+  if (wanted && [...sel.options].some((o) => o.value === wanted)) sel.value = wanted;
 }
 
 /* ---------- 上传 ---------- */
@@ -1476,19 +1785,22 @@ async function upload(file) {
   if (res.ok) {
     await loadCaptures();
     $("#pcap-select").value = res.file;
+    saveForm();
     $("#hint").textContent = `已上传：${res.file}（${(res.size / 1024).toFixed(0)} KB），点击开始诊断`;
   } else {
     $("#hint").textContent = "上传失败：" + (res.error || "未知错误");
   }
 }
 
-/* ---------- 权限弹窗（非管理员强行触发） ---------- */
+/* ---------- 权限卡（非管理员按需提权） ---------- */
 function showPermModal() {
+  if (IS_ADMIN === true) return;   // 管理员环境：不显示卡片、也不请求提权
+  paintPermCopy();
   $("#perm-mask").classList.remove("hidden");
   $("#perm-msg").innerHTML = "";
   const b = $("#perm-elevate");
   b.disabled = false;
-  b.textContent = "以管理员身份重启";
+  b.textContent = UI_COPY.elevate_button || "以管理员身份重启";
 }
 function closePerm() { $("#perm-mask").classList.add("hidden"); }
 function checkAdmin() {
@@ -1497,17 +1809,23 @@ function checkAdmin() {
   return false;
 }
 $("#perm-close").onclick = closePerm;
-$("#perm-cancel").onclick = closePerm;
+$("#perm-cancel").onclick = closePerm;   // 取消只关卡片，不发任何请求
 $("#lock-elevate").onclick = showPermModal;
 $("#perm-mask").addEventListener("mousedown", (e) => {
   if (e.target.id === "perm-mask") closePerm();
 });
 $("#perm-elevate").onclick = async () => {
+  if (IS_ADMIN === true) {
+    $("#perm-msg").innerHTML = '<div class="msg ok">'
+      + esc(UI_COPY.elevate_admin || "") + '</div>';
+    return;
+  }
+  saveForm();   // 提权重启会换进程：表单先落 sessionStorage，刷新后恢复
   const b = $("#perm-elevate");
   b.disabled = true;
-  b.textContent = "正在请求…";
-  $("#perm-msg").innerHTML = '<div class="msg wait">正在请求 Windows 管理员授权，'
-    + '请在系统弹窗中点「是」；授权后服务会重启，重启后请重新选择模式与目标。</div>';
+  b.textContent = UI_COPY.elevate_waiting_button || "正在请求…";
+  $("#perm-msg").innerHTML = '<div class="msg wait">'
+    + esc(UI_COPY.elevate_wait || "") + '</div>';
   let r;
   try {
     r = await fetch("/api/elevate", {
@@ -1517,15 +1835,51 @@ $("#perm-elevate").onclick = async () => {
     r = { ok: false, error: String(e) };
   }
   if (r.ok) {
-    $("#perm-msg").innerHTML = '<div class="msg ok">已请求管理员权限。'
-      + '<br>如果 Windows 弹出了授权窗口，请点「是」；随后页面会自动重新打开。</div>';
+    if (r.already_admin) {
+      IS_ADMIN = true;
+      paintLocks();
+      $("#perm-msg").innerHTML = '<div class="msg ok">'
+        + esc(UI_COPY.elevate_admin || "") + '</div>';
+      setTimeout(closePerm, 1200);
+      return;
+    }
+    $("#perm-msg").innerHTML = '<div class="msg ok">'
+      + esc(UI_COPY.elevate_ok || "") + '</div>';
+    waitForElevatedReload();
     return;
   }
-  $("#perm-msg").innerHTML = '<div class="msg bad">' + esc(r.error || "未获得管理员权限")
-    + '<br>仍可继续使用连通与速度测试和分析抓包文件。</div>';
+  /* 用户取消 UAC / 组策略禁止 / 接口失败：留在当前页、保持非管理员、明确说原因。 */
+  $("#perm-msg").innerHTML = '<div class="msg bad">'
+    + esc(copyFill(UI_COPY.elevate_fail || "", { reason: r.error || "未获得管理员权限" }))
+    + '<br>' + esc(UI_COPY.elevate_safe || "") + '</div>';
   b.disabled = false;
-  b.textContent = "以管理员身份重启";
+  b.textContent = UI_COPY.elevate_button || "以管理员身份重启";
 };
+
+/* ---------- 首屏「准备检查」接线 ---------- */
+$("#startup-recheck").onclick = async () => {
+  setStartupMsg(esc(UI_COPY.checking || "正在检查…"), "wait");
+  await initStartup();
+};
+$("#startup-limited").onclick = () => { finishStartup(false); };
+$("#startup-checks").addEventListener("click", (e) => {
+  const copyBtn = e.target.closest("[data-fix-copy]");
+  if (copyBtn) {
+    const checks = (STARTUP_DATA && STARTUP_DATA.checks) || [];
+    const item = checks[Number(copyBtn.dataset.fixCopy)] || {};
+    if (item.fix_command) {
+      copyPlainText(item.fix_command).then((ok) => {
+        copyBtn.textContent = ok ? (UI_COPY.copied || "已复制")
+          : (UI_COPY.copy_failed || "复制失败，请手动选择命令");
+      });
+    }
+    return;
+  }
+  if (e.target.closest("[data-startup-elevate]")) {
+    hideStartup();
+    showPermModal();
+  }
+});
 
 /* ---------- 运行态：阶段 / 进度条 / 倒计时 ---------- */
 const STAGE_SETS = {
@@ -3153,7 +3507,8 @@ $("#sysinfo-refresh").onclick = loadSysInfo;
 
 $("#quit-app").onclick = quitApp;
 
-boot().then(poll).then(loadAI).then(loadAppInfo);
+wireFormPersistence();
+boot().then(poll).then(loadAI).then(loadAppInfo).then(initStartup);
 </script>
 </body>
 </html>

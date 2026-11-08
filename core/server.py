@@ -12,6 +12,8 @@ API:
   GET  /api/report?path=    读取报告文件
   GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
+  GET  /api/selfcheck       首屏准备检查（五项只读环境检查 + 首次运行标记）
+  POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
   POST /api/ai/test         用当前或临时参数测试连通性
@@ -61,6 +63,7 @@ import passive  # noqa: E402
 import pathprobe  # noqa: E402
 import probe  # noqa: E402
 import report  # noqa: E402
+import selfcheck  # noqa: E402
 import tshark  # noqa: E402
 import verdict  # noqa: E402
 import version  # noqa: E402
@@ -729,25 +732,31 @@ def request_elevation() -> dict:
     * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
       分析抓包文件与连通与速度测试不受影响。
 
+    返回值是结构化契约（UI 只读这几个键，不要再让路由层猜）：
+
     Returns:
-        dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
-            失败 ``{"ok": False, "error": "..."}``。
+        dict: 成功 ``{"ok": True, "restarted": True, "message": ...}``；
+            本来就有权限 ``{"ok": True, "restarted": False, "already_admin": True,
+            "message": ...}``；失败 ``{"ok": False, "restarted": False,
+            "error": "..."}`` —— 失败**不抛异常、不杀当前进程**。
     """
     if tshark.is_admin():
-        return {"ok": True, "already_admin": True, "message": "当前已是管理员权限"}
+        return {"ok": True, "restarted": False, "already_admin": True,
+                "message": "当前已是管理员权限"}
     try:
         import app  # noqa: PLC0415  延迟导入：只有提权时才需要启动器模块
         started = app.relaunch_as_admin()
     except Exception as exc:  # noqa: BLE001  提权失败只回可读错误，不影响服务
-        return {"ok": False, "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
+        return {"ok": False, "restarted": False,
+                "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
     if not started:
-        return {"ok": False,
+        return {"ok": False, "restarted": False,
                 "error": "未获得管理员权限（已取消，或被系统策略禁止）。"
                          "仍可继续使用分析抓包文件与连通与速度测试。"}
     log("[提示] 已请求以管理员身份重启，等待 Windows 授权…")
     threading.Timer(0.8, lambda: request_quit("正在以管理员权限重启，服务即将退出…")
                     ).start()
-    return {"ok": True, "message": "已请求管理员权限，服务将重启"}
+    return {"ok": True, "restarted": True, "message": "已请求管理员权限，服务将重启"}
 
 
 # ---------------------------------------------------------------- 通信观察
@@ -1189,6 +1198,10 @@ class Handler(BaseHTTPRequestHandler):
                                "idle_exit_min": SERVER.get("idle_exit_min", 0),
                                "auto_quit": bool(SERVER.get("idle_exit_min", 0)),
                                "admin": tshark.is_admin(),
+                               # 加法字段：首屏自检与权限卡文案随应用信息一起下发，
+                               # 前端不另存一份中文（文案唯一来源仍是 copy/zh-CN.json）。
+                               "first_run": selfcheck.is_first_run(),
+                               "ui_copy": {"startup": selfcheck.ui_copy()},
                                "auto_open_browser": bool(cfg.get("auto_open_browser", True))})
         if path in ("/", "/index.html"):
             f = UI_DIR / "index.html"
@@ -1243,6 +1256,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(evidence_payload(latest, full=full, fmt=fmt))
         if path == "/api/doctor":
             return self._json(doctor_cached())
+        if path == "/api/selfcheck":
+            # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程。
+            return self._json(selfcheck.collect())
         if path == "/api/passive":
             return self._json(passive_status())
         if path == "/api/ai":
@@ -1274,6 +1290,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/elevate":
             self._discard_body()
             return self._json(request_elevation())
+        if parsed.path == "/api/selfcheck/ack":
+            self._discard_body()
+            # 写失败（U 盘只读 / 目录被锁）返回 ok:false 但绝不阻塞界面。
+            return self._json(selfcheck.ack_first_run())
 
         if parsed.path == "/api/ai":
             payload = self._read_json()

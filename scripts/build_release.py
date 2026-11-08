@@ -85,6 +85,13 @@ REQUIRED_COMMON = (
     "reports/faults_demo.json",
     "tests/test_launcher_contract.py",
 )
+#: 只有 lite 包才由本脚本现场编译并放进包根的图形启动器。
+LAUNCHER_NAME = "NetDiag.exe"
+LAUNCHER_MIN_BYTES = 8 * 1024
+REQUIRED_LITE = (LAUNCHER_NAME,)
+#: lite 包一份可以双击的启动器是「拿到包就能用」的关键；exe 不进 git，
+#: 但必须出现在 zip 里，且不能是空壳。
+LAUNCHER_BUILD_TIMEOUT_S = 300
 #: 只有带 ``tools/`` 的包才要求存在的便携运行时。
 REQUIRED_TOOLS = (
     "tools/python/python.exe",
@@ -217,6 +224,47 @@ def copy_tools(root: Path, staging: Path, with_npcap: bool) -> tuple[int, int, i
     return count, size, excluded_npcap
 
 
+def build_launcher_into(staging: Path, python_exe: str | None = None) -> int:
+    """为 lite 包现场编译 ``NetDiag.exe`` 并放进包根。
+
+    为什么在打包时编译而不是提交二进制：``*.exe`` 不进 git（仓库只存源码），
+    而用户拿到 lite 包应该能直接双击。编译交给 ``scripts/build_launcher.py``，
+    它负责找系统 csc、校验 manifest 为 ``asInvoker``；这里只负责搬运与尺寸守门。
+
+    Args:
+        staging: ``git archive`` 解压后的暂存目录（内含 ``NetDiag/``）。
+        python_exe: 可选的、用来跑构建脚本的解释器（默认 ``sys.executable``）。
+
+    Returns:
+        int: 编译出的 exe 字节数。
+
+    Raises:
+        RuntimeError: 构建脚本失败、产物缺失或小于 :data:`LAUNCHER_MIN_BYTES`。
+    """
+    pkg = staging / PKG_NAME
+    # 编译目录必须放在 staging 之外：build_zip 会遍历 staging 的每个文件，
+    # 放在里面会把 _launcher-build/NetDiag.exe 也打进 zip 顶层。
+    out_dir = Path(tempfile.mkdtemp(prefix="_launcher-build-"))
+    script = ROOT / "scripts" / "build_launcher.py"
+    if not script.is_file():
+        raise RuntimeError(f"缺少启动器构建脚本：{script}")
+    try:
+        _run([python_exe or sys.executable, str(script), "--out", str(out_dir)],
+             ROOT, LAUNCHER_BUILD_TIMEOUT_S)
+        exe = out_dir / LAUNCHER_NAME
+        if not exe.is_file():
+            raise RuntimeError(f"build_launcher.py 没有产出 {LAUNCHER_NAME}：{exe}")
+        size = exe.stat().st_size
+        if size < LAUNCHER_MIN_BYTES:
+            raise RuntimeError(
+                f"{LAUNCHER_NAME} 只有 {size} 字节（< {LAUNCHER_MIN_BYTES}），拒绝放进发布包"
+            )
+        shutil.copy2(exe, pkg / LAUNCHER_NAME)
+        return size
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
 def package_readme(version: str, mode: str) -> str:
     """按模式生成包内 ``README.txt``（给拿到 zip 的人看的第一份说明）。"""
     spec = MODE_SPECS[mode]
@@ -226,12 +274,13 @@ def package_readme(version: str, mode: str) -> str:
             "不含 Python、Wireshark、Npcap 等第三方二进制。\n"
             "运行前请按下面第二节自行准备环境（Python 必装）。"
         )
-        first_step = "双击 `自检.bat`（或在包根目录的命令行里运行 `自检.bat`；**不要**用 `python 自检.bat`）。"
+        first_step = "双击 `NetDiag.exe`（推荐）：自动定位系统 Python、隐藏启动服务、等就绪后打开浏览器；启动不请求管理员权限。"
         launch = (
-            "启动控制台：在包根目录运行 `python core\\server.py`（浏览器自动打开\n"
+            "启动控制台：双击 `NetDiag.exe`（推荐；启动不提权，实时抓包/通信观察会在界面按需提权）。\n"
+            "没有 exe 或想从源码运行：在包根目录运行 `python core\\server.py`（浏览器自动打开\n"
             "http://127.0.0.1:8787/ ，Ctrl+C 停止）。\n"
-            "注意：`start.bat` / `NetDiag.vbs` 依赖 `tools\\python`，只有内部离线包才带；\n"
-            "lite 包请用上面的 python 命令启动（前提是系统 Python 在 PATH 里）。"
+            "`start.bat` / `NetDiag.vbs` 是 Python 回退入口：`start.bat` 需要系统 Python 3.11+，\n"
+            "`NetDiag.vbs` 优先包内 `tools\\python`（只有内部离线包才带）。"
         )
         py_tree = "  python 命令      系统 Python 3.11+（不在包内）"
     elif mode == MODE_INTERNAL:
@@ -240,7 +289,9 @@ def package_readme(version: str, mode: str) -> str:
             "但**不含 Npcap 安装包**。请勿把它当作公开 Release 资产上传。"
         )
         first_step = "双击 `自检.bat`：逐项检查 Python / tshark / Npcap / 管理员权限，并用示例抓包跑一次「分析抓包文件」（离线分析）。"
-        launch = "双击 `NetDiag.vbs`（推荐，无黑窗、自动提权）或 `start.bat`（带窗口，便于看日志）；浏览器自动打开 http://127.0.0.1:8787/ 。"
+        launch = ("双击 `NetDiag.vbs`（兼容入口，无黑窗）或 `start.bat`（带窗口，便于看日志；"
+                  "需要提权时用 `start.bat --admin`）；启动不提权，实时抓包/通信观察会在界面按需提权。"
+                  "浏览器自动打开 http://127.0.0.1:8787/ 。")
         py_tree = "  tools\\python\\      便携 Python 3.11.9（包内自带）"
     else:
         kind_line = (
@@ -249,7 +300,9 @@ def package_readme(version: str, mode: str) -> str:
             "***** 只能用于组织内部 / 离线机器 **，禁止上传到公开仓库、公开 Release、网盘或外网。 *****"
         )
         first_step = "双击 `自检.bat`：逐项检查 Python / tshark / Npcap / 管理员权限，并用示例抓包跑一次「分析抓包文件」（离线分析）。"
-        launch = "双击 `NetDiag.vbs`（推荐，无黑窗、自动提权）或 `start.bat`（带窗口，便于看日志）；浏览器自动打开 http://127.0.0.1:8787/ 。"
+        launch = ("双击 `NetDiag.vbs`（兼容入口，无黑窗）或 `start.bat`（带窗口，便于看日志；"
+                  "需要提权时用 `start.bat --admin`）；启动不提权，实时抓包/通信观察会在界面按需提权。"
+                  "浏览器自动打开 http://127.0.0.1:8787/ 。")
         py_tree = "  tools\\python\\      便携 Python 3.11.9（包内自带）"
 
     if mode == MODE_LITE:
@@ -418,15 +471,39 @@ def assert_manifest(pkg_root: Path, mode: str) -> dict:
         if spec["with_npcap"] and not npcap:
             raise RuntimeError("--with-npcap 包里缺少 Npcap 安装包")
         npcap_label = npcap[0] if npcap else "absent"
+        launcher_label = "absent"
     else:
+        missing_lite = [rel for rel in REQUIRED_LITE if not (pkg / rel).is_file()]
+        if missing_lite:
+            raise RuntimeError(f"lite 包里缺少必要文件：{missing_lite}")
+        exe = pkg / LAUNCHER_NAME
+        if not exe.is_file():
+            raise RuntimeError(
+                f"lite 包里缺少图形启动器 {LAUNCHER_NAME}（用户双击的入口）")
+        if exe.stat().st_size < LAUNCHER_MIN_BYTES:
+            raise RuntimeError(
+                f"lite 包里的 {LAUNCHER_NAME} 只有 {exe.stat().st_size} 字节，"
+                f"小于 {LAUNCHER_MIN_BYTES}，拒绝发布")
+        if exe.read_bytes()[:2] != b"MZ":
+            raise RuntimeError(f"lite 包里的 {LAUNCHER_NAME} 不是 Windows PE 文件")
         if (pkg / "tools").exists():
             raise RuntimeError("lite 包里不允许出现 tools/ 目录")
         npcap = [rel for rel in all_files if fnmatch.fnmatch(Path(rel).name.lower(), NPCAP_PATTERN)]
         if npcap:
             raise RuntimeError(f"lite 包里不允许出现 Npcap 安装包：{npcap}")
+        # lite 不含任何 Wireshark/tshark 二进制；源码里出现 "wireshark" 是允许的
+        # （mcp/wireshark-mcp 是纯 Python），所以只检查二进制后缀。
+        wireshark_bins = [
+            rel for rel in all_files
+            if rel.lower().endswith((".exe", ".dll"))
+            and ("wireshark" in rel.lower() or "tshark" in rel.lower())
+        ]
+        if wireshark_bins:
+            raise RuntimeError(f"lite 包里不允许出现 Wireshark/tshark 二进制：{wireshark_bins[:5]}")
         tools_files = []
         tools_bytes = 0
         npcap_label = "absent"
+        launcher_label = f"{exe.stat().st_size} bytes"
 
     return {
         "files": len(all_files),
@@ -434,6 +511,7 @@ def assert_manifest(pkg_root: Path, mode: str) -> dict:
         "tools_bytes": tools_bytes,
         "reports": reports,
         "npcap": npcap_label,
+        "launcher": launcher_label,
         "mode": mode,
     }
 
@@ -550,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
     print(flush=True)
 
     head = check_git_state(ROOT, args.allow_dirty)
-    print(f"[1/7] git archive HEAD ({head}) -> controlled files only", flush=True)
+    print(f"[1/8] git archive HEAD ({head}) -> controlled files only", flush=True)
     staging = Path(tempfile.mkdtemp(prefix="_stage-", dir=str(out_dir)))
     src_zip = staging / "_src.zip"
     try:
@@ -567,17 +645,26 @@ def main(argv: list[str] | None = None) -> int:
               f"({len(PACKAGE_EXCLUDE)} release-record doc excluded)", flush=True)
 
         if spec["with_tools"]:
-            print("[2/7] copy tools/ ...", flush=True)
+            print("[2/8] copy tools/ ...", flush=True)
             tools_count, tools_bytes, excluded = copy_tools(ROOT, staging, spec["with_npcap"])
             npcap_note = "INCLUDED (internal only)" if spec["with_npcap"] else "excluded"
             print(f"      tools/: {tools_count} files, {human_bytes(tools_bytes)}", flush=True)
             print(f"      npcap-*.exe: {npcap_note}"
                   f"{f' ({excluded} file skipped)' if excluded else ''}", flush=True)
         else:
-            print("[2/7] lite package: skip tools/ (source-only, no third-party binaries)", flush=True)
+            print("[2/8] lite package: skip tools/ (source-only, no third-party binaries)", flush=True)
             tools_count = 0
 
-        print("[3/7] add package README.txt + verify launcher files ...", flush=True)
+        if mode == MODE_LITE:
+            print("[3/8] build NetDiag.exe launcher (source -> zip root) ...", flush=True)
+            launcher_bytes = build_launcher_into(staging)
+            print(f"      {LAUNCHER_NAME}: {human_bytes(launcher_bytes)}", flush=True)
+        else:
+            print("[3/8] internal package: keep NetDiag.vbs / start.bat entrypoints "
+                  "(no launcher exe)", flush=True)
+            launcher_bytes = 0
+
+        print("[4/8] add package README.txt + verify launcher files ...", flush=True)
         readme = staging / PKG_NAME / "README.txt"
         readme.write_text(package_readme(version, mode), encoding="utf-8", newline="\r\n")
         for required in ("自检.bat", "start.bat", "NetDiag.vbs"):
@@ -585,18 +672,19 @@ def main(argv: list[str] | None = None) -> int:
                 raise RuntimeError(f"git archive 里缺少 {required}（是否忘了提交？）")
         (staging / PKG_NAME / "logs").mkdir(exist_ok=True)
 
-        print("[4/7] build zip ...", flush=True)
+        print("[5/8] build zip ...", flush=True)
         files = build_zip(staging, zip_path)
         zip_size = zip_path.stat().st_size
         print(f"      {files} files -> {zip_path.name} ({human_bytes(zip_size)})", flush=True)
 
-        print("[5/7] write SHA256SUMS.txt ...", flush=True)
+        print("[6/8] write SHA256SUMS.txt ...", flush=True)
         sums = write_sha256sums(out_dir, zip_path)
         print(f"      {sums.read_text(encoding='utf-8').strip()}", flush=True)
 
-        result = {"files": files, "zip_bytes": zip_size, "sha256": sha256_file(zip_path)}
+        result = {"files": files, "zip_bytes": zip_size, "sha256": sha256_file(zip_path),
+                  "launcher": launcher_bytes}
         if not args.skip_verify:
-            print("[6/7] extract to a temp dir and run the self-check ...", flush=True)
+            print("[7/8] extract to a temp dir and run the self-check ...", flush=True)
             verify_dir = Path(tempfile.mkdtemp(prefix="_verify-", dir=str(out_dir)))
             try:
                 with zipfile.ZipFile(zip_path) as zf:
@@ -604,7 +692,8 @@ def main(argv: list[str] | None = None) -> int:
                 manifest = assert_manifest(verify_dir, mode)
                 print(f"      package files={manifest['files']} "
                       f"tools={manifest['tools_files']} "
-                      f"reports={manifest['reports']} npcap={manifest['npcap']}", flush=True)
+                      f"reports={manifest['reports']} npcap={manifest['npcap']} "
+                      f"launcher={manifest['launcher']}", flush=True)
                 checks = verify_package(verify_dir, verify_dir, mode)
                 result.update(checks)
             finally:
@@ -613,14 +702,16 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     shutil.rmtree(verify_dir, ignore_errors=True)
         else:
-            print("[6/7] SKIP verify (--skip-verify)", flush=True)
+            print("[7/8] SKIP verify (--skip-verify)", flush=True)
             result.update({"tests": 0, "ok": "SKIPPED", "contract": 0})
 
-        print("[7/7] summary", flush=True)
+        print("[8/8] summary", flush=True)
         print(f"      mode   : {mode}")
         print(f"      zip    : {zip_path}")
         print(f"      size   : {human_bytes(zip_size)}")
         print(f"      sha256 : {result['sha256']}")
+        print(f"      launch : {human_bytes(result['launcher'])}"
+              if result.get("launcher") else "      launch : absent (internal package)")
         print(f"      elapsed: {time.monotonic() - started:.1f}s", flush=True)
         if not args.skip_verify:
             print(f"      tests  : Ran {result['tests']} tests ... {result['ok']}")
