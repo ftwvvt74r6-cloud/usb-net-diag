@@ -1,4 +1,4 @@
-# HANDOVER-AI —— NetDiag（网络矩阵）交接手册
+﻿# HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
 > **对齐版本**：`VERSION` = `0.3.1`；写作基线 `main` = `d4b13dc`（v0.3.1 发布 commit，PR #32 合并后）。
@@ -560,7 +560,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（4,000+ 行；无构建链、无前端框架；首屏自检/能力置灰/说明卡/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 44 个 `test_*.py`（918 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 44 个 `test_*.py`（919 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
