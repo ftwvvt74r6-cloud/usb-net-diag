@@ -1371,6 +1371,12 @@ async function ackFirstRun() {
 }
 
 async function finishStartup(allPassed) {
+  /* 先放行：ack 是写标记的本地请求，不能因为它慢/写失败把用户挡在面板里。 */
+  if (allPassed) {
+    setTimeout(hideStartup, 1200);
+  } else {
+    hideStartup();
+  }
   const ack = await ackFirstRun();
   if (!ack || ack.ok === false) {
     /* 标记写失败（U 盘只读）不阻塞：提示一句，照常进入主界面。 */
@@ -1380,11 +1386,6 @@ async function finishStartup(allPassed) {
       appendLog(note, false);
     }
   }
-  if (allPassed) {
-    setTimeout(hideStartup, ack && ack.ok === false ? 1600 : 900);
-    return;
-  }
-  hideStartup();
 }
 
 async function initStartup() {
