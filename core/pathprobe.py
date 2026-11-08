@@ -130,16 +130,20 @@ class ProbeKind(str, Enum):
 class HopStatus(str, Enum):
     """路径探测（MTR）单跳的状态（机器码，中文文案在 copy 表）。
 
-    ``OK`` 与 ``LOSS`` 保留既有语义（正常 / 全部超时）；``DEGRADED`` 是本批新增的
-    「劣化」值，用于「丢包 ≥ 阈值但仍有响应」或「RTT 相对基线突增」的跳 ——
-    这种跳不能再显示成「正常」，否则表格与「第几跳开始劣化」的结论自相矛盾。
+    ``OK`` 与 ``LOSS`` 保留既有语义（正常 / 全部超时）；``DEGRADED`` 表示
+    **劣化持续到目标或最后一个有响应的跳**（R5）：只在「从这一跳开始的丢包/RTT
+    异常一直延续到终点」时使用，不能再显示成「正常」，否则表格与「第几跳开始
+    劣化」的结论自相矛盾。``RATE_LIMITED`` 表示该跳自身有丢包/RTT 异常、但后面
+    的跳或目标已经恢复正常（企业网里常见于设备对 TTL 回复限速）—— 它不是承载网
+    故障证据，所以既不能显示成「劣化」，也不该粉饰成「正常」。
     ``FILTERED`` / ``UNREACHABLE`` / ``NO_TARGET`` 是保留机器码（当前由结论句 /
     方法标注表达，未逐跳赋值）。
     """
 
     OK = "ok"
     LOSS = "loss"
-    DEGRADED = "degraded"      # 丢包 ≥ 阈值但仍有响应，或 RTT 突增
+    DEGRADED = "degraded"      # 丢包/RTT 异常持续到目标或最后响应跳
+    RATE_LIMITED = "rate_limited"  # 中间跳异常但未持续到终点（疑似限速/过滤）
     FILTERED = "filtered"      # 预留：不回 ICMP，但目标端口可达 → 被策略过滤
     UNREACHABLE = "unreachable"
     NO_TARGET = "no_target"
@@ -429,6 +433,9 @@ class PathProbeResult:
 
     ``verdict_key`` 只用 :data:`PATH_OK` 等 6 个机器码；``unreachable`` 是附加
     布尔（ICMP 与 TCP 都没响应时，渲染层据此写「目标不可达」而不是「正常」）。
+    ``middle_loss_suspected`` / ``middle_loss_ttls`` 记录「中间跳有丢包/RTT 异常、
+    但劣化没有持续到目标或最后响应跳」的跳（R5）：这类跳不能算作劣化，只在报告里
+    提示可能是 ICMP 限速/策略过滤。
     """
 
     target: str = ""
@@ -445,6 +452,8 @@ class PathProbeResult:
     completed: bool = True
     tun_suspected: bool = False
     unreachable: bool = False
+    middle_loss_suspected: bool = False
+    middle_loss_ttls: tuple[int, ...] = ()
     max_hops: int = 0
     samples: int = 0
     timeout_s: float = 0.0
@@ -458,8 +467,10 @@ class PathProbeResult:
             dict: 键 ``target``/``target_ip``/``verdict_key``/``degraded_ttl``/
                 ``baseline_ms``/``icmp_filtered``/``target_port_reachable``/
                 ``method``/``reached_target``/``completed``/``tun_suspected``/
-                ``unreachable``/``max_hops``/``samples``/``timeout_s``/
-                ``probes_sent``/``error``/``hops``（逐跳）/``ledger``。
+                ``unreachable``/``middle_loss_suspected``/``middle_loss_ttls``/
+                ``max_hops``/``samples``/``timeout_s``/``probes_sent``/``error``/
+                ``hops``（逐跳）/``ledger``。``middle_loss_ttls`` 是「有丢包/RTT
+                异常但未持续到目标或最后响应跳」的中间跳 TTL 列表（R5）。
         """
         return {
             "target": self.target,
@@ -474,6 +485,8 @@ class PathProbeResult:
             "completed": self.completed,
             "tun_suspected": self.tun_suspected,
             "unreachable": self.unreachable,
+            "middle_loss_suspected": bool(self.middle_loss_suspected),
+            "middle_loss_ttls": [int(ttl) for ttl in self.middle_loss_ttls],
             "max_hops": int(self.max_hops),
             "samples": int(self.samples),
             "timeout_s": float(self.timeout_s),
@@ -494,9 +507,10 @@ def classify(hops: Sequence[HopStat],
     四态的关键是**最后一种**：全部都丢但目标端口 TCP 可通 → 这不是故障，是
     ICMP 被策略过滤（企业网常见），不能把「被过滤」误判成「链路故障」。
 
-    本函数只做「按最终响应者定界」的旧口径；它不计算 RTT 突增、不区分「探测未完成」。
-    实时路径 / 报告 / 服务端**主路径一律走 :func:`summarize_path`**，这里保留是为了
-    兼容既有调用方与 SPEC 的公开 API 形状。阈值复用模块常量，避免出现第二套魔数。
+    本函数只做「按最终响应者定界」的旧口径；它不计算 RTT 突增、不区分「探测未完成」，
+    **也不套用 R5 的持久性约束**（中间跳限速仍可能被它算成 losing）。实时路径 /
+    报告 / 服务端**主路径一律走 :func:`summarize_path`**，这里保留是为了兼容既有
+    调用方与 SPEC 的公开 API 形状。阈值复用模块常量，避免出现第二套魔数。
 
     Args:
         hops: 逐跳统计（按 TTL 顺序）。
@@ -576,7 +590,98 @@ def clamp_path_options(max_hops: int = PATH_DEFAULT_MAX_HOPS,
             max(low_timeout, min(timeout, high_timeout)))
 
 
-def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
+def _path_degradation(hops: Sequence[HopStat],
+                      target_ip: str = "") -> dict:
+    """按 R5「持久性」口径拆出劣化段与中间跳异常（内部纯函数）。
+
+    判据分两步，避免把「中间跳不回 ICMP、后续跳/目标却正常」误判成承载网故障：
+
+    1. 先用既有阈值标出**单跳异常**（丢包 ≥ :data:`PATH_LOSS_DEGRADED_PCT`，
+       或 RTT 相对基线突增）；
+    2. 只有从某一跳开始、异常**连续延续到终点**（目标跳；目标没探到时取最后一个
+       有响应的跳，**若路径末尾是 100% 不回包的黑洞则取最后一个有采样的跳**）的
+       那一段才算「劣化」。终点之前、被正常跳隔开的异常跳只记进
+       ``middle_loss_ttls``（疑似 ICMP 限速/策略过滤），不算劣化。
+
+    目标可达且目标跳健康时，终点就是目标跳；中间跳的异常因此天然落进
+    ``middle_loss_ttls``，``degraded_ttls`` 为空 —— 这正是 R5 要求的判定约束。
+
+    Args:
+        hops: 逐跳统计（顺序无关，内部按 ``ttl`` 排序；``sent=0`` 的跳忽略）。
+        target_ip: 目标 IP 字面量；为空时无法识别目标跳，终点取最后一个有响应的跳。
+
+    Returns:
+        dict: 键 ``has_samples``（是否有任何采样）/``target_reached``（是否探到目标）/
+            ``endpoint_ttl``（判定终点 TTL，无样本时 ``None``）/``degraded_ttls``
+            （持续到终点的劣化段 TTL，升序）/``middle_loss_ttls``（未持续的中间跳
+            异常 TTL，升序）/``anomaly_ttls``（全部单跳异常 TTL，供状态赋值复用）。
+    """
+    ordered = [hop for hop in sorted(hops, key=lambda item: item.ttl)
+               if hop.sent > 0]
+    empty = {"has_samples": False, "target_reached": False,
+             "endpoint_ttl": None, "degraded_ttls": (),
+             "middle_loss_ttls": (), "anomaly_ttls": ()}
+    if not ordered:
+        return empty
+
+    # 单跳异常：丢包与 RTT 突增。基线取「已响应跳里最小的平均 RTT」，
+    # 与旧口径完全一致；首跳没有可比较的基线，所以不会因为自己抖动被判突增。
+    baseline: float | None = None
+    anomaly: dict[int, bool] = {}
+    for hop in ordered:
+        flagged = hop.loss_pct >= PATH_LOSS_DEGRADED_PCT
+        if (not flagged and hop.rtt_avg_ms is not None and baseline is not None
+                and hop.rtt_avg_ms >= baseline * PATH_RTT_SPIKE_FACTOR
+                and (hop.rtt_avg_ms - baseline) >= PATH_RTT_SPIKE_DELTA_MS):
+            flagged = True
+        anomaly[hop.ttl] = flagged
+        if hop.rtt_avg_ms is not None:
+            baseline = (hop.rtt_avg_ms if baseline is None
+                        else min(baseline, hop.rtt_avg_ms))
+
+    responding = [hop for hop in ordered if hop.loss_pct < 100.0]
+    if not responding:
+        # 一个响应都没有：谈不上「持续到哪一跳」，劣化段留空（调用方按 NO_DATA）。
+        return dict(empty, has_samples=True,
+                    anomaly_ttls=tuple(hop.ttl for hop in ordered
+                                       if anomaly[hop.ttl]))
+
+    target_hop = None
+    if target_ip:
+        target_hop = next((hop for hop in ordered if hop.ip == target_ip), None)
+    # 终点：探到目标 → 目标跳；否则默认最后一个有响应的跳。**例外**：路径末尾
+    # 是 100% 不回包的「黑洞」（目标没探到），观测已经在那里结束，不能拿更早的
+    # 正常跳把尾部丢包当「已恢复」—— 否则「目标不可达」会被粉饰成 PATH.OK。
+    if target_hop is not None:
+        endpoint = target_hop
+    elif ordered[-1].loss_pct >= 100.0:
+        endpoint = ordered[-1]
+    else:
+        endpoint = responding[-1]
+
+    persistent: list[int] = []
+    if anomaly.get(endpoint.ttl):
+        index = next(i for i, hop in enumerate(ordered) if hop is endpoint)
+        while index >= 0 and anomaly.get(ordered[index].ttl):
+            persistent.append(ordered[index].ttl)
+            index -= 1
+        persistent.reverse()
+    degraded = tuple(persistent)
+    middle = tuple(hop.ttl for hop in ordered
+                   if hop.ttl < endpoint.ttl and anomaly.get(hop.ttl)
+                   and hop.ttl not in degraded)
+    return {
+        "has_samples": True,
+        "target_reached": target_hop is not None,
+        "endpoint_ttl": endpoint.ttl,
+        "degraded_ttls": degraded,
+        "middle_loss_ttls": middle,
+        "anomaly_ttls": tuple(hop.ttl for hop in ordered if anomaly[hop.ttl]),
+    }
+
+
+def build_hop_stats(rows: Iterable[Mapping],
+                    target_ip: str = "") -> tuple[HopStat, ...]:
     """把原始采样记录聚合成逐跳统计（纯函数，MTR 与单测共用）。
 
     每条原始记录键：``ttl``（整数）、``responded``（布尔）、``rtt_ms``
@@ -584,6 +689,9 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
 
     Args:
         rows: 原始采样记录（顺序无关，内部按 ``ttl`` 排序输出）。
+        target_ip: 目标 IP 字面量；给了才知道哪一跳是目标跳，从而按 R5 的
+            「劣化必须持续到目标/最后响应跳」赋值状态。省略时按最后一个有响应
+            的跳作为终点（单跳 / 直调场景）。
 
     Returns:
         tuple[HopStat, ...]: 按 TTL 升序的逐跳统计。``sent`` 是该 TTL 的采样数，
@@ -591,8 +699,9 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
         ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
         ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
         ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
-        ``status`` 与劣化判定同源：全部超时 → ``LOSS``；丢包 ≥
-        :data:`PATH_LOSS_DEGRADED_PCT` 或 RTT 突增 → ``DEGRADED``；否则 ``OK``。
+        ``status`` 与劣化判定同源：没有任何样本 → ``LOSS``；**异常持续到终点**
+        → ``DEGRADED``（全丢仍保留 ``LOSS``）；异常被后续正常跳/目标打断
+        → ``RATE_LIMITED``；其余 ``OK``。
 
     Example:
         >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
@@ -616,77 +725,71 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
         rtts = [float(item["rtt_ms"]) for item in samples
                 if item.get("responded") and item.get("rtt_ms") is not None]
         lost = sent - sum(1 for item in samples if item.get("responded"))
-        loss_pct = (lost / sent * 100.0) if sent else 0.0
-        if sent and lost == sent:
-            status = HopStatus.LOSS
-        elif sent and loss_pct >= PATH_LOSS_DEGRADED_PCT:
-            status = HopStatus.DEGRADED
-        else:
-            status = HopStatus.OK
-        hop = HopStat(ttl=ttl, ip=ip, sent=sent, lost=lost, rtt_n=len(rtts),
-                      status=status)
+        hop = HopStat(ttl=ttl, ip=ip, sent=sent, lost=lost, rtt_n=len(rtts))
         if rtts:
             avg = sum(rtts) / len(rtts)
             jitter = (sum((value - avg) ** 2 for value in rtts) / len(rtts)) ** 0.5
             hop = HopStat(ttl=ttl, ip=ip, sent=sent, lost=lost,
                           rtt_min_ms=round(min(rtts), 1),
                           rtt_avg_ms=round(avg, 1),
-                          status=hop.status,
                           rtt_max_ms=round(max(rtts), 1),
                           jitter_ms=round(jitter, 1), rtt_n=len(rtts))
         out.append(hop)
     hops = tuple(out)
-    # RTT 突增要拿「整条路径的基线」才能判，所以在聚合完成后统一补一次状态；
-    # 只升级仍为 OK 的跳（全丢 / 部分丢已经由上面的丢包判据标过）。
-    flagged = set(degraded_hops(hops))
-    return tuple(replace(hop, status=HopStatus.DEGRADED)
-                 if hop.status is HopStatus.OK and hop.ttl in flagged else hop
-                 for hop in hops)
+    # R5：状态必须与「第几跳开始劣化」用同一套持久性判据 —— 中间跳限速
+    # 不能被标成 DEGRADED（否则表格说「劣化」、结论却是 PATH.OK）。
+    profile = _path_degradation(hops, target_ip)
+    degraded = set(profile["degraded_ttls"])
+    middle = set(profile["middle_loss_ttls"])
+    anomaly = set(profile["anomaly_ttls"])
+    stats: list[HopStat] = []
+    for hop in hops:
+        if hop.sent and hop.loss_pct >= 100.0:
+            status = HopStatus.LOSS          # 全丢：事实是「没响应」，不是「劣化」
+        elif hop.ttl in degraded:
+            status = HopStatus.DEGRADED
+        elif hop.ttl in middle:
+            status = HopStatus.RATE_LIMITED  # 疑似限速/过滤，不许显示成「劣化」
+        elif hop.ttl in anomaly:
+            status = HopStatus.DEGRADED
+        else:
+            status = HopStatus.OK
+        stats.append(replace(hop, status=status))
+    return tuple(stats)
 
 
 def degraded_hops(hops: Sequence[HopStat]) -> tuple[int, ...]:
-    """列出「已经劣化」的跳（纯函数，阈值全部来自模块常量）。
+    """列出「已经劣化为承载网问题」的跳（纯函数，阈值全部来自模块常量）。
 
-    两条判据，任一命中即算劣化：
-
-    1. **丢包**：``loss_pct >= PATH_LOSS_DEGRADED_PCT``（默认 20%）；
-    2. **RTT 突增**：当前跳平均 RTT ≥ 基线 × :data:`PATH_RTT_SPIKE_FACTOR`
-       且绝对增量 ≥ :data:`PATH_RTT_SPIKE_DELTA_MS`。基线取「已响应跳里最小的
-       平均 RTT」（首跳自身不参与比较，避免把第一跳的正常抖动当成突增）。
+    R5 的持久性约束在这里落地：单跳丢包/RTT 异常本身不够，必须**从这一跳开始
+    连续延续到目标或最后一个有响应的跳**才算劣化。中间跳不回 ICMP、但后续跳或
+    目标恢复正常的场景返回空元组（那是限速/策略过滤，不是承载网故障）。
 
     Args:
-        hops: 逐跳统计（顺序无关，内部按 ttl 排序）。
+        hops: 逐跳统计（顺序无关，内部按 ttl 排序）。没有目标 IP 时按「最后一个
+            有响应的跳」作为终点（末尾 100% 不回包时按最后一个有采样的跳）；
+            需要按目标跳判定时用 :func:`summarize_path`。
 
     Returns:
-        tuple[int, ...]: 劣化跳的 TTL（升序）；没有劣化时是空元组。
+        tuple[int, ...]: 持续劣化段的 TTL（升序）；没有持续劣化时是空元组。
+            没有样本同样返回空元组 —— **空 ≠ 正常**，调用方需另判 ``PATH.NO_DATA``。
     """
-    baseline: float | None = None
-    flagged: list[int] = []
-    for hop in sorted(hops, key=lambda item: item.ttl):
-        if hop.sent <= 0:
-            continue
-        if hop.loss_pct >= PATH_LOSS_DEGRADED_PCT:
-            flagged.append(hop.ttl)
-        elif (hop.rtt_avg_ms is not None and baseline is not None
-              and hop.rtt_avg_ms >= baseline * PATH_RTT_SPIKE_FACTOR
-              and (hop.rtt_avg_ms - baseline) >= PATH_RTT_SPIKE_DELTA_MS):
-            flagged.append(hop.ttl)
-        if hop.rtt_avg_ms is not None:
-            baseline = (hop.rtt_avg_ms if baseline is None
-                        else min(baseline, hop.rtt_avg_ms))
-    return tuple(flagged)
+    return _path_degradation(hops)["degraded_ttls"]
 
 
 def first_degraded_hop(hops: Sequence[HopStat]) -> int | None:
-    """「第几跳开始劣化」——第一条命中 :func:`degraded_hops` 判据的 TTL。
+    """「第几跳开始劣化」——持续劣化段的第一跳 TTL。
+
+    只有从这一跳开始、异常一直延续到目标或最后响应跳，才会返回 TTL；中间跳
+    丢包但后续跳/目标恢复正常的场景返回 ``None``（R5，避免误判承载网）。
 
     Args:
         hops: 逐跳统计。
 
     Returns:
-        int | None: 劣化跳的 TTL；全部正常或没有任何样本时返回 ``None``。
-            **没有样本 ≠ 正常**：调用方必须再看 ``sent`` / ``rtt_n`` 才能下结论
-            （见 :func:`summarize_path` 的 ``PATH.NO_DATA``）。
+        int | None: 持续劣化段第一跳的 TTL；全部正常、只有中间跳异常、或没有任何
+            样本时返回 ``None``。**没有样本 ≠ 正常**：调用方必须再看 ``sent`` /
+            ``rtt_n`` 才能下结论（见 :func:`summarize_path` 的 ``PATH.NO_DATA``）。
 
     Example:
         >>> first_degraded_hop(()) is None
@@ -752,18 +855,24 @@ def summarize_path(hops: Sequence[HopStat],
     与 :func:`classify` 的区别：这里同时看**丢包**与 **RTT 突增**，并且把
     「没有样本」「ICMP 被过滤」「目标不可达」明确分开 —— 三者都不许落成「正常」。
 
+    「劣化」按 R5 的持久性口径：单跳异常必须**从该跳开始连续延续到目标或最后
+    一个有响应的跳**，才算 ``degraded_ttl``；中间跳异常但后续跳/目标恢复正常的，
+    只进 ``middle_loss_suspected`` / ``middle_loss_ttls``，结论仍是 ``PATH.OK``。
+
     Args:
         hops: 逐跳统计。
         target_port_reachable: 目标端口 TCP 是否可达；``None`` 表示没测。
         method: ``"icmp"`` / ``"tcp"``；只有 ICMP 方法才可能判定「被过滤」。
-        target_ip: 目标 IP 字面量，用于判断「是否已探到目标」与 TUN 提示。
+        target_ip: 目标 IP 字面量，用于识别目标跳（判定终点）、「是否已探到目标」
+            与 TUN 提示。
 
     Returns:
         dict: 键 ``verdict_key``（:data:`PATH_OK` 等 6 个机器码）/
-            ``degraded_ttl``（第几跳开始劣化，无则 ``None``）/``baseline_ms``
+            ``degraded_ttl``（持续劣化段第一跳，无则 ``None``）/``baseline_ms``
             （基线平均 RTT，无样本 ``None``）/``icmp_filtered``/``unreachable``/
-            ``reached_target``/``tun_suspected``。没有样本时恒为 ``PATH.NO_DATA``，
-            绝不返回 ``PATH.OK``。
+            ``reached_target``/``tun_suspected``/``middle_loss_suspected``（是否有
+            「未持续到终点」的中间跳异常）/``middle_loss_ttls``（这些跳的 TTL 列表）。
+            没有样本时恒为 ``PATH.NO_DATA``，绝不返回 ``PATH.OK``。
 
     Example:
         >>> summarize_path(())["verdict_key"]
@@ -775,7 +884,8 @@ def summarize_path(hops: Sequence[HopStat],
         return {"verdict_key": PATH_NO_DATA, "degraded_ttl": None,
                 "baseline_ms": None, "icmp_filtered": False,
                 "unreachable": False, "reached_target": False,
-                "tun_suspected": False}
+                "tun_suspected": False, "middle_loss_suspected": False,
+                "middle_loss_ttls": []}
 
     responded = [hop for hop in hops if hop.rtt_n > 0 or hop.loss_pct < 100.0]
     if not responded:
@@ -784,31 +894,38 @@ def summarize_path(hops: Sequence[HopStat],
             return {"verdict_key": PATH_ICMP_FILTERED, "degraded_ttl": None,
                     "baseline_ms": None, "icmp_filtered": True,
                     "unreachable": False, "reached_target": False,
-                    "tun_suspected": looks_like_tun(hops, target_ip)}
+                    "tun_suspected": looks_like_tun(hops, target_ip),
+                    "middle_loss_suspected": False, "middle_loss_ttls": []}
         return {"verdict_key": PATH_NO_DATA, "degraded_ttl": None,
                 "baseline_ms": None, "icmp_filtered": False,
                 "unreachable": bool(target_port_reachable is False),
                 "reached_target": False,
-                "tun_suspected": looks_like_tun(hops, target_ip)}
+                "tun_suspected": looks_like_tun(hops, target_ip),
+                "middle_loss_suspected": False, "middle_loss_ttls": []}
 
-    flagged = degraded_hops(hops)
+    profile = _path_degradation(hops, target_ip)
+    flagged = profile["degraded_ttls"]
     degraded_ttl = flagged[0] if flagged else None
+    probed = [hop for hop in sorted(hops, key=lambda item: item.ttl)
+              if hop.sent > 0]
     if degraded_ttl is None:
         verdict = PATH_OK
-    elif degraded_ttl == hops[0].ttl:
+    elif degraded_ttl == probed[0].ttl:
         verdict = PATH_LOCAL_SIDE            # 第一跳就坏 → 终端/接入侧
-    elif len(flagged) == 1 and degraded_ttl == hops[-1].ttl:
-        verdict = PATH_SERVER_EDGE           # 只有末跳坏 → 对端侧
+    elif len(flagged) == 1 and degraded_ttl == profile["endpoint_ttl"]:
+        verdict = PATH_SERVER_EDGE           # 只有终点（末跳/目标）坏 → 对端侧
     else:
-        verdict = PATH_TRANSPORT_NET         # 中间跳坏 → 承载网 / 运营商
+        verdict = PATH_TRANSPORT_NET         # 中间跳开始持续坏 → 承载网 / 运营商
 
     rtts = [hop.rtt_avg_ms for hop in hops if hop.rtt_avg_ms is not None]
-    reached = bool(target_ip) and any(hop.ip == target_ip for hop in hops)
+    middle = profile["middle_loss_ttls"]
     return {"verdict_key": verdict, "degraded_ttl": degraded_ttl,
             "baseline_ms": round(min(rtts), 1) if rtts else None,
             "icmp_filtered": False, "unreachable": False,
-            "reached_target": reached,
-            "tun_suspected": looks_like_tun(hops, target_ip)}
+            "reached_target": bool(profile["target_reached"]),
+            "tun_suspected": looks_like_tun(hops, target_ip),
+            "middle_loss_suspected": bool(middle),
+            "middle_loss_ttls": list(middle)}
 
 
 # ---------------------------------------------------------------- 隔离表达式
@@ -1814,6 +1931,8 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
        （TCP 有响应只证明端口可达，不能反推「ICMP 路径正常」）；TCP 也不可达 →
        ``PATH.NO_DATA`` + ``unreachable=True``；
     5. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
+       劣化按 R5 的持久性约束：单跳异常必须持续到目标或最后响应跳；中间跳限速
+       只记进 ``middle_loss_suspected`` / ``middle_loss_ttls``，不判承载网。
 
     Args:
         target: 目标 IP / 域名。
@@ -1829,7 +1948,8 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
 
     Returns:
         :class:`PathProbeResult`: 逐跳统计 + ``verdict_key`` / ``degraded_ttl`` /
-        ``method`` / ``icmp_filtered`` / ``tun_suspected`` 等；参数非法 / 解析失败 /
+        ``method`` / ``icmp_filtered`` / ``tun_suspected`` /
+        ``middle_loss_suspected`` / ``middle_loss_ttls`` 等；参数非法 / 解析失败 /
         scapy 不可用时也返回结果（``hops`` 为空、``error`` 写明原因），**不抛异常**
         —— 调用方（实时抓包 / 体检）绝不允许被路径探测拖垮。
 
@@ -1875,7 +1995,7 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
     icmp_filtered = False
     note = ""
     if not scan_error and rows:
-        hops = build_hop_stats(rows)
+        hops = build_hop_stats(rows, target_ip=ip)
         if not any(hop.rtt_n > 0 or hop.loss_pct < 100.0 for hop in hops) and reachable:
             # ICMP 全丢但目标端口 TCP 可达 → 被策略过滤，改用 TCP SYN 逐跳重扫。
             icmp_filtered = True
@@ -1905,7 +2025,7 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
                                timeout_s=timeout_s, probes_sent=probes_sent,
                                error=scan_error)
 
-    hops = build_hop_stats(rows)
+    hops = build_hop_stats(rows, target_ip=ip)
     summary = summarize_path(hops, reachable, method=method, target_ip=ip)
     # ICMP 扫描全丢、TCP 回退成功时，结论必须是「ICMP 被过滤」而不是「整条路径
     # 未观察到劣化」：TCP 有响应是**降级探测**的结果，不能反过来证明 ICMP 正常。
@@ -1925,6 +2045,8 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
         completed=completed,
         tun_suspected=bool(summary["tun_suspected"]),
         unreachable=bool(summary["unreachable"]),
+        middle_loss_suspected=bool(summary.get("middle_loss_suspected")),
+        middle_loss_ttls=tuple(summary.get("middle_loss_ttls") or ()),
         max_hops=max_hops, samples=samples, timeout_s=timeout_s,
         probes_sent=probes_sent, error=note)
     return result

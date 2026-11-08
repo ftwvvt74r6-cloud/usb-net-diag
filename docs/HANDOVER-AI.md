@@ -264,7 +264,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    快照；本批唯一例外是 `reports/faults_demo.md` **末尾追加「取证请求单」区块**
    （纯后缀，`reports/faults_demo.json` 必须逐字节不变）；测试/实验用
    `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 555 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+3. **测试只增不减**：当前 564 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -355,7 +355,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 555，但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> 测试数为 564，但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
 > （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
@@ -400,7 +400,7 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 555 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 564 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
@@ -485,7 +485,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（1,451 行；无构建链、无前端框架） |
-| `tests/` | 27 个 `test_*.py`（555 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 27 个 `test_*.py`（564 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -547,7 +547,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 555 条，OK (skipped≈27，取决于环境)
+python -m unittest discover -s tests        # 期望 564 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -641,7 +641,7 @@ python -m unittest discover -s tests        # 期望 555 条，OK (skipped≈27�
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 555 tests ... OK (skipped≈27，取决于环境)
+# 期望：Ran 564 tests ... OK (skipped≈27，取决于环境)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：

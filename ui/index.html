@@ -2330,6 +2330,10 @@ function renderPathProfile(pp, copy) {
   lines.push(pp.method === "tcp" || pp.icmp_filtered ? copy.method_tcp : copy.method_icmp);
   const verdictKey = verdictKeys[pp.verdict_key];
   if (verdictKey && copy[verdictKey]) lines.push(copy[verdictKey]);
+  if (pp.middle_loss_suspected && (pp.degraded_ttl === null || pp.degraded_ttl === undefined)) {
+    lines.push(copyFill(copy.middle_loss_hint,
+      { ttls: (pp.middle_loss_ttls || []).join("、") || "-" }));
+  }
   if (pp.degraded_ttl !== null && pp.degraded_ttl !== undefined) {
     lines.push(copyFill(copy.degraded_line, { ttl: pp.degraded_ttl }));
     if (pp.baseline_ms !== null && pp.baseline_ms !== undefined) {

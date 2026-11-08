@@ -830,8 +830,15 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         profile = profiler.result
         if profile is not None and profile.hops:
             result["path"] = profiler.snapshot()
+            if profile.degraded_ttl is not None:
+                detail = f"第 {profile.degraded_ttl} 跳开始劣化"
+            elif profile.middle_loss_suspected:
+                detail = ("中间跳有丢包但未持续到目标（疑似 ICMP 限速/策略过滤，"
+                          f"第 {'、'.join(str(ttl) for ttl in profile.middle_loss_ttls)} 跳）")
+            else:
+                detail = "未发现持续劣化"
             logger(f"路径探测结束：{len(profile.hops)} 跳，结论 {profile.verdict_key}，"
-                   f"第 {profile.degraded_ttl or '—'} 跳开始劣化")
+                   f"{detail}")
         else:
             reason = profiler.error or (profile.error if profile is not None else "")
             logger("[提示] 路径探测没有产生可用数据，本次不注入路径剖面"
@@ -1264,10 +1271,17 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         profile = dict(profile)
         profile["excluded_icmp"] = excluded_icmp
         result["meta"]["path_profile"] = profile
+        if profile.get("degraded_ttl") is not None:
+            degraded_text = f"第 {profile.get('degraded_ttl')} 跳开始劣化"
+        elif profile.get("middle_loss_suspected"):
+            degraded_text = ("中间跳有丢包但未持续到目标（疑似 ICMP 限速/策略过滤，"
+                             f"第 {'、'.join(str(ttl) for ttl in profile.get('middle_loss_ttls') or [])} 跳）")
+        else:
+            degraded_text = "未发现持续劣化"
         logger(f"路径剖面：{len(profile.get('hops') or [])} 跳（方式 {profile.get('method')}），"
-               f"第 {profile.get('degraded_ttl') or '—'} 跳开始劣化；"
+               f"{degraded_text}；"
                f"已从业务统计剔除 {excluded_icmp} 个 ICMP 超时包"
-               f"（含非探针流量，{excluded_icmp} 为上限）")
+               f"（含非探针流量，{excluded_icmp} 为上限）——这些包未计入业务统计")
 
     if result["meta"]["packets"] == 0:
         result["rows"].insert(0, {

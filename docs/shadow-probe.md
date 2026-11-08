@@ -72,9 +72,11 @@ DNS 响应），只排「源端口」会漏。所以：
 | 分析 `-Y` | `ProbeLedger.exclusion_display_filter()` | `icmp.type/icmp.ident` + `tcp/udp srcport/dstport` 判断 |
 | 计数 | `pathprobe.count_marked_packets()` | 用「只匹配探针」的 `-Y` 统计 pcap 里混进多少标记探针包；该表达式**显式排除 ICMP type 11**，避免与路径剖面的「ICMP 超时包」计数重复 |
 
-报告里写「探针标记报文已从业务统计排除（N 包；ICMP 超时包另计）」。**N=0 也是证据**：
+报告里写「探针标记报文已从业务统计排除（N 包）——这些包未计入业务统计；
+ICMP 超时包另计，见路径剖面」。**N=0 也是证据**：
 说明抓包 BPF 生效；N>0 说明 BPF 没盖住（例如抓的是 TUN 网卡），分析阶段的显示过滤
-兜住了。ICMP type 11 由路径剖面单独计数，与这里的标记包计数互不重叠。
+兜住了。ICMP type 11 由路径剖面单独计数，与这里的标记包计数互不重叠；路径剖面的
+文案同样明说「这些包未计入业务统计」。
 
 合成 pcap 回归测试：`tests/test_shadow_probe.py::ProbeIsolationSyntheticTest`
 ——「业务 + 探针」pcap 带过滤分析与纯净业务 pcap **逐字段相同**；不带过滤时统计不同

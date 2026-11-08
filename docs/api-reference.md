@@ -1583,9 +1583,9 @@ Returns:
 | `capture_filter_for` | function | 219 | ✅ |
 | `bpf_for` | function | 305 | ✅ |
 | `capture_live` | function | 603 | ✅ |
-| `degraded_empty_capture_result` | function | 871 | ✅ |
-| `run_scan` | function | 1048 | ✅ |
-| `main` | function | 1325 | ✅ |
+| `degraded_empty_capture_result` | function | 878 | ✅ |
+| `run_scan` | function | 1055 | ✅ |
+| `main` | function | 1339 | ✅ |
 
 ### `load_config`
 
@@ -2662,65 +2662,65 @@ Returns:
 |---|---|---|---|
 | `ProbeKind` | class | 122 | ✅ |
 | `HopStatus` | class | 130 | ✅ |
-| `ProbeSpec` | class | 149 | ✅ |
-| `ProbeSpec.to_dict` | method | 175 | ✅ |
-| `ProbeRecord` | class | 200 | ✅ |
-| `ProbeRecord.to_dict` | method | 224 | ✅ |
-| `ProbeLedger` | class | 245 | ✅ |
-| `ProbeLedger.ports` | method | 261 | ✅ |
-| `ProbeLedger.targets` | method | 269 | ✅ |
-| `ProbeLedger.kinds` | method | 277 | ✅ |
-| `ProbeLedger.has_icmp` | method | 285 | ✅ |
-| `ProbeLedger.exclusion_bpf` | method | 293 | ✅ |
-| `ProbeLedger.exclusion_display_filter` | method | 312 | ✅ |
-| `ProbeLedger.window` | method | 320 | ✅ |
-| `ProbeLedger.baseline` | method | 328 | ✅ |
-| `ProbeLedger.to_dict` | method | 350 | ✅ |
-| `HopStat` | class | 373 | ✅ |
-| `HopStat.loss_pct` | method | 393 | ✅ |
-| `HopStat.to_dict` | method | 402 | ✅ |
-| `PathProbeResult` | class | 427 | ✅ |
-| `PathProbeResult.to_dict` | method | 454 | ✅ |
-| `classify` | function | 490 | ✅ |
-| `clamp_path_options` | function | 538 | ✅ |
-| `build_hop_stats` | function | 579 | ✅ |
-| `degraded_hops` | function | 647 | ✅ |
-| `first_degraded_hop` | function | 680 | ✅ |
-| `looks_like_tun` | function | 699 | ✅ |
-| `summarize_path` | function | 746 | ✅ |
-| `exclusion_bpf` | function | 831 | ✅ |
-| `exclusion_display_filter` | function | 855 | ✅ |
-| `probe_marker_display_filter` | function | 876 | ✅ |
-| `path_exclusion_display_filter` | function | 907 | ✅ |
-| `discover_targets` | function | 986 | ✅ |
-| `plan` | function | 1051 | ✅ |
-| `shadow_specs` | function | 1077 | ✅ |
-| `rounds_for` | function | 1098 | ✅ |
-| `probe_len` | function | 1115 | ✅ |
-| `probe_src_port` | function | 1127 | ✅ |
-| `send_probe` | function | 1144 | ✅ |
-| `ShadowProber` | class | 1221 | ✅ |
-| `ShadowProber.start` | method | 1248 | ✅ |
-| `ShadowProber.stop` | method | 1258 | ✅ |
-| `ShadowProber.join` | method | 1262 | ✅ |
-| `ShadowProber.run_round` | method | 1277 | ✅ |
-| `ShadowProber.exclusion_bpf` | method | 1321 | ✅ |
-| `ShadowProber.exclusion_display_filter` | method | 1330 | ✅ |
-| `ShadowProber.marker_display_filter` | method | 1339 | ✅ |
-| `ShadowProber.sent_count` | method | 1349 | ✅ |
-| `ShadowProber.snapshot` | method | 1358 | ✅ |
-| `aggregate_records` | function | 1379 | ✅ |
-| `count_marked_packets` | function | 1447 | ✅ |
-| `count_time_exceeded_packets` | function | 1482 | ✅ |
-| `probe_tcp_reachable` | function | 1550 | ✅ |
-| `check_target_port` | function | 1585 | ✅ |
-| `run` | function | 1797 | ✅ |
-| `PathProfiler` | class | 1936 | ✅ |
-| `PathProfiler.start` | method | 1971 | ✅ |
-| `PathProfiler.stop` | method | 1982 | ✅ |
-| `PathProfiler.join` | method | 1986 | ✅ |
-| `PathProfiler.should_stop` | method | 2001 | ✅ |
-| `PathProfiler.snapshot` | method | 2021 | ✅ |
+| `ProbeSpec` | class | 153 | ✅ |
+| `ProbeSpec.to_dict` | method | 179 | ✅ |
+| `ProbeRecord` | class | 204 | ✅ |
+| `ProbeRecord.to_dict` | method | 228 | ✅ |
+| `ProbeLedger` | class | 249 | ✅ |
+| `ProbeLedger.ports` | method | 265 | ✅ |
+| `ProbeLedger.targets` | method | 273 | ✅ |
+| `ProbeLedger.kinds` | method | 281 | ✅ |
+| `ProbeLedger.has_icmp` | method | 289 | ✅ |
+| `ProbeLedger.exclusion_bpf` | method | 297 | ✅ |
+| `ProbeLedger.exclusion_display_filter` | method | 316 | ✅ |
+| `ProbeLedger.window` | method | 324 | ✅ |
+| `ProbeLedger.baseline` | method | 332 | ✅ |
+| `ProbeLedger.to_dict` | method | 354 | ✅ |
+| `HopStat` | class | 377 | ✅ |
+| `HopStat.loss_pct` | method | 397 | ✅ |
+| `HopStat.to_dict` | method | 406 | ✅ |
+| `PathProbeResult` | class | 431 | ✅ |
+| `PathProbeResult.to_dict` | method | 463 | ✅ |
+| `classify` | function | 503 | ✅ |
+| `clamp_path_options` | function | 552 | ✅ |
+| `build_hop_stats` | function | 683 | ✅ |
+| `degraded_hops` | function | 761 | ✅ |
+| `first_degraded_hop` | function | 780 | ✅ |
+| `looks_like_tun` | function | 802 | ✅ |
+| `summarize_path` | function | 849 | ✅ |
+| `exclusion_bpf` | function | 948 | ✅ |
+| `exclusion_display_filter` | function | 972 | ✅ |
+| `probe_marker_display_filter` | function | 993 | ✅ |
+| `path_exclusion_display_filter` | function | 1024 | ✅ |
+| `discover_targets` | function | 1103 | ✅ |
+| `plan` | function | 1168 | ✅ |
+| `shadow_specs` | function | 1194 | ✅ |
+| `rounds_for` | function | 1215 | ✅ |
+| `probe_len` | function | 1232 | ✅ |
+| `probe_src_port` | function | 1244 | ✅ |
+| `send_probe` | function | 1261 | ✅ |
+| `ShadowProber` | class | 1338 | ✅ |
+| `ShadowProber.start` | method | 1365 | ✅ |
+| `ShadowProber.stop` | method | 1375 | ✅ |
+| `ShadowProber.join` | method | 1379 | ✅ |
+| `ShadowProber.run_round` | method | 1394 | ✅ |
+| `ShadowProber.exclusion_bpf` | method | 1438 | ✅ |
+| `ShadowProber.exclusion_display_filter` | method | 1447 | ✅ |
+| `ShadowProber.marker_display_filter` | method | 1456 | ✅ |
+| `ShadowProber.sent_count` | method | 1466 | ✅ |
+| `ShadowProber.snapshot` | method | 1475 | ✅ |
+| `aggregate_records` | function | 1496 | ✅ |
+| `count_marked_packets` | function | 1564 | ✅ |
+| `count_time_exceeded_packets` | function | 1599 | ✅ |
+| `probe_tcp_reachable` | function | 1667 | ✅ |
+| `check_target_port` | function | 1702 | ✅ |
+| `run` | function | 1914 | ✅ |
+| `PathProfiler` | class | 2058 | ✅ |
+| `PathProfiler.start` | method | 2093 | ✅ |
+| `PathProfiler.stop` | method | 2104 | ✅ |
+| `PathProfiler.join` | method | 2108 | ✅ |
+| `PathProfiler.should_stop` | method | 2123 | ✅ |
+| `PathProfiler.snapshot` | method | 2143 | ✅ |
 
 ### `ProbeKind`  (class)
 
@@ -2741,9 +2741,12 @@ class HopStatus
 ```text
 路径探测（MTR）单跳的状态（机器码，中文文案在 copy 表）。
 
-``OK`` 与 ``LOSS`` 保留既有语义（正常 / 全部超时）；``DEGRADED`` 是本批新增的
-「劣化」值，用于「丢包 ≥ 阈值但仍有响应」或「RTT 相对基线突增」的跳 ——
-这种跳不能再显示成「正常」，否则表格与「第几跳开始劣化」的结论自相矛盾。
+``OK`` 与 ``LOSS`` 保留既有语义（正常 / 全部超时）；``DEGRADED`` 表示
+**劣化持续到目标或最后一个有响应的跳**（R5）：只在「从这一跳开始的丢包/RTT
+异常一直延续到终点」时使用，不能再显示成「正常」，否则表格与「第几跳开始
+劣化」的结论自相矛盾。``RATE_LIMITED`` 表示该跳自身有丢包/RTT 异常、但后面
+的跳或目标已经恢复正常（企业网里常见于设备对 TTL 回复限速）—— 它不是承载网
+故障证据，所以既不能显示成「劣化」，也不该粉饰成「正常」。
 ``FILTERED`` / ``UNREACHABLE`` / ``NO_TARGET`` 是保留机器码（当前由结论句 /
 方法标注表达，未逐跳赋值）。
 ```
@@ -3025,6 +3028,9 @@ class PathProbeResult
 
 ``verdict_key`` 只用 :data:`PATH_OK` 等 6 个机器码；``unreachable`` 是附加
 布尔（ICMP 与 TCP 都没响应时，渲染层据此写「目标不可达」而不是「正常」）。
+``middle_loss_suspected`` / ``middle_loss_ttls`` 记录「中间跳有丢包/RTT 异常、
+但劣化没有持续到目标或最后响应跳」的跳（R5）：这类跳不能算作劣化，只在报告里
+提示可能是 ICMP 限速/策略过滤。
 ```
 
 ### `PathProbeResult.to_dict`  (method)
@@ -3040,8 +3046,10 @@ Returns:
     dict: 键 ``target``/``target_ip``/``verdict_key``/``degraded_ttl``/
         ``baseline_ms``/``icmp_filtered``/``target_port_reachable``/
         ``method``/``reached_target``/``completed``/``tun_suspected``/
-        ``unreachable``/``max_hops``/``samples``/``timeout_s``/
-        ``probes_sent``/``error``/``hops``（逐跳）/``ledger``。
+        ``unreachable``/``middle_loss_suspected``/``middle_loss_ttls``/
+        ``max_hops``/``samples``/``timeout_s``/``probes_sent``/``error``/
+        ``hops``（逐跳）/``ledger``。``middle_loss_ttls`` 是「有丢包/RTT
+        异常但未持续到目标或最后响应跳」的中间跳 TTL 列表（R5）。
 ```
 
 ### `classify`
@@ -3056,9 +3064,10 @@ def classify(hops: Sequence[HopStat], target_port_reachable: bool | None=None) -
 四态的关键是**最后一种**：全部都丢但目标端口 TCP 可通 → 这不是故障，是
 ICMP 被策略过滤（企业网常见），不能把「被过滤」误判成「链路故障」。
 
-本函数只做「按最终响应者定界」的旧口径；它不计算 RTT 突增、不区分「探测未完成」。
-实时路径 / 报告 / 服务端**主路径一律走 :func:`summarize_path`**，这里保留是为了
-兼容既有调用方与 SPEC 的公开 API 形状。阈值复用模块常量，避免出现第二套魔数。
+本函数只做「按最终响应者定界」的旧口径；它不计算 RTT 突增、不区分「探测未完成」，
+**也不套用 R5 的持久性约束**（中间跳限速仍可能被它算成 losing）。实时路径 /
+报告 / 服务端**主路径一律走 :func:`summarize_path`**，这里保留是为了兼容既有
+调用方与 SPEC 的公开 API 形状。阈值复用模块常量，避免出现第二套魔数。
 
 Args:
     hops: 逐跳统计（按 TTL 顺序）。
@@ -3100,7 +3109,7 @@ Example:
 ### `build_hop_stats`
 
 ```python
-def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]
+def build_hop_stats(rows: Iterable[Mapping], target_ip: str='') -> tuple[HopStat, ...]
 ```
 
 ```text
@@ -3111,6 +3120,9 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]
 
 Args:
     rows: 原始采样记录（顺序无关，内部按 ``ttl`` 排序输出）。
+    target_ip: 目标 IP 字面量；给了才知道哪一跳是目标跳，从而按 R5 的
+        「劣化必须持续到目标/最后响应跳」赋值状态。省略时按最后一个有响应
+        的跳作为终点（单跳 / 直调场景）。
 
 Returns:
     tuple[HopStat, ...]: 按 TTL 升序的逐跳统计。``sent`` 是该 TTL 的采样数，
@@ -3118,8 +3130,9 @@ Returns:
     ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
     ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
     ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
-    ``status`` 与劣化判定同源：全部超时 → ``LOSS``；丢包 ≥
-    :data:`PATH_LOSS_DEGRADED_PCT` 或 RTT 突增 → ``DEGRADED``；否则 ``OK``。
+    ``status`` 与劣化判定同源：没有任何样本 → ``LOSS``；**异常持续到终点**
+    → ``DEGRADED``（全丢仍保留 ``LOSS``）；异常被后续正常跳/目标打断
+    → ``RATE_LIMITED``；其余 ``OK``。
 
 Example:
     >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
@@ -3133,20 +3146,20 @@ def degraded_hops(hops: Sequence[HopStat]) -> tuple[int, ...]
 ```
 
 ```text
-列出「已经劣化」的跳（纯函数，阈值全部来自模块常量）。
+列出「已经劣化为承载网问题」的跳（纯函数，阈值全部来自模块常量）。
 
-两条判据，任一命中即算劣化：
-
-1. **丢包**：``loss_pct >= PATH_LOSS_DEGRADED_PCT``（默认 20%）；
-2. **RTT 突增**：当前跳平均 RTT ≥ 基线 × :data:`PATH_RTT_SPIKE_FACTOR`
-   且绝对增量 ≥ :data:`PATH_RTT_SPIKE_DELTA_MS`。基线取「已响应跳里最小的
-   平均 RTT」（首跳自身不参与比较，避免把第一跳的正常抖动当成突增）。
+R5 的持久性约束在这里落地：单跳丢包/RTT 异常本身不够，必须**从这一跳开始
+连续延续到目标或最后一个有响应的跳**才算劣化。中间跳不回 ICMP、但后续跳或
+目标恢复正常的场景返回空元组（那是限速/策略过滤，不是承载网故障）。
 
 Args:
-    hops: 逐跳统计（顺序无关，内部按 ttl 排序）。
+    hops: 逐跳统计（顺序无关，内部按 ttl 排序）。没有目标 IP 时按「最后一个
+        有响应的跳」作为终点（末尾 100% 不回包时按最后一个有采样的跳）；
+        需要按目标跳判定时用 :func:`summarize_path`。
 
 Returns:
-    tuple[int, ...]: 劣化跳的 TTL（升序）；没有劣化时是空元组。
+    tuple[int, ...]: 持续劣化段的 TTL（升序）；没有持续劣化时是空元组。
+        没有样本同样返回空元组 —— **空 ≠ 正常**，调用方需另判 ``PATH.NO_DATA``。
 ```
 
 ### `first_degraded_hop`
@@ -3156,15 +3169,18 @@ def first_degraded_hop(hops: Sequence[HopStat]) -> int | None
 ```
 
 ```text
-「第几跳开始劣化」——第一条命中 :func:`degraded_hops` 判据的 TTL。
+「第几跳开始劣化」——持续劣化段的第一跳 TTL。
+
+只有从这一跳开始、异常一直延续到目标或最后响应跳，才会返回 TTL；中间跳
+丢包但后续跳/目标恢复正常的场景返回 ``None``（R5，避免误判承载网）。
 
 Args:
     hops: 逐跳统计。
 
 Returns:
-    int | None: 劣化跳的 TTL；全部正常或没有任何样本时返回 ``None``。
-        **没有样本 ≠ 正常**：调用方必须再看 ``sent`` / ``rtt_n`` 才能下结论
-        （见 :func:`summarize_path` 的 ``PATH.NO_DATA``）。
+    int | None: 持续劣化段第一跳的 TTL；全部正常、只有中间跳异常、或没有任何
+        样本时返回 ``None``。**没有样本 ≠ 正常**：调用方必须再看 ``sent`` /
+        ``rtt_n`` 才能下结论（见 :func:`summarize_path` 的 ``PATH.NO_DATA``）。
 
 Example:
     >>> first_degraded_hop(()) is None
@@ -3218,18 +3234,24 @@ def summarize_path(hops: Sequence[HopStat], target_port_reachable: bool | None=N
 与 :func:`classify` 的区别：这里同时看**丢包**与 **RTT 突增**，并且把
 「没有样本」「ICMP 被过滤」「目标不可达」明确分开 —— 三者都不许落成「正常」。
 
+「劣化」按 R5 的持久性口径：单跳异常必须**从该跳开始连续延续到目标或最后
+一个有响应的跳**，才算 ``degraded_ttl``；中间跳异常但后续跳/目标恢复正常的，
+只进 ``middle_loss_suspected`` / ``middle_loss_ttls``，结论仍是 ``PATH.OK``。
+
 Args:
     hops: 逐跳统计。
     target_port_reachable: 目标端口 TCP 是否可达；``None`` 表示没测。
     method: ``"icmp"`` / ``"tcp"``；只有 ICMP 方法才可能判定「被过滤」。
-    target_ip: 目标 IP 字面量，用于判断「是否已探到目标」与 TUN 提示。
+    target_ip: 目标 IP 字面量，用于识别目标跳（判定终点）、「是否已探到目标」
+        与 TUN 提示。
 
 Returns:
     dict: 键 ``verdict_key``（:data:`PATH_OK` 等 6 个机器码）/
-        ``degraded_ttl``（第几跳开始劣化，无则 ``None``）/``baseline_ms``
+        ``degraded_ttl``（持续劣化段第一跳，无则 ``None``）/``baseline_ms``
         （基线平均 RTT，无样本 ``None``）/``icmp_filtered``/``unreachable``/
-        ``reached_target``/``tun_suspected``。没有样本时恒为 ``PATH.NO_DATA``，
-        绝不返回 ``PATH.OK``。
+        ``reached_target``/``tun_suspected``/``middle_loss_suspected``（是否有
+        「未持续到终点」的中间跳异常）/``middle_loss_ttls``（这些跳的 TTL 列表）。
+        没有样本时恒为 ``PATH.NO_DATA``，绝不返回 ``PATH.OK``。
 
 Example:
     >>> summarize_path(())["verdict_key"]
@@ -3729,6 +3751,8 @@ TTL 递增路径探测（MTR）：逐跳 RTT/丢包/抖动 + 劣化判定 + ICMP
    （TCP 有响应只证明端口可达，不能反推「ICMP 路径正常」）；TCP 也不可达 →
    ``PATH.NO_DATA`` + ``unreachable=True``；
 5. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
+   劣化按 R5 的持久性约束：单跳异常必须持续到目标或最后响应跳；中间跳限速
+   只记进 ``middle_loss_suspected`` / ``middle_loss_ttls``，不判承载网。
 
 Args:
     target: 目标 IP / 域名。
@@ -3744,7 +3768,8 @@ Args:
 
 Returns:
     :class:`PathProbeResult`: 逐跳统计 + ``verdict_key`` / ``degraded_ttl`` /
-    ``method`` / ``icmp_filtered`` / ``tun_suspected`` 等；参数非法 / 解析失败 /
+    ``method`` / ``icmp_filtered`` / ``tun_suspected`` /
+    ``middle_loss_suspected`` / ``middle_loss_ttls`` 等；参数非法 / 解析失败 /
     scapy 不可用时也返回结果（``hops`` 为空、``error`` 写明原因），**不抛异常**
     —— 调用方（实时抓包 / 体检）绝不允许被路径探测拖垮。
 
@@ -4329,10 +4354,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 358 | ✅ |
-| `save` | function | 627 | ✅ |
-| `render_degraded` | function | 676 | ✅ |
-| `save_degraded` | function | 742 | ✅ |
+| `render_markdown` | function | 353 | ✅ |
+| `save` | function | 622 | ✅ |
+| `render_degraded` | function | 671 | ✅ |
+| `save_degraded` | function | 737 | ✅ |
 
 ### `render_markdown`
 

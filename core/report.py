@@ -188,18 +188,13 @@ def _render_path_profile(profile: dict) -> list[str]:
     verdict = _path_verdict_text(profile)
     if verdict:
         lines.append(verdict)
-    # 中间跳丢包但后续跳恢复（目标响应，或更后面的跳 0 丢包）：这在企业网里常是
-    # 「路由设备对 TTL 回复限速」，不能仅凭中间跳直接断言承载网故障。
-    degraded_ttl = profile.get("degraded_ttl")
-    recovered = bool(profile.get("reached_target"))
-    if degraded_ttl is not None:
-        recovered = recovered or any(
-            int(hop.get("ttl") or 0) > int(degraded_ttl)
-            and int(hop.get("sent") or 0) > 0
-            and float(hop.get("loss_pct") or 0.0) == 0.0
-            for hop in hops)
-    if str(profile.get("verdict_key") or "") == "PATH.TRANSPORT_NET" and recovered:
-        lines.append(_pa("mid_hop_loss_hint"))
+    # R5：中间跳有丢包/RTT 异常，但劣化没有持续到目标或最后响应跳。企业网里路由
+    # 设备常对 TTL 回复限速，单看中间跳直接断言「承载网故障」会误报 —— 该提示只在
+    # 没有持续劣化段（degraded_ttl 为空）时出现，和有劣化结论的路径不混着说。
+    middle_ttls = list(profile.get("middle_loss_ttls") or [])
+    if profile.get("middle_loss_suspected") and profile.get("degraded_ttl") is None:
+        lines.append(_pa("middle_loss_hint",
+                         ttls="、".join(str(ttl) for ttl in middle_ttls) or "-"))
     if profile.get("degraded_ttl") is not None:
         lines.append(_pa("degraded_line", ttl=profile.get("degraded_ttl")))
         if profile.get("baseline_ms") is not None:

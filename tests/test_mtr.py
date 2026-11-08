@@ -87,27 +87,54 @@ def _hop(ttl, ip="", sent=3, lost=0, rtts=None):
 
 
 def _profile(**overrides) -> dict:
-    """造一份 ``meta.path_profile``（文档示例地址；不出现真实 IP）。"""
+    """造一份 ``meta.path_profile``：R5 的典型「中间跳限速、目标正常」场景。"""
     profile = {
         "target": "example.com", "target_ip": TARGET,
-        "verdict_key": pathprobe.PATH_TRANSPORT_NET, "degraded_ttl": 2,
+        "verdict_key": pathprobe.PATH_OK, "degraded_ttl": None,
         "baseline_ms": 1.0, "icmp_filtered": False,
         "target_port_reachable": True, "method": "icmp",
         "reached_target": True, "completed": True, "tun_suspected": False,
         "unreachable": False, "max_hops": 16, "samples": 3, "timeout_s": 0.8,
-        "probes_sent": 9, "error": "", "excluded_icmp": 6,
+        "probes_sent": 12, "error": "", "excluded_icmp": 6,
+        "middle_loss_suspected": True, "middle_loss_ttls": [2, 3],
         "hops": [
+            {"ttl": 1, "ip": GW, "sent": 3, "lost": 0, "loss_pct": 0.0,
+             "rtt_min_ms": 0.5, "rtt_avg_ms": 1.0, "rtt_max_ms": 1.5,
+             "jitter_ms": 0.4, "rtt_n": 3, "status": "ok"},
+            {"ttl": 2, "ip": "", "sent": 3, "lost": 3, "loss_pct": 100.0,
+             "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
+             "jitter_ms": None, "rtt_n": 0, "status": "loss"},
+            {"ttl": 3, "ip": "", "sent": 3, "lost": 3, "loss_pct": 100.0,
+             "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
+             "jitter_ms": None, "rtt_n": 0, "status": "loss"},
+            {"ttl": 4, "ip": TARGET, "sent": 3, "lost": 0, "loss_pct": 0.0,
+             "rtt_min_ms": 8.0, "rtt_avg_ms": 9.0, "rtt_max_ms": 10.0,
+             "jitter_ms": 0.8, "rtt_n": 3, "status": "ok"},
+        ],
+    }
+    profile.update(overrides)
+    return profile
+
+
+def _degraded_profile(**overrides) -> dict:
+    """造一份「劣化持续到目标」的路径剖面（R5）：第 2 跳起持续丢包，目标也丢。"""
+    profile = _profile(
+        verdict_key=pathprobe.PATH_TRANSPORT_NET, degraded_ttl=2,
+        middle_loss_suspected=False, middle_loss_ttls=[],
+        hops=[
             {"ttl": 1, "ip": GW, "sent": 3, "lost": 0, "loss_pct": 0.0,
              "rtt_min_ms": 0.5, "rtt_avg_ms": 1.0, "rtt_max_ms": 1.5,
              "jitter_ms": 0.4, "rtt_n": 3, "status": "ok"},
             {"ttl": 2, "ip": ROUTER, "sent": 3, "lost": 2, "loss_pct": 66.7,
              "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
              "jitter_ms": None, "rtt_n": 0, "status": "degraded"},
-            {"ttl": 3, "ip": TARGET, "sent": 3, "lost": 0, "loss_pct": 0.0,
+            {"ttl": 3, "ip": ROUTER, "sent": 3, "lost": 2, "loss_pct": 66.7,
+             "rtt_min_ms": 5.0, "rtt_avg_ms": 5.0, "rtt_max_ms": 5.0,
+             "jitter_ms": 0.0, "rtt_n": 1, "status": "degraded"},
+            {"ttl": 4, "ip": TARGET, "sent": 3, "lost": 1, "loss_pct": 33.3,
              "rtt_min_ms": 8.0, "rtt_avg_ms": 9.0, "rtt_max_ms": 10.0,
-             "jitter_ms": 0.8, "rtt_n": 3, "status": "ok"},
-        ],
-    }
+             "jitter_ms": 0.8, "rtt_n": 2, "status": "degraded"},
+        ])
     profile.update(overrides)
     return profile
 
@@ -283,6 +310,93 @@ class DegradationTest(unittest.TestCase):
         self.assertEqual(pathprobe.first_degraded_hop(hops), 2)
         self.assertEqual(pathprobe.degraded_hops(hops), (2, 3))
 
+    def test_middle_hop_loss_with_healthy_target_is_ok_not_degraded(self):
+        """R5 核心：中间跳 100% 不回 ICMP、目标正常 → 不能判承载网/第 2 跳劣化。
+
+        这是企业网里路由器对 TTL 回复限速的典型形态；旧口径「任意跳丢包 ≥ 20%
+        即劣化」会误报 PATH.TRANSPORT_NET。这里同时钉住判定、字段与状态三件事。
+        """
+        hops = [_hop(1, ip=GW, rtts=[1.0]),
+                _hop(2, sent=3, lost=3),
+                _hop(3, sent=3, lost=3),
+                _hop(4, ip=TARGET, rtts=[9.0])]
+        summary = pathprobe.summarize_path(hops, target_ip=TARGET)
+        self.assertEqual(summary["verdict_key"], pathprobe.PATH_OK)
+        self.assertIsNone(summary["degraded_ttl"])
+        self.assertTrue(summary["middle_loss_suspected"])
+        self.assertEqual(summary["middle_loss_ttls"], [2, 3])
+        self.assertTrue(summary["reached_target"])
+        self.assertEqual(pathprobe.degraded_hops(hops), ())
+        self.assertIsNone(pathprobe.first_degraded_hop(hops))
+
+        stats = pathprobe.build_hop_stats([
+            _row(1, rtt=1.0, responder=GW),
+            _row(2, responded=False), _row(2, responded=False),
+            _row(2, responded=False),
+            _row(3, responded=False), _row(3, responded=False),
+            _row(3, responded=False),
+            _row(4, rtt=9.0, responder=TARGET),
+        ], target_ip=TARGET)
+        self.assertIs(stats[1].status, pathprobe.HopStatus.LOSS)
+        self.assertIs(stats[2].status, pathprobe.HopStatus.LOSS)
+        self.assertIs(stats[3].status, pathprobe.HopStatus.OK)
+
+    def test_middle_loss_persisting_to_target_is_transport_net(self):
+        """R5：从第 2 跳开始的丢包持续到目标（目标自身也丢）→ 仍判劣化。"""
+        hops = [_hop(1, ip=GW, rtts=[1.0]),
+                _hop(2, sent=3, lost=3),
+                _hop(3, sent=3, lost=3),
+                _hop(4, ip=TARGET, sent=3, lost=1, rtts=[5.0])]
+        summary = pathprobe.summarize_path(hops, target_ip=TARGET)
+        self.assertEqual(summary["verdict_key"], pathprobe.PATH_TRANSPORT_NET)
+        self.assertEqual(summary["degraded_ttl"], 2,
+                         "连续劣化段的第一跳是 2，不是目标跳 4")
+        self.assertFalse(summary["middle_loss_suspected"])
+        self.assertEqual(summary["middle_loss_ttls"], [])
+        self.assertEqual(pathprobe.degraded_hops(hops), (2, 3, 4))
+
+    def test_target_hop_loss_alone_is_server_edge(self):
+        """R5：只有目标跳自身丢包 ≥ 阈值 → 对端侧（保持既有判定）。"""
+        hops = [_hop(1, ip=GW, rtts=[1.0]),
+                _hop(2, ip=ROUTER, rtts=[2.0]),
+                _hop(3, ip=TARGET, sent=4, lost=2, rtts=[9.0, 9.0])]
+        summary = pathprobe.summarize_path(hops, target_ip=TARGET)
+        self.assertEqual(summary["verdict_key"], pathprobe.PATH_SERVER_EDGE)
+        self.assertEqual(summary["degraded_ttl"], 3)
+        self.assertEqual(summary["middle_loss_ttls"], [])
+
+    def test_single_hop_behaviour_unchanged(self):
+        """单跳（目标 = 第 1 跳）：正常仍 OK；丢包仍第 1 跳劣化（本地出口）。"""
+        healthy = pathprobe.summarize_path(
+            [_hop(1, ip=TARGET, rtts=[1.0])], target_ip=TARGET)
+        self.assertEqual(healthy["verdict_key"], pathprobe.PATH_OK)
+        self.assertIsNone(healthy["degraded_ttl"])
+        self.assertFalse(healthy["middle_loss_suspected"])
+
+        lossy = pathprobe.summarize_path(
+            [_hop(1, ip=TARGET, sent=3, lost=1)], target_ip=TARGET)
+        self.assertEqual(lossy["verdict_key"], pathprobe.PATH_LOCAL_SIDE)
+        self.assertEqual(lossy["degraded_ttl"], 1)
+
+    def test_all_hops_lost_is_no_data_not_ok(self):
+        """全丢不是「正常」；没有 TCP 可达证据时也不能冒充 ICMP 被过滤。"""
+        summary = pathprobe.summarize_path(
+            [_hop(1, sent=3, lost=3), _hop(2, sent=3, lost=3)],
+            target_ip=TARGET)
+        self.assertEqual(summary["verdict_key"], pathprobe.PATH_NO_DATA)
+        self.assertIsNone(summary["degraded_ttl"])
+        self.assertFalse(summary["middle_loss_suspected"])
+        self.assertFalse(summary["unreachable"])
+
+    def test_target_unreachable_tail_loss_keeps_existing_verdict(self):
+        """目标没探到、路径末尾持续不回包 → 不能因为更早的跳正常就判 PATH.OK。"""
+        summary = pathprobe.summarize_path(
+            [_hop(1, ip=GW, rtts=[1.0]), _hop(2, sent=3, lost=3)],
+            target_ip=TARGET)
+        self.assertEqual(summary["verdict_key"], pathprobe.PATH_SERVER_EDGE)
+        self.assertEqual(summary["degraded_ttl"], 2)
+        self.assertFalse(summary["reached_target"])
+
     def test_no_samples_is_no_data_not_ok(self):
         self.assertEqual(pathprobe.summarize_path(())["verdict_key"],
                          pathprobe.PATH_NO_DATA)
@@ -296,11 +410,11 @@ class DegradationTest(unittest.TestCase):
                                       target_ip=TARGET)
         self.assertEqual(ok["verdict_key"], pathprobe.PATH_OK)
         local = pathprobe.summarize_path([_hop(1, sent=3, lost=1),
-                                          _hop(2, rtts=[2.0])])
+                                          _hop(2, sent=3, lost=1)])
         self.assertEqual(local["verdict_key"], pathprobe.PATH_LOCAL_SIDE)
         transport = pathprobe.summarize_path([_hop(1, rtts=[1.0]),
                                               _hop(2, sent=3, lost=1),
-                                              _hop(3, rtts=[2.0])])
+                                              _hop(3, sent=3, lost=1)])
         self.assertEqual(transport["verdict_key"], pathprobe.PATH_TRANSPORT_NET)
         server_edge = pathprobe.summarize_path([_hop(1, rtts=[1.0]),
                                                 _hop(2, sent=3, lost=1)])
@@ -398,6 +512,76 @@ class RunIcmpTest(unittest.TestCase):
         self.assertEqual([hop.ttl for hop in result.hops], [1, 2, 3],
                          "目标之后的 TTL 不能重复算成多跳")
         self.assertEqual(result.verdict_key, pathprobe.PATH_OK)
+
+    def test_middle_hop_timeouts_with_healthy_target_are_ok_end_to_end(self):
+        """R5：run() 全链路 —— 第 2/3 跳 100% 不回但目标正常 → PATH.OK。"""
+        def sender(ip, method, probes, timeout_s, port):
+            rows = []
+            for probe in probes:
+                ttl = probe["ttl"]
+                if ttl == 1:
+                    rows.append(_row(ttl, rtt=1.0, responder=GW))
+                elif ttl >= 4:
+                    rows.append(_row(ttl, rtt=9.0, responder=ip))
+                else:
+                    rows.append(_row(ttl, responded=False))
+            return rows
+
+        result = pathprobe.run(TARGET, port=443, max_hops=8, samples=2,
+                               timeout_s=0.2, sender=sender,
+                               tcp_checker=lambda *_a: False)
+        self.assertTrue(result.reached_target)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_OK)
+        self.assertIsNone(result.degraded_ttl)
+        self.assertTrue(result.middle_loss_suspected)
+        self.assertEqual(result.middle_loss_ttls, (2, 3))
+        self.assertEqual([hop.status for hop in result.hops],
+                         [pathprobe.HopStatus.OK, pathprobe.HopStatus.LOSS,
+                          pathprobe.HopStatus.LOSS, pathprobe.HopStatus.OK])
+
+        payload = result.to_dict()
+        self.assertTrue(payload["middle_loss_suspected"])
+        self.assertEqual(payload["middle_loss_ttls"], [2, 3])
+        md = report.render_markdown(_result(payload))
+        self.assertIn("中间跳（第 2、3 跳）未响应或丢包", md)
+        self.assertIn("疑似 ICMP 限速/策略过滤", md)
+        self.assertIn("不能据此判承载网故障", md)
+        self.assertIn("整条路径未观察到劣化", md)
+        self.assertNotIn("问题更像在承载网", md)
+        self.assertNotIn("第 2 跳开始劣化", md)
+
+    def test_partial_middle_loss_with_healthy_target_is_rate_limited(self):
+        """R5：中间跳 50% 丢包但目标正常 → 状态「疑似限速」，不是「劣化」。"""
+        def sender(ip, method, probes, timeout_s, port):
+            rows = []
+            for index, probe in enumerate(probes):
+                ttl = probe["ttl"]
+                if ttl == 1:
+                    rows.append(_row(ttl, rtt=1.0, responder=GW))
+                elif ttl == 2:
+                    rows.append(_row(ttl, responded=(index % 2 == 0),
+                                     rtt=1.0, responder=GW))
+                else:
+                    rows.append(_row(ttl, rtt=9.0, responder=ip))
+            return rows
+
+        result = pathprobe.run(TARGET, port=443, max_hops=8, samples=2,
+                               timeout_s=0.2, sender=sender,
+                               tcp_checker=lambda *_a: False)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_OK)
+        self.assertIsNone(result.degraded_ttl)
+        self.assertTrue(result.middle_loss_suspected)
+        self.assertEqual(result.middle_loss_ttls, (2,))
+        partial = result.hops[1]
+        self.assertEqual(partial.loss_pct, 50.0)
+        self.assertIs(partial.status, pathprobe.HopStatus.RATE_LIMITED)
+        self.assertIsNot(partial.status, pathprobe.HopStatus.DEGRADED)
+
+        md = report.render_markdown(_result(result.to_dict()))
+        row = next(line for line in md.splitlines() if line.startswith("| 2 |"))
+        self.assertIn("疑似限速", row)
+        self.assertNotIn("劣化", row)
+        self.assertIn("中间跳（第 2 跳）", md)
 
     def test_probes_sent_counts_actual_packets_not_truncated_rows(self):
         """R4：probes_sent 数实际发出的包，不数截断后的 hops 行。"""
@@ -750,7 +934,9 @@ class RunScanInjectionTest(unittest.TestCase):
         self.assertTrue(result.get("ok"), result)
         injected = result["meta"]["path_profile"]
         self.assertEqual(injected["excluded_icmp"], 7)
-        self.assertEqual(len(injected["hops"]), 3)
+        self.assertEqual(len(injected["hops"]), 4)
+        self.assertTrue(injected["middle_loss_suspected"], "R5 字段必须随快照注入报告")
+        self.assertEqual(injected["middle_loss_ttls"], [2, 3])
         self.assertTrue(counted.called)
         display_filter = analyze.call_args.kwargs.get("display_filter") or ""
         self.assertIn("icmp.type == 11", display_filter)
@@ -816,39 +1002,45 @@ class PathReportTest(unittest.TestCase):
     """报告「路径剖面」区块：有数据才出现；无数据输出不变（红线）。"""
 
     def test_block_renders_hops_and_conclusion(self):
-        md = report.render_markdown(_result(_profile()))
+        md = report.render_markdown(_result(_degraded_profile()))
         self.assertIn("路径剖面", md)
         self.assertIn("| TTL |", md)
         self.assertIn("0.5/1.0/1.5 ms", md)
         self.assertIn("66.7%", md)
         self.assertIn("未探到", md)
         self.assertIn("第 2 跳开始劣化", md)
+        self.assertIn("持续到目标或最后响应跳", md)
         self.assertIn("基线 RTT", md)
         self.assertIn("ICMP", md)
         self.assertIn("已探测到目标", md)
         self.assertIn("ICMP 超时", md)
         self.assertIn("6 为上限", md)
 
-    def test_mid_hop_loss_with_recovery_adds_rate_limit_hint(self):
-        """R5：中间跳丢包但后续跳/目标恢复 → 提示可能是 ICMP 限速。"""
+    def test_middle_loss_hint_only_without_persistent_degradation(self):
+        """R5：中间跳丢包、目标正常 → 报告明确「不能据此判承载网」。"""
         md = report.render_markdown(_result(_profile()))
-        self.assertIn("ICMP 回复限速", md)
-        self.assertIn("不能仅凭中间跳直接断定承载网故障", md)
-        # 目标没回、但更后面的跳 0 丢包：同样算「后续跳恢复」。
-        later_recovered = _profile(reached_target=False)
-        self.assertIn("ICMP 回复限速", report.render_markdown(_result(later_recovered)))
-        # 后面也全丢：没有恢复证据，不该给这句解读。
-        no_recovery = _profile(reached_target=False)
-        no_recovery["hops"][2] = {
-            "ttl": 3, "ip": "", "sent": 3, "lost": 3, "loss_pct": 100.0,
-            "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
-            "jitter_ms": None, "rtt_n": 0, "status": "loss"}
-        self.assertNotIn("ICMP 回复限速", report.render_markdown(_result(no_recovery)))
+        self.assertIn("中间跳（第 2、3 跳）未响应或丢包", md)
+        self.assertIn("疑似 ICMP 限速/策略过滤", md)
+        self.assertIn("后续跳与目标正常，不能据此判承载网故障", md)
+        self.assertIn("整条路径未观察到劣化", md)
+        self.assertNotIn("第 2 跳开始劣化", md)
+        self.assertNotIn("问题更像在承载网", md)
+        # 持续劣化（目标也丢）时，不许再给「限速」解读，否则与承载网结论矛盾。
+        degraded_md = report.render_markdown(_result(_degraded_profile()))
+        self.assertNotIn("疑似 ICMP 限速", degraded_md)
+        self.assertNotIn("中间跳（第", degraded_md)
+
+    def test_excluded_icmp_copy_says_packets_not_counted(self):
+        """R1：剔除的 ICMP 超时包必须明说「这些包未计入业务统计」。"""
+        md = report.render_markdown(_result(_profile()))
+        self.assertIn("这些包未计入业务统计", md)
+        self.assertIn("6 为上限", md)
+        self.assertIn("含非探针流量", md)
 
     def test_tcp_method_and_icmp_filtered_wording(self):
         md = report.render_markdown(_result(_profile(
             method="tcp", icmp_filtered=True, verdict_key=pathprobe.PATH_ICMP_FILTERED,
-            degraded_ttl=None)))
+            degraded_ttl=None, middle_loss_suspected=False, middle_loss_ttls=[])))
         self.assertIn("ICMP 被过滤，改用 TCP 探测", md)
         self.assertIn("ICMP 被过滤", md)
 
@@ -864,18 +1056,21 @@ class PathReportTest(unittest.TestCase):
         for key, needle in keys.items():
             with self.subTest(key=key):
                 md = report.render_markdown(_result(_profile(
-                    verdict_key=key, degraded_ttl=None, reached_target=False)))
+                    verdict_key=key, degraded_ttl=None, reached_target=False,
+                    middle_loss_suspected=False, middle_loss_ttls=[])))
                 self.assertIn(needle, md)
 
     def test_unreachable_uses_target_unreachable_wording(self):
         md = report.render_markdown(_result(_profile(
             verdict_key=pathprobe.PATH_NO_DATA, unreachable=True,
-            degraded_ttl=None, reached_target=False)))
+            degraded_ttl=None, reached_target=False,
+            middle_loss_suspected=False, middle_loss_ttls=[])))
         self.assertIn("目标不可达", md)
 
     def test_tun_hint_and_not_completed(self):
         md = report.render_markdown(_result(_profile(
-            tun_suspected=True, completed=False)))
+            tun_suspected=True, completed=False,
+            middle_loss_suspected=False, middle_loss_ttls=[])))
         self.assertIn("代理/TUN", md)
         self.assertIn("探测未完成", md)
 
@@ -1008,13 +1203,15 @@ class PathUiTest(unittest.TestCase):
         path_copy = COPY["path"]
         for key in ("ui_title", "ui_hint", "th_ttl", "target_line", "verdict_ok",
                     "verdict_icmp_filtered", "tun_hint", "not_completed_line",
-                    "excluded_icmp", "method_tcp"):
+                    "excluded_icmp", "method_tcp", "middle_loss_hint",
+                    "status_rate_limited"):
             with self.subTest(key=key):
                 self.assertIn(key, path_copy)
         start = HTML.index("function renderPathProfile(pp, copy)")
         body = HTML[start:HTML.index("\nfunction ", start)]
         self.assertIn("copy.ui_title", body)
         self.assertIn("copy.target_line", body)
+        self.assertIn("copy.middle_loss_hint", body)
         for hardcoded in ("未探到", "劣化", "代理/TUN", "路径剖面（"):
             self.assertNotIn(hardcoded, body,
                              "路径区块的文案必须来自 copy 表，不能在页面里写死")

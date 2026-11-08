@@ -641,6 +641,7 @@ class ProbeReportTest(unittest.TestCase):
         self.assertIn(GW, md)
         self.assertIn(TARGET, md)
         self.assertIn("探针标记报文已从业务统计排除（4 包", md)
+        self.assertIn("这些包未计入业务统计", md)
         self.assertIn("1.0/1.5/2.0 ms", md)
 
     def test_zero_samples_show_not_probed_not_zero_ms(self):
