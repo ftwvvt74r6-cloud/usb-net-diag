@@ -666,34 +666,48 @@ def first_degraded_hop(hops: Sequence[HopStat]) -> int | None:
 def looks_like_tun(hops: Sequence[HopStat], target_ip: str = "") -> bool:
     """猜「本次逐跳走的是代理/TUN 的虚拟路径」。
 
-    两个信号（任一命中即提示，措辞用「可能」）：
+    **唯一可靠证据**是 ``198.18.0.0/15`` 出现在路径的关键位置。这段是 RFC 2544
+    的基准测试网段，mihomo / Clash 等 TUN 代理默认拿它做 fake-ip：
 
-    1. 目标解析到 ``198.18.0.0/15``（RFC 2544 基准测试网段，TUN 代理的 fake-ip
-       常用这段）；
-    2. 有响应的跳最多只到 1~2 跳 —— 真实物理路径通常至少经过「网关 + 出口」两跳
-       以上，只看到 1~2 跳多半是本地 TUN 在代为应答。
+    1. 目标解析到该网段（fake-ip 直接命中，逐跳探到的是代理的虚拟路径）；
+    2. 任一**有响应**的跳的 IP 落在该网段（TUN 虚拟网关在代为应答）。
+
+    **为什么不用跳数判断**：on-link 目标（同网段主机、本机物理网关）正常就只有
+    1 跳；ICMP 被过滤时也可能只看到 1~2 跳响应。把「有响应的最大 TTL ≤ 2」当成
+    代理证据，会把物理网关误报成 TUN（D+ 增量 2.5 的路测缺陷：对物理网关提示
+    「当前流量可能走代理」）。漏报只是少一句建议，误报会诱导用户去关代理，
+    所以**证据不足一律返回 False**（宁可不提示，不可误报）。
 
     Args:
         hops: 逐跳统计。
         target_ip: 本次探测的目标 IP 字面量；空串表示不知道。
 
     Returns:
-        bool: 疑似走 TUN/代理时为 True。``hops`` 完全没有响应时返回 ``False``
-            （那是「没数据」，不是「只探到 1~2 跳」）。
+        bool: 目标或任一有响应的跳落在 ``198.18.0.0/15`` 时为 True；其余情况
+            （hop ip 为空 / 解析失败 / 全部丢包 / on-link LAN 目标 / 物理网关 /
+            普通多跳公网）恒为 False。
+
+    Example:
+        >>> looks_like_tun((), "198.18.0.2")
+        True
     """
-    if target_ip:
+    bench = ipaddress.ip_network("198.18.0.0/15")
+
+    def _is_fake_ip(value: str) -> bool:
         try:
-            address = ipaddress.ip_address(str(target_ip))
+            address = ipaddress.ip_address(str(value))
         except ValueError:
-            address = None
-        if address is not None and address.version == 4:
-            bench = ipaddress.ip_network("198.18.0.0/15")
-            if address in bench:
-                return True
-    responded = [hop for hop in hops if hop.sent > 0 and hop.loss_pct < 100.0]
-    if not responded:
-        return False
-    return max(hop.ttl for hop in responded) <= 2
+            return False
+        return address.version == 4 and address in bench
+
+    if target_ip and _is_fake_ip(target_ip):
+        return True
+    for hop in hops:
+        # 「有响应」= 有 RTT 样本，或至少有一个采样回了包；全丢的 hop 不算证据。
+        responded = hop.rtt_n > 0 or (hop.sent > 0 and hop.loss_pct < 100.0)
+        if responded and hop.ip and _is_fake_ip(hop.ip):
+            return True
+    return False
 
 
 def summarize_path(hops: Sequence[HopStat],

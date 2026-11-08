@@ -294,13 +294,33 @@ class DegradationTest(unittest.TestCase):
         self.assertTrue(unreachable["unreachable"])
 
     def test_tun_suspected_signals(self):
-        one_hop = [_hop(1, rtts=[1.0])]
-        self.assertTrue(pathprobe.looks_like_tun(one_hop, TARGET))
+        # 唯一可靠证据是 198.18.0.0/15（mihomo/Clash 的 fake-ip 段）：
+        # 目标命中、或任一有响应的跳命中。
         self.assertTrue(pathprobe.looks_like_tun([_hop(1, rtts=[1.0])], "198.18.0.2"))
-        three = [_hop(1, rtts=[1.0]), _hop(2, rtts=[2.0]), _hop(3, rtts=[3.0])]
+        self.assertTrue(pathprobe.looks_like_tun(
+            [_hop(1, ip="198.18.0.7", rtts=[1.0])], TARGET))
+
+        # 回归锚点（变异锚点）：on-link 物理网关只有 1 跳响应，但它是正常直连，
+        # 不是 TUN。旧规则「有响应的最大 TTL ≤ 2 ⇒ True」在这里会返回 True；
+        # 谁把旧启发式改回来，下面的 False 断言必红。
+        gateway = [_hop(1, ip=GW, sent=2, rtts=[1.0, 1.0])]
+        self.assertTrue(max(hop.ttl for hop in gateway) <= 2,
+                        "变异锚点失效：这个用例必须能区分新旧规则")
+        self.assertFalse(pathprobe.looks_like_tun(gateway, GW))
+
+        # 1 跳响应但响应方未知（ip 为空）→ 证据不足，不提示。
+        self.assertFalse(pathprobe.looks_like_tun([_hop(1, rtts=[1.0])], TARGET))
+
+        # 普通 3 跳公网：目标与响应方都不在基准段 → 不提示。
+        three = [_hop(1, ip=GW, rtts=[1.0]), _hop(2, ip=ROUTER, rtts=[2.0]),
+                 _hop(3, ip=TARGET, rtts=[3.0])]
         self.assertFalse(pathprobe.looks_like_tun(three, TARGET))
-        # 完全没响应是「没数据」，不是「只探到 1~2 跳」。
+
+        # 全丢包是「没数据」，不是「只探到 1~2 跳」；没有响应就不算证据，
+        # 即使构造出的 hop ip 落在基准段也不算。
         self.assertFalse(pathprobe.looks_like_tun([_hop(1, sent=3, lost=3)], TARGET))
+        self.assertFalse(pathprobe.looks_like_tun(
+            [_hop(1, ip="198.18.0.9", sent=3, lost=3)], TARGET))
 
 
 # ---------------------------------------------------------------- V6/V8 run()
