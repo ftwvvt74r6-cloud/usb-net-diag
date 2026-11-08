@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**32** 个（有模块说明 32 个）
-- 公开符号：**292** 个（有 docstring 292 个，合格 292 个）
+- 扫描模块：**33** 个（有模块说明 33 个）
+- 公开符号：**298** 个（有 docstring 298 个，合格 298 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -511,6 +511,107 @@ Returns:
     int: 0 正常；``--npcap`` 模式下 Npcap 未装返回 1。
 ```
 
+## `core/conclusion.py`
+
+**职责**：结论边界结构化渲染器：把一次诊断的「结论 + 依据 + 覆盖 / 未覆盖 + 置信」做成一份对象。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `derive_confidence` | function | 520 | ✅ |
+| `build_conclusion` | function | 654 | ✅ |
+| `render_conclusion_markdown` | function | 787 | ✅ |
+| `render_conclusion_text` | function | 823 | ✅ |
+
+### `derive_confidence`
+
+```python
+def derive_confidence(result: dict) -> float
+```
+
+```text
+由证据形态自动推导结论级置信度（纯函数，不允许人工填写）。
+
+三档映射（用户 2026-11-08 定稿）：
+
+* :data:`CONFIDENCE_CONTRAST`（0.9，高）：有对照组（网关 vs 对端双侧探测）
+  且两侧结论一致；
+* :data:`CONFIDENCE_SINGLE_SIDE`（0.65，中）：仅单侧证据（只测目标 / 只有抓包
+  无对照 / 只有一侧探针）；
+* :data:`CONFIDENCE_INDIRECT`（0.3，低）：仅间接线索（无样本 / 证据不足 /
+  ICMP 超时 / 采样异常）。
+
+Args:
+    result: 诊断结果字典（读 ``meta`` / ``rows`` / 可选 ``verdict``）。
+
+Returns:
+    float: 0.9 / 0.65 / 0.3 之一；``result`` 不是对象时按 0.3（证据不足）。
+```
+
+### `build_conclusion`
+
+```python
+def build_conclusion(result: dict, verdict: dict | None=None) -> dict
+```
+
+```text
+构造结论边界对象（六出口的唯一出处）。
+
+处理顺序：推导 ``confidence`` → 派生 ``confidence_level`` → 按等级取
+``key_limit`` → 用 copy 模板填 ``basis`` / ``coverage`` / ``not_covered`` →
+渲染 conclusion 句。**任何一项填充失败**都会把该项替换成「未知（原因：…）」，
+并把最终 ``confidence`` 降为 :data:`CONFIDENCE_INDIRECT`（等级「低」）。
+
+Args:
+    result: 诊断结果字典（``meta`` / ``rows`` / ``summary`` / 可选 ``verdict``）。
+    verdict: 已算好的判定字典；省略时读 ``result["verdict"]``。只读
+        ``headline`` 与 ``probe_contrast``，不调用 ``verdict.build``。
+
+Returns:
+    dict: 键 ``conclusion``（str）/ ``basis`` / ``coverage`` /
+        ``not_covered``（``list[str]``，保证非空、无空串）/
+        ``confidence``（float）/ ``confidence_level``（高|中|低）/
+        ``key_limit``（str）。**不含**任何缓存或本次结果以外的事实。
+```
+
+### `render_conclusion_markdown`
+
+```python
+def render_conclusion_markdown(block: dict) -> str
+```
+
+```text
+把结论边界对象渲染成 Markdown 整块（报告 / 取证单共用）。
+
+输出固定包含：结论句、依据、本次覆盖、明确未覆盖、置信等级/关键边界。
+任何字段缺失都会补「未知」；函数**永远不返回空串**。
+
+Args:
+    block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
+
+Returns:
+    str: 以 ``### 结论与边界`` 开头、以单个换行结尾的 Markdown 文本。
+```
+
+### `render_conclusion_text`
+
+```python
+def render_conclusion_text(block: dict) -> str
+```
+
+```text
+把结论边界对象渲染成纯文本整块（复制给二线 / 发微信 / 工单）。
+
+与 :func:`render_conclusion_markdown` 同源，但不含 Markdown 符号
+（无 ``#`` 标题、无 ``|`` 表格），并显式列出「结论 + 依据 + 本次覆盖 +
+明确未覆盖 + 置信等级/关键边界」。
+
+Args:
+    block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
+
+Returns:
+    str: 纯文本整块（以单个换行结尾，保证非空）。
+```
+
 ## `core/config.py`
 
 **职责**：统一配置加载。
@@ -627,61 +728,87 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `Layer` | class | 38 | ✅ |
-| `Layer.label_key` | method | 48 | ✅ |
-| `Severity` | class | 61 | ✅ |
-| `Direction` | class | 83 | ✅ |
-| `EndpointKind` | class | 95 | ✅ |
-| `EvidenceKind` | class | 105 | ✅ |
-| `Category` | class | 112 | ✅ |
-| `JobState` | class | 129 | ✅ |
-| `to_jsonable` | function | 145 | ✅ |
-| `Endpoint` | class | 174 | ✅ |
-| `Endpoint.to_dict` | method | 194 | ✅ |
-| `Stats` | class | 204 | ✅ |
-| `Stats.from_values` | method | 214 | ✅ |
-| `Stats.has_sample` | method | 237 | ✅ |
-| `Stats.to_dict` | method | 245 | ✅ |
-| `DirStat` | class | 255 | ✅ |
-| `DirStat.to_dict` | method | 289 | ✅ |
-| `CaptureMeta` | class | 304 | ✅ |
-| `CaptureMeta.to_dict` | method | 325 | ✅ |
-| `StreamStat` | class | 335 | ✅ |
-| `StreamStat.dir_of` | method | 358 | ✅ |
-| `StreamStat.to_dict` | method | 370 | ✅ |
-| `TcpFeatures` | class | 380 | ✅ |
-| `TcpFeatures.total` | method | 402 | ✅ |
-| `TcpFeatures.has_streams` | method | 419 | ✅ |
-| `TcpFeatures.to_dict` | method | 427 | ✅ |
-| `Features` | class | 438 | ✅ |
-| `Features.has` | method | 456 | ✅ |
-| `Features.to_dict` | method | 467 | ✅ |
-| `Finding` | class | 480 | ✅ |
-| `Finding.validate` | method | 511 | ✅ |
-| `Finding.rank` | method | 532 | ✅ |
-| `Finding.to_dict` | method | 540 | ✅ |
-| `Sufficiency` | class | 554 | ✅ |
-| `Sufficiency.to_dict` | method | 563 | ✅ |
-| `LayerStatus` | class | 574 | ✅ |
-| `LayerStatus.to_dict` | method | 593 | ✅ |
-| `Verdict` | class | 603 | ✅ |
-| `Verdict.to_dict` | method | 627 | ✅ |
-| `Provenance` | class | 638 | ✅ |
-| `Provenance.to_dict` | method | 649 | ✅ |
-| `AnalyzeResult` | class | 664 | ✅ |
-| `AnalyzeResult.by_layer` | method | 683 | ✅ |
-| `AnalyzeResult.worst` | method | 695 | ✅ |
-| `AnalyzeResult.to_dict` | method | 705 | ✅ |
-| `ProbeResult` | class | 715 | ✅ |
-| `ProbeResult.to_dict` | method | 728 | ✅ |
-| `PassiveResult` | class | 739 | ✅ |
-| `PassiveResult.to_dict` | method | 749 | ✅ |
-| `Job` | class | 762 | ✅ |
-| `Job.running` | method | 790 | ✅ |
-| `Job.public` | method | 798 | ✅ |
-| `Job.to_dict` | method | 820 | ✅ |
-| `envelope_ok` | function | 832 | ✅ |
-| `envelope_err` | function | 846 | ✅ |
+| `confidence_level_of` | function | 40 | ✅ |
+| `Layer` | class | 73 | ✅ |
+| `Layer.label_key` | method | 83 | ✅ |
+| `Severity` | class | 96 | ✅ |
+| `Direction` | class | 118 | ✅ |
+| `EndpointKind` | class | 130 | ✅ |
+| `EvidenceKind` | class | 140 | ✅ |
+| `Category` | class | 147 | ✅ |
+| `JobState` | class | 164 | ✅ |
+| `to_jsonable` | function | 180 | ✅ |
+| `Endpoint` | class | 209 | ✅ |
+| `Endpoint.to_dict` | method | 229 | ✅ |
+| `Stats` | class | 239 | ✅ |
+| `Stats.from_values` | method | 249 | ✅ |
+| `Stats.has_sample` | method | 272 | ✅ |
+| `Stats.to_dict` | method | 280 | ✅ |
+| `DirStat` | class | 290 | ✅ |
+| `DirStat.to_dict` | method | 324 | ✅ |
+| `CaptureMeta` | class | 339 | ✅ |
+| `CaptureMeta.to_dict` | method | 360 | ✅ |
+| `StreamStat` | class | 370 | ✅ |
+| `StreamStat.dir_of` | method | 393 | ✅ |
+| `StreamStat.to_dict` | method | 405 | ✅ |
+| `TcpFeatures` | class | 415 | ✅ |
+| `TcpFeatures.total` | method | 437 | ✅ |
+| `TcpFeatures.has_streams` | method | 454 | ✅ |
+| `TcpFeatures.to_dict` | method | 462 | ✅ |
+| `Features` | class | 473 | ✅ |
+| `Features.has` | method | 491 | ✅ |
+| `Features.to_dict` | method | 502 | ✅ |
+| `Finding` | class | 515 | ✅ |
+| `Finding.validate` | method | 546 | ✅ |
+| `Finding.rank` | method | 567 | ✅ |
+| `Finding.to_dict` | method | 575 | ✅ |
+| `Sufficiency` | class | 589 | ✅ |
+| `Sufficiency.to_dict` | method | 598 | ✅ |
+| `LayerStatus` | class | 609 | ✅ |
+| `LayerStatus.to_dict` | method | 628 | ✅ |
+| `Verdict` | class | 638 | ✅ |
+| `Verdict.confidence_level` | method | 687 | ✅ |
+| `Verdict.to_dict` | method | 696 | ✅ |
+| `Provenance` | class | 710 | ✅ |
+| `Provenance.to_dict` | method | 721 | ✅ |
+| `AnalyzeResult` | class | 736 | ✅ |
+| `AnalyzeResult.by_layer` | method | 755 | ✅ |
+| `AnalyzeResult.worst` | method | 767 | ✅ |
+| `AnalyzeResult.to_dict` | method | 777 | ✅ |
+| `ProbeResult` | class | 787 | ✅ |
+| `ProbeResult.to_dict` | method | 800 | ✅ |
+| `PassiveResult` | class | 811 | ✅ |
+| `PassiveResult.to_dict` | method | 821 | ✅ |
+| `Job` | class | 834 | ✅ |
+| `Job.running` | method | 862 | ✅ |
+| `Job.public` | method | 870 | ✅ |
+| `Job.to_dict` | method | 892 | ✅ |
+| `envelope_ok` | function | 904 | ✅ |
+| `envelope_err` | function | 918 | ✅ |
+
+### `confidence_level_of`
+
+```python
+def confidence_level_of(confidence: float) -> str
+```
+
+```text
+把结论级置信度映射成「高/中/低」（阈值唯一出处）。
+
+等级不是可人工填写的字段，而是由 ``confidence`` 派生的展示态；
+渲染层（:mod:`core.conclusion`）与 :class:`Verdict` 的属性都调用本函数，
+避免两处阈值写不一致。
+
+Args:
+    confidence: 结论级置信度，必须落在 ``[0, 1]`` 区间内。
+
+Returns:
+    str: ``"高"``（≥ :data:`CONFIDENCE_HIGH_MIN`）、``"中"``
+        （≥ :data:`CONFIDENCE_MEDIUM_MIN`）或 ``"低"``。
+
+Raises:
+    ValueError: 传入值不是数字、为 ``NaN`` 或超出 ``[0, 1]``。
+```
 
 ### `Layer`  (class)
 
@@ -1234,7 +1361,7 @@ class Verdict
 ```
 
 ```text
-最终判定 —— 一句话结论 + 四层状态 + 下一步做什么。
+最终判定 —— 一句话结论 + 四层状态 + 本次结论的证据边界。
 
 字段：
     level: 总体严重度。
@@ -1243,6 +1370,31 @@ class Verdict
     next_step_keys: 处置建议的 key 列表，按优先级排列。
     sufficiency: 证据是否够；``ok=False`` 时 ``level`` 必须是降级后的结论
         （见 ``VERDICT.INSUFFICIENT``），不能拿「没样本」当「正常」。
+    confidence: 结论级置信度（**不是** ``Finding.confidence``），由证据推导，
+        必须落在 ``[0,1]``；推断类结论不得为 1.0。
+    basis / coverage / not_covered: 本次结论的依据 / 覆盖 / 明确未覆盖，
+        已是可读句子的运行时事实（静态模板在 ``copy/zh-CN.json`` 的
+        ``conclusion`` section）。三者都落库进报告 JSON 的 verdict 块。
+
+注意：
+    ``confidence_level`` 是派生 ``@property``，**不是** dataclass 字段，因此
+    无法在构造器里人工填写、也无法赋值；``key_limit`` 只存在于渲染层，
+    两者都**不落库**（见 E-IMPL-SPEC §1）。
+```
+
+### `Verdict.confidence_level`  (method)
+
+```python
+@property
+def confidence_level(self) -> str
+```
+
+```text
+派生置信等级（不是 dataclass 字段，无法人工填写）。
+
+Returns:
+    str: ``"高"`` / ``"中"`` / ``"低"``，阈值见
+        :data:`CONFIDENCE_HIGH_MIN` 与 :data:`CONFIDENCE_MEDIUM_MIN`。
 ```
 
 ### `Verdict.to_dict`  (method)
@@ -1256,7 +1408,10 @@ def to_dict(self) -> dict
 
 Returns:
     dict: ``layers`` 是 ``LayerStatus.to_dict()`` 的列表，
-        ``sufficiency`` 是 ``Sufficiency.to_dict()``。
+        ``sufficiency`` 是 ``Sufficiency.to_dict()``；
+        ``confidence`` 为 float，``basis`` / ``coverage`` /
+        ``not_covered`` 为字符串列表。**不含** ``confidence_level``
+        与 ``key_limit``（二者是渲染期派生值，不落库）。
 ```
 
 ### `Provenance`  (class)
@@ -1601,14 +1756,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 50 | ✅ |
-| `log` | function | 113 | ✅ |
-| `capture_filter_for` | function | 219 | ✅ |
-| `bpf_for` | function | 305 | ✅ |
-| `capture_live` | function | 603 | ✅ |
-| `degraded_empty_capture_result` | function | 878 | ✅ |
-| `run_scan` | function | 1055 | ✅ |
-| `main` | function | 1339 | ✅ |
+| `load_config` | function | 51 | ✅ |
+| `log` | function | 114 | ✅ |
+| `capture_filter_for` | function | 220 | ✅ |
+| `bpf_for` | function | 306 | ✅ |
+| `capture_live` | function | 604 | ✅ |
+| `degraded_empty_capture_result` | function | 879 | ✅ |
+| `run_scan` | function | 1056 | ✅ |
+| `main` | function | 1372 | ✅ |
 
 ### `load_config`
 
@@ -1826,7 +1981,8 @@ def main(argv: list[str] | None=None) -> int
 
 Args:
     argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
-        ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
+        ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``
+        （完整结论对象：``summary`` + ``conclusion`` 边界；旧版只打摘要）/
         ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
         省略时仍写 ``reports/``）/ ``--export-diag``（导出脱敏诊断包后退出，
         可配 ``--include-reports`` / ``--raw`` / ``--out``）/ ``--no-shadow``
@@ -1932,12 +2088,12 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `validate_template` | function | 64 | ✅ |
-| `load_template` | function | 117 | ✅ |
-| `dimensions_for` | function | 277 | ✅ |
-| `build_checklist` | function | 350 | ✅ |
-| `render_checklist_markdown` | function | 421 | ✅ |
-| `render_checklist_text` | function | 459 | ✅ |
+| `validate_template` | function | 69 | ✅ |
+| `load_template` | function | 122 | ✅ |
+| `dimensions_for` | function | 282 | ✅ |
+| `build_checklist` | function | 355 | ✅ |
+| `render_checklist_markdown` | function | 438 | ✅ |
+| `render_checklist_text` | function | 485 | ✅ |
 
 ### `validate_template`
 
@@ -2021,7 +2177,7 @@ Returns:
 ### `build_checklist`
 
 ```python
-def build_checklist(result: dict, full: bool=False, verdict: dict | None=None, template: dict | None=None) -> dict
+def build_checklist(result: dict, full: bool=False, verdict: dict | None=None, template: dict | None=None, conclusion: dict | None=None) -> dict
 ```
 
 ```text
@@ -2035,28 +2191,37 @@ Args:
     full: 为 ``True`` 时忽略结论、输出全部 7 维（界面「复制通用空白版」用）。
     verdict: 可选的已算好判定；报告渲染/接口传入同一个判定，避免重复计算。
     template: 可选的模板对象（测试注入/变异用）；省略时用导入期加载的模板。
+    conclusion: 可选的已算好结论边界对象（E1）。报告/接口可传入同一个
+        :func:`core.conclusion.build_conclusion` 产物；省略且 ``full=False``
+        时按本次 ``result`` + ``verdict`` 现算一次，保证取证单与报告同源。
 
 Returns:
     dict: ``{"full": bool, "level": str, "layer": str, "dimensions": [...]}``；
         ``dimensions`` 每项 ``{"key", "name", "note", "items"}``，``items``
-        每项恰好 ``field/why/where/criteria`` 四键。模板不可用时返回空
-        ``dimensions``（调用方据此不渲染区块）。
+        每项恰好 ``field/why/where/criteria`` 四键。E1 起加法键
+        ``conclusion``（结论边界对象，``full=True`` 时为通用空白版不加）；
+        模板不可用时返回空 ``dimensions``（调用方据此不渲染区块）。
 ```
 
 ### `render_checklist_markdown`
 
 ```python
-def render_checklist_markdown(checklist: dict) -> str
+def render_checklist_markdown(checklist: dict, include_conclusion: bool=True) -> str
 ```
 
 ```text
 把清单渲染成报告内 Markdown 区块（维度小标题 + 四列表格）。
 
 维度与条目文字来自模板 JSON，标题/表头等标签来自 ``copy.evidence_checklist``；
-没有维度时返回空串（调用方据此不追加区块）。
+没有维度时返回空串（调用方据此不追加区块）。E1 起若 ``checklist`` 带
+``conclusion`` 边界对象，则在清单**之前**输出同一结论+边界块（与报告同源），
+保证「任何只给结论不给边界的导出路径」不成立。
 
 Args:
     checklist: :func:`build_checklist` 的返回值。
+    include_conclusion: 是否在清单前输出结论边界块；报告正文第一节已经
+        输出过同一块时也**保留**（报告末尾的取证单是「整块可转发」的副本，
+        复制给二线时结论和边界不会丢）。
 
 Returns:
     str: 以 ``copy.evidence_checklist.section_title`` 开头、以换行结尾的 Markdown；
@@ -2066,14 +2231,18 @@ Returns:
 ### `render_checklist_text`
 
 ```python
-def render_checklist_text(checklist: dict) -> str
+def render_checklist_text(checklist: dict, include_conclusion: bool=True) -> str
 ```
 
 ```text
 把清单渲染成纯文本（方便直接发微信/工单，不含 Markdown 表格符号）。
 
+E1 起若 ``checklist`` 带 ``conclusion`` 边界对象，则在清单前输出同一结论+
+边界块的**纯文本版**（复制给二线时结论与边界一起走）。
+
 Args:
     checklist: :func:`build_checklist` 的返回值。
+    include_conclusion: 是否在清单前输出结论边界块；默认输出。
 
 Returns:
     str: 纯文本清单；无维度时返回 ``""``。正文不含 ``|`` 与 ``#`` 标题符号，
@@ -4377,10 +4546,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 353 | ✅ |
-| `save` | function | 622 | ✅ |
-| `render_degraded` | function | 671 | ✅ |
-| `save_degraded` | function | 737 | ✅ |
+| `render_markdown` | function | 354 | ✅ |
+| `save` | function | 630 | ✅ |
+| `render_degraded` | function | 690 | ✅ |
+| `save_degraded` | function | 756 | ✅ |
 
 ### `render_markdown`
 
@@ -4419,6 +4588,9 @@ Returns:
 Note:
     JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
     因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
+    E1 起 ``verdict`` 块新增 ``confidence`` / ``basis`` / ``coverage`` /
+    ``not_covered`` 四个键（声明例外）；``confidence_level`` / ``key_limit``
+    只在渲染层出现，**不落库**。
     文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
 
     落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，

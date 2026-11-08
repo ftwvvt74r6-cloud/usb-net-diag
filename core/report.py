@@ -19,6 +19,7 @@ from pathlib import Path
 
 import verdict as verdict_mod
 import evidence as evidence_mod
+import conclusion as conclusion_mod
 
 try:                                    # 扁平导入：core/ 在 sys.path 上（runtime / 测试）
     from copytext import text as _copy_text
@@ -388,6 +389,13 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     level_key = {"严重": "bad", "警告": "warn", "正常": "ok",
                  "证据不足": "insufficient"}.get(vd.get("level", ""), "ok")
     L += [_t("section_verdict"), "", f"### {STATUS_MARK.get(level_key, '')} {vd['headline']}", ""]
+    # E1：结论句 + 依据 + 本次覆盖 / 明确未覆盖 + 置信等级/关键边界，紧跟在标题之后。
+    # 只**追加行**、不改上面任何一行：红线要求「去掉新增行后与基线逐字节相等」。
+    conclusion_block = conclusion_mod.build_conclusion(result, vd)
+    rendered_conclusion = conclusion_mod.render_conclusion_markdown(conclusion_block)
+    if rendered_conclusion.strip():
+        L += rendered_conclusion.rstrip("\n").split("\n")
+        L.append("")
     L.append(_t("fault_layer_line", layer=vd.get("layer", "—"),
                 impact=vd.get("impact", "—")))
     L.append("")
@@ -632,6 +640,9 @@ def save(result: dict, out_dir: Path) -> dict:
     Note:
         JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
         因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
+        E1 起 ``verdict`` 块新增 ``confidence`` / ``basis`` / ``coverage`` /
+        ``not_covered`` 四个键（声明例外）；``confidence_level`` / ``key_limit``
+        只在渲染层出现，**不落库**。
         文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
 
         落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，
@@ -651,6 +662,14 @@ def save(result: dict, out_dir: Path) -> dict:
     md_path = out_dir / f"{stem}.md"
     json_path = out_dir / f"{stem}.json"
     md_path.write_text(render_markdown(result), encoding="utf-8")
+    verdict_data = verdict_mod.build(result)
+    conclusion_block = conclusion_mod.build_conclusion(result, verdict_data)
+    # E1：verdict 块只新增 confidence / basis / coverage / not_covered 四键。
+    # confidence_level 与 key_limit 是渲染期派生值，**不许落库**（E-IMPL-SPEC §1）。
+    verdict_data["confidence"] = conclusion_block["confidence"]
+    verdict_data["basis"] = conclusion_block["basis"]
+    verdict_data["coverage"] = conclusion_block["coverage"]
+    verdict_data["not_covered"] = conclusion_block["not_covered"]
     json_path.write_text(
         json.dumps(
             {
@@ -658,7 +677,7 @@ def save(result: dict, out_dir: Path) -> dict:
                 "meta": result.get("meta", {}),
                 "metrics": result.get("metrics", {}),
                 "rows": result.get("rows", []),
-                "verdict": verdict_mod.build(result),
+                "verdict": verdict_data,
             },
             ensure_ascii=False,
             indent=2,

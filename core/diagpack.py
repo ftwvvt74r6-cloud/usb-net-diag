@@ -478,5 +478,9 @@ def _render_readme(entries: list, skipped: list, raw: bool, include_reports: boo
         "  把整个 zip 原样发回给维护者（IM / 邮件均可）。不用解压、不用改名。",
         "  聊天软件里请选「发送文件」，不要截图。",
         "",
+        "【阅读报告】",
+        "  报告结论含边界字段（依据 / 本次覆盖 / 明确未覆盖 / 置信度 / 关键边界），",
+        "  请整块阅读，不要只看一句话结论；单独转述结论会丢失覆盖范围。",
+        "",
     ]
     return "\n".join(lines)

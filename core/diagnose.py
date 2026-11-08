@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 from core.platform import winapi  # noqa: E402
 
 import analyzer  # noqa: E402
+import conclusion  # noqa: E402
 import diagpack  # noqa: E402
 import logstore  # noqa: E402
 import pathprobe  # noqa: E402
@@ -1336,12 +1337,45 @@ def _export_diag(args) -> int:
     return 0
 
 
+def _cli_payload(result: dict) -> dict:
+    """组装 ``--json`` 的完整结论对象（与后续 MCP 返回同 schema）。
+
+    旧版 ``--json`` 只打 ``summary``；E1 起改为「摘要 + 结论边界对象」，因为
+    只给摘要等于把「依据 / 覆盖 / 未覆盖 / 置信」全部丢掉（用户定稿：任何只给
+    结论不给边界的导出路径算缺陷）。结构固定为::
+
+        {"summary": {...},
+         "conclusion": {"conclusion", "basis", "coverage", "not_covered",
+                        "confidence", "confidence_level", "key_limit"},
+         "level", "headline", "layer", "next_steps"}
+
+    Args:
+        result: ``run_scan`` 的结果字典（必须已 ``ok=True``）。
+
+    Returns:
+        dict: 可 JSON 序列化的对象；``conclusion`` 直接来自
+            :func:`core.conclusion.build_conclusion`，不在这里另拼文案。
+    """
+    verdict_data = result.get("verdict")
+    if not isinstance(verdict_data, dict):
+        verdict_data = verdict.build(result)
+    return {
+        "summary": result.get("summary", {}),
+        "conclusion": conclusion.build_conclusion(result, verdict_data),
+        "level": verdict_data.get("level", ""),
+        "headline": verdict_data.get("headline", ""),
+        "layer": verdict_data.get("layer", ""),
+        "next_steps": list(verdict_data.get("next_steps") or []),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """``diagnose.py`` 的命令行入口（不开界面也能出报告）。
 
     Args:
         argv: 参数列表；省略时取 ``sys.argv[1:]``。支持 ``--target`` / ``--duration`` /
-            ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
+            ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``
+            （完整结论对象：``summary`` + ``conclusion`` 边界；旧版只打摘要）/
             ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
             省略时仍写 ``reports/``）/ ``--export-diag``（导出脱敏诊断包后退出，
             可配 ``--include-reports`` / ``--raw`` / ``--out``）/ ``--no-shadow``
@@ -1362,7 +1396,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--interface", default=None, help="网卡序号或名称关键字")
     ap.add_argument("--pcap", default=None, help="分析抓包文件：指定 pcap 文件")
     ap.add_argument("--interfaces", action="store_true", help="列出可用网卡")
-    ap.add_argument("--json", action="store_true", help="仅输出 JSON 摘要")
+    ap.add_argument("--json", action="store_true",
+                    help="输出完整结论对象（summary + conclusion 边界）；旧版仅摘要")
     ap.add_argument("--report-out", default=None, metavar="DIR",
                     help="只写该目录（不再写 reports/）：把完整报告 .md/.json "
                          "导出到指定目录；省略时仍写 reports/")
@@ -1404,8 +1439,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.json:
-        print(json.dumps(res["summary"], ensure_ascii=False))
+        print(json.dumps(_cli_payload(res), ensure_ascii=False, indent=2))
     else:
+        # 人读模式打印完整报告；报告第一节的结论块由同一个
+        # conclusion.render_conclusion_markdown 渲染（不是第三份手写文案）。
         print("\n" + report.render_markdown(res))
     return 0
 

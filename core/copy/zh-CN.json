@@ -1,8 +1,8 @@
 {
   "_meta": {
-    "schema_version": "3.0",
+    "schema_version": "3.1",
     "lang": "zh-CN",
-    "note": "唯一的中文文案来源：报告 / 判定 / 建议 / AI prompt 都从这里取，代码里只留 key。占位符用 {name}，消费方 str.format(**args)。值一律照抄 PR E 之前的代码现值，用户可见文字逐字不变；只有 V5 的 na 短语是新增文案。"
+    "note": "唯一的中文文案来源：报告 / 判定 / 建议 / AI prompt 都从这里取，代码里只留 key。占位符用 {name}，消费方 str.format(**args)。值一律照抄 PR E 之前的代码现值，用户可见文字逐字不变；只有 V5 的 na 短语与 E1 的 conclusion 边界模板是新增文案。"
   },
   "layer": {
     "l2": "L2 本地链路",
@@ -607,6 +607,57 @@
     "text_where": "在哪看：{value}",
     "text_criteria": "判断标准或期望值：{value}",
     "text_footer": "回填与二次生成属后续版本（0.3.0 观察项）；本清单只负责说明还需要什么证据。"
+  },
+  "conclusion": {
+    "_note": "结论边界的唯一模板来源：template 只留占位符，运行时事实由 core/conclusion.py 填；静态覆盖/未覆盖项也在这里维护。",
+    "section_title": "### 结论与边界",
+    "conclusion_label": "**结论**：",
+    "basis_heading": "**依据**",
+    "coverage_heading": "**本次覆盖**",
+    "not_covered_heading": "**明确未覆盖**",
+    "confidence_line": "**置信度**：{level}（{confidence:.2f}）　**关键边界**：{key_limit}",
+    "text_title": "结论与边界",
+    "text_conclusion": "结论：{conclusion}",
+    "text_basis": "依据：",
+    "text_coverage": "本次覆盖：",
+    "text_not_covered": "明确未覆盖：",
+    "text_confidence": "置信度：{level}（{confidence:.2f}）",
+    "text_key_limit": "关键边界：{key_limit}",
+    "template": "{headline}（基于 {basis_short}；{key_limit}）",
+    "basis_short": "本次抓包 {packets} 个报文、TCP 会话 {streams} 个，判定 {finding_count} 项",    "basis": {
+      "capture": "抓包窗口 {duration} 秒，报文 {packets} 个、TCP 会话 {streams} 个",
+      "target": "诊断目标 {target}，涉及端口 {ports}",
+      "probe": "探针角色 {probe_roles}：发出 {probe_sent} 个、收到 {probe_recv} 个、丢包 {probe_loss}%",
+      "path": "路径逐跳 {path_hops} 跳，劣化跳 {path_degraded}",
+      "findings": "本次判定计数：严重 {critical}、警告 {warning}、提示 {info}"
+    },
+    "coverage_static": [
+      "终端侧抓包与 L2–L7 规则判定",
+      "ARP / ICMP / TCP / DNS / HTTP / TLS 指标统计",
+      "安全观察（附带项，不参与主判定）"
+    ],
+    "coverage_runtime": [
+      "采样窗口 {duration} 秒（报文 {packets} 个、TCP 会话 {streams} 个）",
+      "诊断目标 {target}，涉及端口 {ports}",
+      "本次判定 {finding_count} 项（严重 {critical} / 警告 {warning} / 提示 {info}）"
+    ],
+    "coverage_runtime_probe": "探针类型 {probe_kinds}（角色 {probe_roles}）：发出 {probe_sent} 个、收到 {probe_recv} 个",
+    "coverage_runtime_no_probe": "本次未启用探针（没有网关/对端对照组）",
+    "probe_kind_icmp": "ICMP",
+    "probe_kind_tcp_syn": "TCP SYN",
+    "probe_kind_udp": "UDP",
+    "not_covered_static": [
+      "业务流量 QoS/DSCP 路径未覆盖（理论边界）",
+      "抓包点以外的链路（交换机内部、对端主机内部）未覆盖",
+      "抓包窗口之外的时段未覆盖"
+    ],
+    "not_covered_runtime": "本次未覆盖的探针角色：{missing_roles}",
+    "key_limit": {
+      "high": "业务流量 QoS/DSCP 路径未覆盖（理论边界）",
+      "medium": "探测/逐跳基于 ICMP，不代表 TCP 路径",
+      "low": "本次无有效样本或采样异常"
+    },
+    "unknown": "未知（原因：{reason}）"
   },
   "degraded_report": {
     "title": "# NetDiag · 网络矩阵 · 降级结论报告",

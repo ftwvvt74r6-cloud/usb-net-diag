@@ -124,7 +124,7 @@ class FeaturesFixtureTest(unittest.TestCase):
         """fixture 里的数字必须等于 golden —— 口径漂了就在这里炸。"""
         self.assertTrue(FIXTURE.is_file(), f"缺少特征样本：{FIXTURE}")
         data = json.loads(FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(data["schema_version"], "2.1", "fixture 的 schema 版本与契约不一致")
+        self.assertEqual(data["schema_version"], "2.2", "fixture 的 schema 版本与契约不一致")
         _assert_golden(self, data["tcp"])
 
 
