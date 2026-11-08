@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/ftwvvt74r6-cloud/usb-net-diag/actions/workflows/smoke.yml"><img src="https://github.com/ftwvvt74r6-cloud/usb-net-diag/actions/workflows/smoke.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-v0.3.0-blue" alt="version v0.3.0">
+  <img src="https://img.shields.io/badge/version-v0.3.1-blue" alt="version v0.3.1">
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License MIT">
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Platform Windows">

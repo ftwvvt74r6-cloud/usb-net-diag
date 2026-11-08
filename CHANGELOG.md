@@ -6,7 +6,7 @@
 > 被动监听 → **通信观察**、链路体检 → **连通与速度测试**、离线分析 → **分析抓包文件**。
 > 本文件 v0.2.0 及更早的历史条目沿用当时的旧名（v0.3.0 起统一用新名），对照表见上。
 
-## v0.3.1（未发布）— E 批次 · 结论边界结构化（E1 + E2）
+## v0.3.1 — 2026-11-08
 
 结论不再只有一句话：新增 `confidence` / `basis` / `coverage` / `not_covered`，
 报告、CLI JSON、诊断包内报告与取证请求单都从同一个结论边界对象渲染。
@@ -55,6 +55,7 @@
 
 ### 声明例外
 
+- 报告 JSON 新增 4 键 + `SCHEMA_VERSION` 2.1→2.2；`reports/faults_demo.md` 追加结论边界、json 仅新增键。
 - 以 v0.3.0 发布 commit `e3f2c97` 为基线，demo + 9 样本 20 个产物：
   **JSON 差异 = report 载荷新增四键 + `analyze.provenance.schema_version` 2.1→2.2
   （契约升级）**；证明 = 删除四键并把 `schema_version` 归一后逐字节相等 **20/20**。
