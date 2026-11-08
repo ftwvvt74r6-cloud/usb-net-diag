@@ -1,7 +1,7 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.3.0`；写作基线 `main` = `e3f2c97`（v0.3.0 发布 commit，PR #29 合并后）。
+> **对齐版本**：`VERSION` = `0.3.1`；写作基线 `main` = `272ab0d`（批次 E 合并，PR #31 后；v0.3.1 版本进位前）。
 > **时效性**：文中数字是 2026-11-08 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
@@ -475,7 +475,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 | 文件 | 一句话职责 |
 |---|---|
-| `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.0"`（升级时与 `VERSION` 同步） |
+| `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.1"`（升级时与 `VERSION` 同步） |
 | `core/analyzer.py` | 抓包分析引擎：一次 tshark 流式解析 → `meta/metrics/rows` + `findings_v2` + `provenance` |
 | `core/app.py` | 静默启动器：pythonw、单实例探测、空闲退出、错误弹窗；**启动不提权**（`--no-elevate`），提权只剩 `/api/elevate` 的 `--elevated` 新进程路径 |
 | `core/bootstrap.py` | 盘符自适应：按当前路径重写 MCP/Harness 配置 + 环境自检（`--check`/`--npcap`） |
@@ -556,7 +556,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/assets/` | 图标/Logo | ✅ |
 
 > **v0.3.0 发布记录**：tag `v0.3.0`（annotated tag object `9563dbc5…`）→ commit
-> `e3f2c974a3fbaa8e6f02222ab6d794f15ece84a4`（`main` HEAD）；Release
+> `e3f2c974a3fbaa8e6f02222ab6d794f15ece84a4`（v0.3.0 发布 commit）；Release
 > <https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.0>；
 > lite `NetDiag-0.3.0-lite.zip` **169 个文件 / 974,570 B / SHA-256
 > `c3687b917a331328a2e8ad45fa2291e9ac4a2e4f18eee157f0912c61ecdfd905`**，
@@ -670,7 +670,7 @@ python -m unittest discover -s tests        # 期望 722 条，OK (skipped≈27�
 
 - `/api/v1/*` 与标准 envelope **未实现**；`contracts.py` 里只是定义。
 - `core/rules/thresholds.json` **不存在**；`load_thresholds()` 返回 `{}`，阈值实际在代码里。
-- `core/__init__.py::__version__` 是写死的 `"0.3.0"`，与 `VERSION` 两处需同步。
+- `core/__init__.py::__version__` 是写死的 `"0.3.1"`，与 `VERSION` 两处需同步。
 
 ---
 
@@ -699,7 +699,7 @@ $env:TSHARK_PATH = "$PWD\tools\WiresharkPortable\App\Wireshark\tshark.exe"
 # 3) 日志现场
 Get-Content logs\env.json | Select-String '"version"|"tshark_version"|"admin"'
 Get-ChildItem logs\runs | Select-Object -Last 1
-# 期望：version=0.3.0；runs/ 有本次分析记录；不联网、不上传
+# 期望：version=0.3.1；runs/ 有本次分析记录；不联网、不上传
 
 # 4) 诊断包
 <python> core\diagnose.py --export-diag --out "$env:TEMP\netdiag-diag"
@@ -716,7 +716,7 @@ Get-Content "$env:TEMP\netdiag-unzip\README.txt"
 # 另一个窗口：
 curl.exe http://127.0.0.1:8787/api/ping
 curl.exe http://127.0.0.1:8787/api/app
-# 期望：{"ok":true,"app":"USBNetDiag","version":"0.3.0",...}
+# 期望：{"ok":true,"app":"USBNetDiag","version":"0.3.1",...}
 #       浏览器打开 http://127.0.0.1:8787/ 能看到控制台
 curl.exe -X POST http://127.0.0.1:8787/api/quit
 ```
