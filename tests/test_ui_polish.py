@@ -157,6 +157,11 @@ class FocusAndModalTest(unittest.TestCase):
         self.assertIn("e.shiftKey && document.activeElement === first", HTML)
         self.assertIn("!e.shiftKey && document.activeElement === last", HTML)
 
+    def test_focus_return_has_fallback_target(self):
+        """启动检测是自动弹的，没有触发控件；不能把焦点丢回 body。"""
+        self.assertIn("back !== document.body", HTML)
+        self.assertIn('($("#run") || document.querySelector("[data-mode]"))', HTML)
+
 
 class AppBarStabilityTest(unittest.TestCase):
     """顶栏不许因为「徽章多了一个」而重排。

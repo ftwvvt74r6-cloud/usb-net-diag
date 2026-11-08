@@ -3894,7 +3894,12 @@ function wireModalA11y() {
         if (first) setTimeout(() => first.focus(), 30);
       } else {
         const back = maskReturnFocus.get(mask);
-        if (back && document.contains(back)) setTimeout(() => back.focus(), 0);
+        // 启动检测是自动弹的，没有「打开它的控件」，此时退到页面主操作，
+        // 而不是把焦点丢给 body（丢给 body 后 Tab 要从头开始走一遍）。
+        const target = back && document.contains(back) && back !== document.body
+          ? back
+          : ($("#run") || document.querySelector("[data-mode]"));
+        if (target) setTimeout(() => target.focus(), 0);
       }
     }).observe(mask, { attributes: true, attributeFilter: ["class"] });
     mask.addEventListener("keydown", (e) => {
