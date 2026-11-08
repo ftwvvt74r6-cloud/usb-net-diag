@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "core"))
 
 from core.version import read_version  # noqa: E402
 
+import core  # noqa: E402
 import analyzer  # noqa: E402
 import diagpack  # noqa: E402
 import logstore  # noqa: E402
@@ -38,6 +39,13 @@ class AppVersionTest(unittest.TestCase):
             f"server.APP_VERSION={server.APP_VERSION!r} 与 VERSION={expected!r} 不一致",
         )
         self.assertRegex(server.APP_VERSION, r"^\d+\.\d+\.\d+$")
+
+    def test_package_dunder_version_matches_version_file(self):
+        """``core.__version__`` 也必须来自 ``VERSION``：包标记与文件两处一起进位。"""
+        self.assertEqual(
+            core.__version__, read_version(),
+            f"core.__version__={core.__version__!r} 与 VERSION={read_version()!r} 不一致",
+        )
 
     def test_app_version_is_not_a_hardcoded_literal(self):
         """回归钉：``APP_VERSION`` 不许再写死字面量（含当前值的字面量）。"""

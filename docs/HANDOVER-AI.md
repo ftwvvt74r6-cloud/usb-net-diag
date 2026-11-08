@@ -1,7 +1,7 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.2.0`；写作基线 `main` = `d6a10c4`（PR #25 合并后）。
+> **对齐版本**：`VERSION` = `0.3.0`；写作基线 `main` = `7bc9e14`（PR #26 合并后）。
 > **时效性**：文中数字是 2026-11-08 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
@@ -69,6 +69,7 @@ MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`sca
 | 观察 | 高危端口外联、明文凭证 | 只列事实，不抢主判定 |
 | 基线 | 实时抓包时每 5 秒一轮轻量探针（网关 ICMP / DNS UDP / 目标 TCP SYN） | 「探针基线」区块 + 两侧对照；探针流量双过滤隔离（见 `docs/shadow-probe.md`） |
 | 路径 | 实时抓包或有目标时跑一次 MTR（TTL 1..16 逐跳 RTT/丢包） | 「路径剖面」区块 + 第几跳开始劣化；ICMP 被过滤时降级 TCP 并标注（见 `docs/path-probe.md`） |
+| 取证 | 按结论映射到 7 个证据来源方，只列「还需要谁来提供什么」 | 报告「取证请求单」区块 + 界面复制 / 导出 `.md`；模板不出现厂商名（见 `docs/evidence-checklist.md`） |
 
 另有「通信观察（被动监听）」（Scapy/tshark 抓包 → 会话表）与「连通与速度测试（链路体检）」（对单个 TCP 目标按协议
 自适应探测 DNS/TCP/TLS/HTTP/SMB/RDP/SSH/Opaque TCP 分段耗时）。
@@ -260,11 +261,11 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    （`arp_no_reply` / `icmp_unreachable` / `dns_timeout` / `tcp_retransmission` /
    `zero_window_client` / `http_500` / `404_error` / `udp_no_response` / `empty_capture`）。
    当前 demo 期望：`verdict.level=严重`、`layer=L4 传输层｜TCP`、严重 3 / 警告 5。
-2. **`reports/` 仅声明例外、其余零改动**：`reports/faults_demo.md` 与 `.json` 是入库
-   快照；本批唯一例外是 `reports/faults_demo.md` **末尾追加「取证请求单」区块**
-   （纯后缀，`reports/faults_demo.json` 必须逐字节不变）；测试/实验用
-   `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 564 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+2. **`reports/` 冻结（仅 v0.3.0 声明例外）**：`reports/faults_demo.md` 与 `.json` 是入库
+   快照；v0.3.0 声明例外是 `reports/faults_demo.md` **末尾已带 D+ 追加的「取证请求单」区块**
+   （纯后缀，`reports/faults_demo.json` 逐字节未变）。除该已入库的后缀外 `reports/` 零改动；
+   测试/实验用 `--report-out` 或临时目录，不要写仓库 `reports/`。
+3. **测试只增不减**：当前 565 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -355,7 +356,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 564，但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> 测试数为 565，但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
 > （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
@@ -400,7 +401,7 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 564 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 565 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
@@ -446,7 +447,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 | 文件 | 一句话职责 |
 |---|---|
-| `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.2.0"`（升级时与 `VERSION` 同步） |
+| `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.0"`（升级时与 `VERSION` 同步） |
 | `core/analyzer.py` | 抓包分析引擎：一次 tshark 流式解析 → `meta/metrics/rows` + `findings_v2` + `provenance` |
 | `core/app.py` | 静默启动器：pythonw、单实例探测、UAC 提权、空闲退出、错误弹窗 |
 | `core/bootstrap.py` | 盘符自适应：按当前路径重写 MCP/Harness 配置 + 环境自检（`--check`/`--npcap`） |
@@ -485,7 +486,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（1,451 行；无构建链、无前端框架） |
-| `tests/` | 27 个 `test_*.py`（564 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 27 个 `test_*.py`（565 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -547,7 +548,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 564 条，OK (skipped≈27，取决于环境)
+python -m unittest discover -s tests        # 期望 565 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -624,7 +625,7 @@ python -m unittest discover -s tests        # 期望 564 条，OK (skipped≈27�
 
 - `/api/v1/*` 与标准 envelope **未实现**；`contracts.py` 里只是定义。
 - `core/rules/thresholds.json` **不存在**；`load_thresholds()` 返回 `{}`，阈值实际在代码里。
-- `core/__init__.py::__version__` 是写死的 `"0.2.0"`，与 `VERSION` 两处需同步。
+- `core/__init__.py::__version__` 是写死的 `"0.3.0"`，与 `VERSION` 两处需同步。
 
 ---
 
@@ -653,7 +654,7 @@ $env:TSHARK_PATH = "$PWD\tools\WiresharkPortable\App\Wireshark\tshark.exe"
 # 3) 日志现场
 Get-Content logs\env.json | Select-String '"version"|"tshark_version"|"admin"'
 Get-ChildItem logs\runs | Select-Object -Last 1
-# 期望：version=0.2.0；runs/ 有本次分析记录；不联网、不上传
+# 期望：version=0.3.0；runs/ 有本次分析记录；不联网、不上传
 
 # 4) 诊断包
 <python> core\diagnose.py --export-diag --out "$env:TEMP\netdiag-diag"
@@ -670,7 +671,7 @@ Get-Content "$env:TEMP\netdiag-unzip\README.txt"
 # 另一个窗口：
 curl.exe http://127.0.0.1:8787/api/ping
 curl.exe http://127.0.0.1:8787/api/app
-# 期望：{"ok":true,"app":"USBNetDiag","version":"0.2.0",...}
+# 期望：{"ok":true,"app":"USBNetDiag","version":"0.3.0",...}
 #       浏览器打开 http://127.0.0.1:8787/ 能看到控制台
 curl.exe -X POST http://127.0.0.1:8787/api/quit
 ```
@@ -679,7 +680,7 @@ curl.exe -X POST http://127.0.0.1:8787/api/quit
 
 | 结果 | 结论 |
 |---|---|
-| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.2.0 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
+| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.3.0 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
 | 测试绿但 UI 打不开 | 看 `logs/app-*.log` / `logs/diag-*.log`，先查端口占用与 `ui/index.html` |
 | demo 报告层/计数不对 | 先确认 `captures/faults_demo.pcap` 未被改（sha256 应与入库一致），再看 `rows[]` |
 | 诊断包解压乱码/缺 README | 看 `core/diagpack.py` 的 `README_NAME` 与 zip 条目名脱敏（`*` → `_`） |
