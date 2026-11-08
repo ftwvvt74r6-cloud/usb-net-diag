@@ -6,16 +6,18 @@ API:
   GET  /api/interfaces      可用网卡
   GET  /api/captures        已有抓包文件
   GET  /api/reports         历史报告列表（报告与导出 → 历史报告）
-  POST /api/scan            启动诊断 {mode,target,duration,interface,pcap}
+  POST /api/scan            启动诊断 {mode,target,duration,interface,pcap,shadow}
   POST /api/elevate         非管理员一键请求 UAC 提权重启
   POST /api/upload?name=x   上传 pcap 后分析抓包文件
   GET  /api/report?path=    读取报告文件
+  GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
   POST /api/ai/test         用当前或临时参数测试连通性
   POST /api/ai/analyze      对最近一次诊断结果做 AI 解读
-  GET/POST /api/probe       连通与速度测试（链路体检，分段测 DNS/TCP/TLS/首字节）
+  GET/POST /api/probe       连通与速度测试（链路体检，分段测 DNS/TCP/TLS/首字节；
+                            ``path`` 开关默认开 = 体检后补一次逐跳路径探测）
   POST /api/passive         启动通信观察（被动监听）{interface,duration,target,engine}
   GET  /api/passive         通信观察状态与结果
   POST /api/passive/stop    提前结束通信观察
@@ -50,13 +52,17 @@ sys.path.insert(0, str(CORE))
 
 import ai  # noqa: E402
 import bootstrap  # noqa: E402
+import copytext  # noqa: E402
 import diagnose  # noqa: E402
 import diagpack  # noqa: E402
+import evidence  # noqa: E402
 import logstore  # noqa: E402
 import passive  # noqa: E402
+import pathprobe  # noqa: E402
 import probe  # noqa: E402
 import report  # noqa: E402
 import tshark  # noqa: E402
+import verdict  # noqa: E402
 import version  # noqa: E402
 
 UI_DIR = ROOT / "ui"
@@ -282,8 +288,13 @@ def doctor_cached(ttl: int = 60) -> dict:
     return data
 
 
-def _probe_guarded(target: str, port, count, timeout, proto) -> dict:
+def _probe_guarded(target: str, port, count, timeout, proto,
+                   path: bool = False) -> dict:
     """体检会向目标发真实报文，加并发闸门，避免被误用成压测工具。
+
+    「逐跳路径」开关打开且体检成功时，在本函数里补一次 MTR（``pathprobe.run``），
+    把结果附到 ``path_profile``。路径探测失败/超时**只降级**：返回的体检结论与
+    记录一条 run 的行为都不变，最多少一个 ``path_profile`` 键。
 
     Args:
         target: 目标主机/URL。
@@ -291,17 +302,20 @@ def _probe_guarded(target: str, port, count, timeout, proto) -> dict:
         count: 探测次数。
         timeout: 单次超时秒数；假值回落到 3.0。
         proto: 强制协议（``http``/``tls``/``smb``/...），``None`` 表示自动识别。
+        path: 是否在体检之后做逐跳路径探测（默认 ``False``；HTTP 路由缺省传
+            ``True``，与「旧载荷默认开」的兼容口径一致）。
 
     Returns:
-        dict: ``probe.run()`` 的结果；并发超限时 ``{"ok": False, "error": ...}``
-            （不记 run，因为这次体检根本没执行）。
+        dict: ``probe.run()`` 的结果（``path=True`` 且拿到逐跳数据时多一个
+            ``path_profile`` 与 ``ui_copy.path``）；并发超限时
+            ``{"ok": False, "error": ...}``（不记 run，因为这次体检根本没执行）。
     """
     if not PROBE_SEM.acquire(blocking=False):
         return {"ok": False,
                 "error": f"同时进行的体检已达 {MAX_CONCURRENT_PROBE} 个，请等待前一个结束"}
     started = time.monotonic()
     params = {"target": (target or "")[:300], "port": port or "",
-              "count": count, "proto": proto or ""}
+              "count": count, "proto": proto or "", "path": bool(path)}
     try:
         try:
             res = probe.run(target, port=port, count=count,
@@ -311,8 +325,42 @@ def _probe_guarded(target: str, port, count, timeout, proto) -> dict:
     except Exception:
         _record_ui_run("probe", params, started, {"ok": False})
         raise
+    if path and isinstance(res, dict) and res.get("ok"):
+        profile = _probe_path_profile(target, port)
+        if profile is not None:
+            res = dict(res)
+            res["path_profile"] = profile
+            res["ui_copy"] = {"path": _path_ui_copy()}
     _record_ui_run("probe", params, started, res)
     return res
+
+
+def _probe_path_profile(target: str, port) -> dict | None:
+    """体检成功后补跑一次 MTR，返回 ``path_profile``（失败只降级为 ``None``）。
+
+    Args:
+        target: 目标（域名或 IP；域名由 ``pathprobe.run`` 自己解析）。
+        port: 体检用的端口；``None`` 时路径探测按 443/80 判断可达性。
+
+    Returns:
+        dict | None: 有逐跳数据时是 ``PathProbeResult.to_dict()``（另加
+            ``excluded_icmp=0`` —— 体检不抓包，没有可排除的包）；解析失败 /
+            探测不可用 / 零跳时返回 ``None``（界面上不显示该区块）。
+    """
+    try:
+        result = pathprobe.run(target, port=port)
+    except Exception as exc:                       # noqa: BLE001  路径探测失败只降级
+        log(f"[提示] 逐跳路径探测不可用（不影响体检结论）："
+            f"{type(exc).__name__}: {exc}")
+        return None
+    if not result.hops:
+        log(f"[提示] 逐跳路径探测没有可用数据：{result.error or '零跳'}")
+        return None
+    if result.error:
+        log(f"[提示] 逐跳路径探测部分降级（结果仍可用）：{result.error}")
+    profile = result.to_dict()
+    profile["excluded_icmp"] = 0
+    return profile
 
 
 def log(msg: str) -> None:
@@ -364,7 +412,141 @@ def _record_ui_run(mode: str, params: dict, started: float, result: dict) -> Non
         pass
 
 
-def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None) -> None:
+def _probe_ui_copy() -> dict:
+    """影子探测结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的 ``probe``）。
+
+    只把这一节随 ``/api/status`` 的结果下发，前端不另存一份中文文案：
+    ``ui/index.html`` 的行为「搬文案」而不是「写文案」。文案表损坏时返回空表，
+    前端在缺文案时不渲染该区块（不影响主结果）。
+
+    Returns:
+        dict: ``probe`` section 的字符串映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "probe")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def _path_ui_copy() -> dict:
+    """路径剖面结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的 ``path``）。
+
+    与 :func:`_probe_ui_copy` 同一套做法：中文只在 copy 表里，页面只负责排版。
+    文案表损坏时返回空表，前端在缺文案时不渲染该区块。
+
+    Returns:
+        dict: ``path`` section 的字符串映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "path")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def _evidence_ui_copy() -> dict:
+    """取证请求单结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的
+    ``evidence_checklist``）。
+
+    清单正文来自 ``core/copy/evidence_checklist.json``（后端算好随结果下发），
+    页面只负责排版与按钮，不另存一份中文标签。
+
+    Returns:
+        dict: ``evidence_checklist`` section 的字符串映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "evidence_checklist")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def evidence_payload(result: dict | None, full: bool = False, fmt: str = "md") -> dict:
+    """生成 ``/api/evidence`` 的响应体（纯计算，不写文件、不联网）。
+
+    ``full=True`` 是**通用空白版**：不依赖 ``JOB["result"]``，还没有诊断结果时
+    也返回全 7 维（``result=None`` 等价于空结果）。``full=False`` 才要求最近一次
+    诊断结果，并按结论挑相关维度。
+
+    为避免 ``dimensions_for`` 在缺 ``verdict`` 时回退去 ``verdict.build``（会读
+    copy 表），这里先把判定算好再显式传给 ``build_checklist``；已有
+    ``result["verdict"]`` 时直接复用，不重复计算。
+
+    Args:
+        result: 最近一次诊断结果（``JOB["result"]``）；``None`` 表示还没有结果。
+        full: ``True`` 输出覆盖 7 维的通用空白版；``False`` 按本次结论取相关维度。
+        fmt: ``"md"``（报告内区块同款 Markdown）或 ``"txt"``（纯文本，供复制）。
+            其它值由路由层拒绝；这里按 ``md`` 兜底。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "fmt", "full", "dimensions": [维度机器码],
+        "content": str}``；``full=False`` 且没有结果 / 本次不需要取证时
+        ``{"ok": False, "error": "..."}``（错误可直接展示给用户）。
+    """
+    has_result = isinstance(result, dict) and bool(result)
+    if not has_result and not full:
+        return {"ok": False, "error": "还没有可用的诊断结果，请先完成一次诊断"}
+    payload_result = result if has_result else {}
+    if full:
+        # 通用空白版不需要结论；只借用已有的判定做展示，不重新计算。
+        stored = payload_result.get("verdict")
+        verdict_obj = stored if isinstance(stored, dict) else {}
+        checklist = evidence.build_checklist(payload_result, full=True,
+                                             verdict=verdict_obj)
+    else:
+        stored = payload_result.get("verdict")
+        verdict_obj = stored if isinstance(stored, dict) else verdict.build(payload_result)
+        checklist = evidence.build_checklist(payload_result, full=False,
+                                             verdict=verdict_obj)
+    dims = [dim.get("key", "") for dim in checklist.get("dimensions") or []]
+    content = (evidence.render_checklist_text(checklist) if fmt == "txt"
+               else evidence.render_checklist_markdown(checklist))
+    if not content:
+        return {"ok": False,
+                "error": "本次结论不需要外部取证（可用 full=1 获取通用空白版）"}
+    return {"ok": True, "fmt": "txt" if fmt == "txt" else "md",
+            "full": bool(full), "dimensions": dims, "content": content}
+
+
+
+def _attach_probe_ui_copy(result: dict | None) -> dict | None:
+    """给带探针基线 / 路径剖面 / 取证清单的结果补界面文案（不原地改 JOB 里的结果）。
+
+    取证清单（``evidence_checklist``）是**只进状态响应**的加法字段：它由
+    最近一次结果现算，不写进报告 JSON，所以 20 产物快照不受影响。
+
+    Args:
+        result: ``JOB["result"]``；三个区块都没有时原样返回。
+
+    Returns:
+        dict | None: 有 ``meta.probe_baseline`` / ``meta.path_profile`` 或本次
+            需要外部取证时返回浅拷贝 + ``ui_copy``（键 ``probe`` / ``path`` /
+            ``evidence``），需要取证时另加 ``evidence_checklist``；否则返回原对象
+            （离线路径 / 正常结果零改动）。
+    """
+    if not isinstance(result, dict):
+        return result
+    meta = result.get("meta") or {}
+    payload = {}
+    if isinstance(meta.get("probe_baseline"), dict):
+        payload["probe"] = _probe_ui_copy()
+    if isinstance(meta.get("path_profile"), dict):
+        payload["path"] = _path_ui_copy()
+    stored_verdict = result.get("verdict")
+    checklist = evidence.build_checklist(
+        result, verdict=stored_verdict if isinstance(stored_verdict, dict) else None)
+    if checklist.get("dimensions"):
+        payload["evidence"] = _evidence_ui_copy()
+    if not payload:
+        return result
+    enriched = dict(result)
+    if checklist.get("dimensions"):
+        enriched["evidence_checklist"] = checklist
+    enriched["ui_copy"] = payload
+    return enriched
+
+
+
+def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None,
+            shadow: bool = False) -> None:
     # run 记录由 diagnose.run_scan() 统一写（UI 的 /api/scan 也走它），
     # 这里不再重复 record_run —— 否则同一次分析会出现两条记录。
     try:
@@ -372,7 +554,7 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             res = diagnose.run_scan(target=target, pcap=pcap, logger=log)
         else:
             res = diagnose.run_scan(target=target, duration=duration,
-                                    interface=interface, logger=log)
+                                    interface=interface, logger=log, shadow=shadow)
             if not res.get("ok") and res.get("empty_capture"):
                 # 0 包不直接判失败：自动做一次连通与速度测试（目标 → 默认网关），
                 # 拿到时延/抖动/丢包就降级成中性结论；拿不到才走红色失败。
@@ -383,12 +565,18 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
                     bpf=res.get("bpf", ""), logger=log)
                 if fallback is not None:
                     # 降级卡也必须落盘（复审遗留 #7）：历史报告/导出里要能查到。
-                    try:
-                        fallback["report"] = report.save_degraded(fallback, REPORTS)
-                        log(f"[提示] 降级结论报告已生成："
-                            f"{fallback['report']['markdown']}")
-                    except Exception as exc:  # noqa: BLE001 落盘失败不改变降级结论
-                        log(f"[警告] 降级结论报告落盘失败：{type(exc).__name__}: {exc}")
+                    # 只落「真实卡片」：没有 kind/card_title 的结构不是本函数的产物
+                    # （测试替身 / 上游改动），写出去只会得到一份空报告污染 reports/。
+                    if isinstance(fallback, dict) and (
+                            fallback.get("kind") or fallback.get("card_title")):
+                        try:
+                            fallback["report"] = report.save_degraded(fallback, REPORTS)
+                            log(f"[提示] 降级结论报告已生成："
+                                f"{fallback['report']['markdown']}")
+                        except Exception as exc:  # noqa: BLE001 落盘失败不改变降级结论
+                            log(f"[警告] 降级结论报告落盘失败：{type(exc).__name__}: {exc}")
+                    else:
+                        log("[提示] 降级结论结构不完整，跳过落盘（界面结论不受影响）")
                     res = fallback
         with LOCK:
             if res.get("ok"):
@@ -411,6 +599,30 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             JOB["finished_at"] = time.time()
 
 
+def _to_bool(value, default: bool = True) -> bool:
+    """把请求体里的布尔开关解析成 ``bool``（缺省 / 脏值回退默认值）。
+
+    Args:
+        value: 原始值（``True``/``False``/``0``/``1``/``"false"``/``None`` 等）。
+        default: 缺省时的返回值；影子探测要求默认 **开**。
+
+    Returns:
+        bool: 解析结果；``None`` / 无法识别时返回 ``default``。
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
 def start_job(payload: dict) -> dict:
     """启动一次诊断任务（全网体检 / 单目标诊断 / 分析抓包文件）。
 
@@ -420,13 +632,17 @@ def start_job(payload: dict) -> dict:
             ``target``（目标 IP/网段/域名，最多 300 字符）、
             ``duration``（秒，夹在 3 ~ ``max_duration`` 之间）、
             ``interface``（网卡序号，可空=自动挑）、
-            ``pcap``（仅离线模式；**只接受 captures/ 下的文件名**，防任意文件读取）。
+            ``pcap``（仅离线模式；**只接受 captures/ 下的文件名**，防任意文件读取）、
+            ``shadow``（可选 bool，默认 ``True``：实时抓包同时做影子探测**与路径
+            剖面（MTR）**；离线忽略；MTR 只在有目标时跑）。
+            旧版前端不传 ``shadow`` 时按默认开处理，行为兼容。
 
     Returns:
         dict: 成功 ``{"ok": True}``；已在跑或参数不合法时 ``{"ok": False, "error": "..."}``。
             任务本身在后台线程执行，进度请轮询 ``/api/status``。
     """
     cfg = diagnose.load_config()
+    shadow = _to_bool(payload.get("shadow"), True)
     with LOCK:
         if JOB["state"] == "running":
             return {"ok": False, "error": "已有诊断任务在执行，请等待完成"}
@@ -460,8 +676,11 @@ def start_job(payload: dict) -> dict:
                     "result": None, "error": "", "error_code": ""})
     if ignored_target:
         log(f"[提示] 全网体检（全网扫描）模式忽略目标 {ignored_target}，抓取全部流量")
-    log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s")
-    threading.Thread(target=_worker, args=(mode, target, duration, interface, pcap), daemon=True).start()
+    log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s"
+        f"{'' if mode == 'offline' else ('，探针基线/路径剖面=' + ('开' if shadow else '关'))}")
+    threading.Thread(target=_worker,
+                     args=(mode, target, duration, interface, pcap),
+                     kwargs={"shadow": shadow}, daemon=True).start()
     return {"ok": True}
 
 
@@ -991,6 +1210,7 @@ class Handler(BaseHTTPRequestHandler):
             # 只进状态响应，不进报告，所以 faults_demo 快照不受影响。
             if data["state"] == "done" and data.get("result"):
                 data["link_actions"] = link_actions(data["result"], _gateway_now())
+                data["result"] = _attach_probe_ui_copy(data["result"])
             return self._json(data)
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]
@@ -1011,6 +1231,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"report not found", "text/plain; charset=utf-8")
             ctype = "text/markdown; charset=utf-8" if target.suffix == ".md" else "application/json; charset=utf-8"
             return self._send(200, target.read_bytes(), ctype)
+        if path == "/api/evidence":
+            # 纯计算：只读最近一次诊断结果，不写文件、不联网。
+            q = urllib.parse.parse_qs(parsed.query)
+            full = _to_bool((q.get("full") or [None])[0], False)
+            fmt = ((q.get("fmt") or ["md"])[0] or "md").strip().lower()
+            if fmt not in ("md", "txt"):
+                return self._json({"ok": False, "error": "fmt 只支持 md / txt"})
+            with LOCK:
+                latest = JOB.get("result")
+            return self._json(evidence_payload(latest, full=full, fmt=fmt))
         if path == "/api/doctor":
             return self._json(doctor_cached())
         if path == "/api/passive":
@@ -1025,7 +1255,10 @@ class Handler(BaseHTTPRequestHandler):
             port = _to_int((q.get("port") or [None])[0], None, 1, 65535)
             count = _to_int((q.get("count") or ["4"])[0], 4, 1, 10)
             proto = (q.get("proto") or [None])[0]
-            return self._json(_probe_guarded(target, port, count, None, proto))
+            # 加法字段：旧前端不传 path 时按「开」处理（与 /api/scan 的 shadow 同口径）。
+            want_path = _to_bool((q.get("path") or [None])[0], True)
+            return self._json(_probe_guarded(target, port, count, None, proto,
+                                             path=want_path))
         return self._send(404, b"not found", "text/plain; charset=utf-8")
 
     def _route_post(self):
@@ -1072,9 +1305,13 @@ class Handler(BaseHTTPRequestHandler):
             port = _to_int(payload.get("port"), None, 1, 65535)
             count = _to_int(payload.get("count"), 4, 1, 10)
             timeout = _to_float(payload.get("timeout"), 3.0, 0.5, 10.0)
-            log(f"连通与速度测试（链路体检）：{target}:{port or '默认端口'}")
+            # 「逐跳路径」开关（默认开，加法字段）：关闭时不发任何 MTR 探测包。
+            want_path = _to_bool(payload.get("path"), True)
+            log(f"连通与速度测试（链路体检）：{target}:{port or '默认端口'}"
+                f"（逐跳路径={'开' if want_path else '关'}）")
             return self._json(_probe_guarded(target, port, count, timeout,
-                                             payload.get("proto") or None))
+                                             payload.get("proto") or None,
+                                             path=want_path))
         if parsed.path == "/api/scan":
             payload = self._read_json()
             return self._json(start_job(payload))

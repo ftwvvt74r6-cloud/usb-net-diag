@@ -409,7 +409,8 @@ def _dns_timeout_count(q_ids, r_ids) -> int:
     return len(set(q_ids) - set(r_ids))
 
 
-def collect(pcap: Path, log=None) -> tuple[dict, str]:
+def collect(pcap: Path, log=None,
+            display_filter: str | None = None) -> tuple[dict, str]:
     """流式解析 pcap，边读边聚合。
 
     一次 tshark 调用取全所需字段，避免对同一文件扫多遍；输出按行消费，
@@ -418,6 +419,10 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
     Args:
         pcap: 抓包文件路径。
         log: 可选日志回调 ``log(str)``，用于输出进度与 tshark 告警首行。
+        display_filter: 可选的 tshark ``-Y`` 显示过滤表达式；``None``（默认）时
+            不加任何过滤、行为与历史版本完全一致。影子探测用它做**第二道隔离**
+            （抓包 BPF 之外的防御层）：探针的回复报文方向端口是反的，只靠 BPF
+            可能漏进统计。
 
     Returns:
         tuple[dict, str]: ``(stats, error)``。``stats`` 是全部计数器与时间戳的聚合字典；
@@ -434,6 +439,10 @@ def collect(pcap: Path, log=None) -> tuple[dict, str]:
         "-T", "fields", "-E", "header=y", "-E", "separator=|",
         "-E", "quote=d", "-E", "aggregator=,", "-E", "occurrence=a",
     ]
+    # 影子探测隔离的防御层：能进统计的报文先过一遍显示过滤。None 时一个参数都不加，
+    # 保证离线分析（20 产物红线）的 tshark 命令行与历史版本逐字节一致。
+    if display_filter:
+        args += ["-Y", display_filter]
     for f in FIELDS:
         args += ["-e", f]
     if log:
@@ -1393,7 +1402,8 @@ def _build_provenance() -> dict:
     return info
 
 
-def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> dict:
+def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None,
+            display_filter: str | None = None) -> dict:
     """分析抓包文件（离线分析）：读取一个 pcap，产出完整结果字典。
 
     Args:
@@ -1401,6 +1411,9 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
         target: 本次诊断目标的展示用名字（IP/域名），可空。
         ti_key: 威胁情报 API Key；为空则跳过可疑外联核对。
         log: 可选日志回调 ``log(str)``。
+        display_filter: 可选的 tshark ``-Y`` 显示过滤表达式（影子探测隔离的
+            防御层）；``None``（默认）时行为与输出完全不变 —— 离线分析的
+            20 个产物逐字节红线靠这个默认值守住。
 
     Returns:
         dict: 成功时 ``ok=True``，键含 ``meta``（采集与明细）、``metrics``（扁平指标）、
@@ -1411,7 +1424,7 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None) -> d
     pcap = Path(pcap)
     if not pcap.is_file():
         return {"ok": False, "error": f"抓包文件不存在: {pcap}"}
-    st, err = collect(pcap, log=log)
+    st, err = collect(pcap, log=log, display_filter=display_filter)
     if err:
         return {"ok": False, "error": err}
 
