@@ -1,8 +1,8 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.3.1`；写作基线 `main` = `d4b13dc`（v0.3.1 发布 commit，PR #32 合并后）。
-> **时效性**：文中数字是 2026-11-08 在本仓库实测的；合并新 PR 后 sha 会变，以
+> **对齐版本**：`VERSION` = `0.3.2`；写作基线 `main` = `ec374a0`（H 批次 PR #36 合并后的 main；F = PR #34、G = PR #35）。
+> **时效性**：文中数字是 2026-11-09 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
 > fork 后没有 `tools/` 时，用系统 `python`（同样只用标准库）。
@@ -28,9 +28,9 @@ git ls-files 'core/*.py'                        # 核心模块清单（注意用
 git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，见下方说明）
 ```
 
-> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **76 行**
+> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **83 行**
 > （含 docstring / 注释 / 示例 URL），**不等于路由数量**；精确路由清单看 **§4 的表**
-> （**13 个 POST + 15 个 GET = 28 个 API**，另有静态页 `/`）。
+> （**13 个 POST + 16 个 GET = 29 个 API**，另有静态页 `/`）。
 
 > 仓库里有多份**历史文档**（`docs/START-HERE.md`、`docs/plan-review.md`、`docs/code-index.md`、
 > `docs/t00-findings.md`、`docs/handoff-MANIFEST.json`）描述的是 v0.1.0 或目标架构，
@@ -51,7 +51,7 @@ git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，
 
 | 入口 | 怎么进 | 前提 | 自动化覆盖 |
 |---|---|---|---|
-| **UI** | **`NetDiag.exe`（推荐，双击不提权）** / `start.bat`（Python 回退，`--admin` 才提权）/ `NetDiag.vbs`（兼容）/ `core\server.py` | 便携 Python 或系统 Python 3.11+；实时抓包另需 Npcap + 管理员 | 启动器 `test_launcher_exe.py`；HTTP 路由有 `test_http_drain.py` 等；首屏自检/权限卡/表单保留用 `test_selfcheck.py` + `test_startup_ui.py` 静态契约，CI 不跑浏览器（本机 headless 证据见 `review/`） |
+| **UI** | **`NetDiag.exe`（推荐，双击不提权；splash 六项检查 + 唯一浏览器打开点）** / `start.bat`（Python 回退，`--admin` 才提权）/ `NetDiag.vbs`（兼容）/ `core\server.py` | 便携 Python 或系统 Python 3.11+；实时抓包另需 Npcap + 管理员 | 启动器 `test_launcher_exe.py`；HTTP 路由有 `test_http_drain.py` 等；首屏自检/权限卡/表单保留用 `test_selfcheck.py` + `test_startup_ui.py` 静态契约，CI 不跑浏览器（本机 headless 证据见 `review/`） |
 | **CLI** | `core\diagnose.py --pcap ...` | tshark（分析抓包文件也要） | `test_cli_report_out.py` 等 |
 | **MCP** | `mcp\wireshark-mcp\server.py`（stdio）+ `config\mcp-wireshark.json` | 一个 MCP 客户端；实时能力同 UI | `test_mcp_conclusion.py`：output Schema / required 校验 / 结构化返回 / description / 工具名参数回归（不抓包） |
 | **诊断包** | 界面按钮 / `导出诊断包.bat` / `diagnose.py --export-diag` | 无（纯本地打包） | `test_diagpack.py`、`test_sanitize.py` |
@@ -187,7 +187,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 被占则顺延最多 10 个端口。请求处理有三道边界：`Host` 只接受 `127.0.0.1`/`localhost`/`::1`；
 写请求检查 `Origin`（无 Origin 的本机程序放行）；JSON body 上限 8 MB、上传上限 2 GB。
 
-> **路由计数**：**13 个 POST + 15 个 GET = 28 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
+> **路由计数**：**13 个 POST + 16 个 GET = 29 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
 > `do_GET` 另外还服务静态首页，完整清单见 4.2/4.3。
 
 ### 4.1 响应信封的现状（重要）
@@ -207,7 +207,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 
 | 路由 | 请求体 / 参数 | 成功响应（关键键） |
 |---|---|---|
-| `POST /api/quit` | 无 | `{ok: true, message}`；0.3s 后关监听并清理 `logs/netdiag.pid` |
+| `POST /api/quit` | 无 | `{ok: true, message}`；0.3s 后关监听并清理 `logs/netdiag.pid`。**防护**：与所有 POST 一样先过 Host + Origin 同源校验（拒外部网页 CSRF / DNS rebinding），不额外加一次性 token（本机同用户进程本来就能结束进程，token 挡不住它们，反而会破坏「界面退出 / 空闲自动退出」两条既有链路） |
 | `POST /api/last-run/clear` | 无请求体 | `{ok: true}`；清空内存 `LAST_RUN` 与已完成任务的展示槽（`JOB` 回 `idle`），**不删** `logs/runs/` 历史；G5 加法接口 |
 | `POST /api/elevate` | 无请求体（路由会丢弃 body，不接受参数） | `{ok, restarted, message}`；已是管理员时 `{ok:true, restarted:false, already_admin:true}`；用户取消/策略禁止时 `{ok:false, restarted:false, error}` 且**不杀当前进程** |
 | `POST /api/selfcheck/ack` | 无请求体 | `{ok, writable, path?, error?}`；写 `config/ui-first-run.json`，写失败返回 `ok:false` 但 HTTP 仍 200，**不阻塞界面** |
@@ -333,7 +333,7 @@ core/diagnose.py --pcap x.pcap --json
    E2 只改 UI / MCP / 文档，**没有新的报告结构变化**；20/20 复核仍成立。
    重生成必须用 CLI 真跑并把 `generated_at` 归一化回基线值；测试/实验用
    `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 **722 条**（v0.3.0 基线 620；E1 结论边界 +69、E2 UI/MCP +30、复审 B1 +3）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+3. **测试只增不减**：当前 **955 条**（v0.3.1 基线 722；F/G +168、H +65；只增不减）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -424,7 +424,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 722（v0.3.0 基线 620；E1 +69、E2 +30、复审 B1 +3），但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> 测试数为 955，但 **skip 数会变成 27（取决于环境，以 CI 日志为准）**
 > （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
@@ -469,14 +469,14 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 722 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 955 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
 
 | 步骤 | 命令 | 作用 |
 |---|---|---|
-| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 302/302 = 100.0%（33 模块） |
+| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 314/314 = 100.0%（33 模块） |
 | 文档与源码同步 | `python scripts/gen_api_doc.py` + `git diff --exit-code docs/api-reference.md docs/docstring-gaps.md` | 禁止手改生成文档 |
 
 ### 7.3 CI 里会 skip 什么
@@ -497,7 +497,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 ---
 
-## 8. 代码地图（`core/` 31 个 .py + 外围）
+## 8. 代码地图（`core/` 32 个顶层 .py + 外围）
 
 > 每个文件一句话职责。行数/签名细节看 `docs/api-reference.md`（自动生成，签名永远是真的）。
 
@@ -516,7 +516,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 | 文件 | 一句话职责 |
 |---|---|
-| `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.1"`（升级时与 `VERSION` 同步） |
+| `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.2"`（升级时与 `VERSION` 同步） |
 | `core/analyzer.py` | 抓包分析引擎：一次 tshark 流式解析 → `meta/metrics/rows` + `findings_v2` + `provenance` |
 | `core/app.py` | 静默启动器：pythonw、单实例探测（先查监听端口表再发 HTTP）、空闲退出、错误弹窗；**浏览器打开权受 `NETDIAG_NO_BROWSER` 控制**（H1：launcher 是唯一打开点）；**启动不提权**（`--no-elevate`），提权只剩 `/api/elevate` 的 `--elevated` 新进程路径（不重开浏览器） |
 | `core/bootstrap.py` | 盘符自适应：按当前路径重写 MCP/Harness 配置 + 环境自检（`--check`/`--npcap`） |
@@ -576,13 +576,14 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `AGENTS.md` | 硬约束清单（不推 main、不改模块边界等） | ⚠️ 部分目录表是目标架构 |
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
-| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 33/302 |
-| `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（C 批次启动器 + v0.3.1 实测数字） |
-| `docs/release-v0.3.1.md` | v0.3.1 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 当前（v0.3.1 已发布） |
+| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 33 模块/314 符号 |
+| `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（H 批次启动器 + v0.3.1 历史实测；v0.3.2 不预写包大小/SHA） |
+| `docs/release-v0.3.2.md` | v0.3.2 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ⏳ **发版后**由 Lead 回写；本 PR 不创建、不预写数字 |
+| `docs/release-v0.3.1.md` | v0.3.1 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 历史（最新已发布版本） |
 | `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ❌ 历史（v0.3.0） |
 | `docs/release-v0.2.0.md` | v0.2.0 发布资产与法务修正回合证据 | ❌ 历史（v0.2.0） |
 | `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
-| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检六项 / 能力置灰与说明卡 / 表单保留 / **H1 单次打开浏览器、H2 计时与 `--measure`、H3 splash 与 `--splash-test`、H6 `/api/preflight`** / 常见启动失败 | ✅ 当前（C2 + F2 + G2 + H-A） |
+| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检六项 / 能力置灰与说明卡 / 表单保留 / **H1 单次打开浏览器、H2 计时与 `--measure`、H3 splash 与 `--splash-test`、H6 `/api/preflight`** / 常见启动失败 | ✅ 当前（C2 + F2 + G2 + H） |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/path-probe.md` | 路径剖面（MTR）：scapy / 系统 tracert 两条实现路径（命令、样本、精度、失败形态、AGENTS §3-11 声明例外）、逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2 + G2） |
@@ -598,7 +599,12 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/git-setup.md` | Git 接管操作手册（已去个人化，含 `<owner>/<repo>` 占位符） | ✅ 可用；示例数字偏旧 |
 | `docs/assets/` | 图标/Logo | ✅ |
 
-> **v0.3.1 发布记录**：tag `v0.3.1`（annotated tag object `b15f592c…`）→ commit
+> **v0.3.2 发布记录（待发版）**：版本进位 PR `chore/release-v0.3.2` 只改
+> `VERSION` / `core/__init__.py::__version__` / `CHANGELOG` / `README` / `docs/HANDOVER-AI.md` /
+> `docs/build.md`；**不打包、不建 tag、不发 Release**。tag `v0.3.2`、lite 包大小与 SHA-256
+> 由 Lead 合并后执行，并回写 `docs/release-v0.3.2.md` 与本文件。
+>
+> **v0.3.1 发布记录（历史）**：tag `v0.3.1`（annotated tag object `b15f592c…`）→ commit
 > `d4b13dcd1220e149b4f9283ce2930875dab4cfd5`（v0.3.1 发布 commit，PR #32 合并）；
 > Release <https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.1>；
 > lite `NetDiag-0.3.1-lite.zip` **174 个文件 / 1,031,112 B / SHA-256
@@ -643,7 +649,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 722 条，OK (skipped≈27，取决于环境)
+python -m unittest discover -s tests        # 期望 955 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -720,7 +726,7 @@ python -m unittest discover -s tests        # 期望 722 条，OK (skipped≈27�
 
 - `/api/v1/*` 与标准 envelope **未实现**；`contracts.py` 里只是定义。
 - `core/rules/thresholds.json` **不存在**；`load_thresholds()` 返回 `{}`，阈值实际在代码里。
-- `core/__init__.py::__version__` 是写死的 `"0.3.1"`，与 `VERSION` 两处需同步。
+- `core/__init__.py::__version__` 是写死的 `"0.3.2"`，与 `VERSION` 两处需同步。
 
 ---
 
@@ -737,7 +743,7 @@ python -m unittest discover -s tests        # 期望 722 条，OK (skipped≈27�
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 722 tests ... OK (skipped≈27，取决于环境)
+# 期望：Ran 955 tests ... OK (skipped≈27，取决于环境)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：
@@ -749,7 +755,7 @@ $env:TSHARK_PATH = "$PWD\tools\WiresharkPortable\App\Wireshark\tshark.exe"
 # 3) 日志现场
 Get-Content logs\env.json | Select-String '"version"|"tshark_version"|"admin"'
 Get-ChildItem logs\runs | Select-Object -Last 1
-# 期望：version=0.3.1；runs/ 有本次分析记录；不联网、不上传
+# 期望：version=0.3.2；runs/ 有本次分析记录；不联网、不上传
 
 # 4) 诊断包
 <python> core\diagnose.py --export-diag --out "$env:TEMP\netdiag-diag"
@@ -766,7 +772,7 @@ Get-Content "$env:TEMP\netdiag-unzip\README.txt"
 # 另一个窗口：
 curl.exe http://127.0.0.1:8787/api/ping
 curl.exe http://127.0.0.1:8787/api/app
-# 期望：{"ok":true,"app":"USBNetDiag","version":"0.3.1",...}
+# 期望：{"ok":true,"app":"USBNetDiag","version":"0.3.2",...}
 #       浏览器打开 http://127.0.0.1:8787/ 能看到控制台
 curl.exe -X POST http://127.0.0.1:8787/api/quit
 ```
@@ -775,7 +781,7 @@ curl.exe -X POST http://127.0.0.1:8787/api/quit
 
 | 结果 | 结论 |
 |---|---|
-| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.3.1 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
+| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.3.2 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
 | 测试绿但 UI 打不开 | 看 `logs/app-*.log` / `logs/diag-*.log`，先查端口占用与 `ui/index.html` |
 | demo 报告层/计数不对 | 先确认 `captures/faults_demo.pcap` 未被改（sha256 应与入库一致），再看 `rows[]` |
 | 诊断包解压乱码/缺 README | 看 `core/diagpack.py` 的 `README_NAME` 与 zip 条目名脱敏（`*` → `_`） |

@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/ftwvvt74r6-cloud/usb-net-diag/actions/workflows/smoke.yml"><img src="https://github.com/ftwvvt74r6-cloud/usb-net-diag/actions/workflows/smoke.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-v0.3.1-blue" alt="version v0.3.1">
+  <img src="https://img.shields.io/badge/version-v0.3.2-blue" alt="version v0.3.2">
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License MIT">
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Platform Windows">
@@ -135,23 +135,34 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 启动器会按 **① `tools\python\pythonw.exe` / `python.exe` → ② 系统 `python` → ③ `py -3`** 的顺序找运行时；
 都没有时会给出明确提示和 Python 官网链接。源码目录没有 `tools/`，因此自动走 ② / ③。
 
-### ② 公开 lite 包（需自装 Python / Wireshark）
+### ② 公开 lite 包（lite 包要求）
 
-v0.3.1 **已发布**：从 [Release v0.3.1](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.1)
+当前已发布的是 **v0.3.1**：从 [Release v0.3.1](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.1)
 下载 `NetDiag-0.3.1-lite.zip`（**174 个文件 / 1,031,112 B / 解压后 2,771,469 B /
 SHA-256 `09fc93f463c82724a6a1a5ceabe85ea76b438e3549eee2e51303a7bc87ac8d53`**，同页附
-`SHA256SUMS.txt`），解压后**推荐直接双击 `NetDiag.exe`**
-（首次运行先做五项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
+`SHA256SUMS.txt`）。**v0.3.2 的 Release 链接、包大小与 SHA-256 在发布后回写本文件**，
+本仓库当前只做版本进位与文档同步。解压后**推荐直接双击 `NetDiag.exe`**
+（启动时显示 splash 并做六项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 
 ```bat
 自检.bat
 python core\server.py
 ```
 
-lite 包**不含**便携 Python、Wireshark、Npcap；包内 `NetDiag.exe` 是构建时用系统 csc 编译的启动器，
-**双击不请求提权**，实时抓包 / 通信观察在界面里按需提权。需要 Python 3.11+；分析抓包文件另装
-Wireshark；全网体检 / 单目标诊断 / 通信观察另装 Npcap。`自检.bat` 会逐项告诉你缺什么、去哪装；
-启动、提权与首屏自检的细节见 [`docs/startup.md`](docs/startup.md)。
+**lite 包要求（v0.3.2）**：
+
+- 需要 **Python 3.11+**；分析抓包文件另装 **Wireshark**（tshark）；全网体检 / 单目标诊断 /
+  通信观察另装 **Npcap**。包内 `NetDiag.exe` 是构建时用系统 csc 编译的启动器（约 70 KB），
+  **双击不请求提权**，实时抓包 / 通信观察在界面里按需提权。
+- **缺 Wireshark / Npcap / scapy 时程序仍可打开**：splash 与首屏自检逐项提示缺什么、
+  「缺了会怎样」、去哪装；不可用的模式置灰并给说明卡，补齐后点「重新检测」即可，不需要重启。
+- **双击只打开一个浏览器窗口**：launcher 是唯一打开点，并给子进程设 `NETDIAG_NO_BROWSER=1`；
+  并发双击有单实例锁，已有实例时直接复用、不重复起进程。
+- **连通与速度测试始终可用**：纯标准库 socket，不依赖上述任何组件。
+- 启动、提权与首屏自检的细节见 [`docs/startup.md`](docs/startup.md)。
+
+lite 包**不含**便携 Python、Wireshark、Npcap；公开仓库 / 公开 Release 只发代码。
+`自检.bat` 会逐项告诉你缺什么、去哪装。
 
 ### ③ internal 包（自带运行时，双击即用）
 
@@ -179,13 +190,13 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 
 | 项目 | 实测值 | 出处 / 复现方式 |
 |---|---|---|
-| 自动化测试 | **722** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
-| 测试文件 | **35** 个（34 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
+| 自动化测试 | **955** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
+| 测试文件 | **47** 个（46 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
 | CI | **2 个 job**：Windows 语法 + 启动器契约；Ubuntu 注释覆盖率 + 文档同步 | [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) |
-| 注释覆盖率 | **302 / 302 = 100.0%**，33 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
+| 注释覆盖率 | **314 / 314 = 100.0%**，33 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
 | 判定可复现 | demo + 9 个确定性样本 = **20 / 20** 个产物逐字节相同 | `captures/faults_demo.pcap` + `scaffold/tests/fixtures/gen_pcap.py` |
-| API 契约 | **12 个 POST + 13 个 GET** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
-| 发布包 | v0.3.1 lite：**174 个文件 / 1,031,112 B**（解压后 2,771,469 B） | [`docs/release-v0.3.1.md`](docs/release-v0.3.1.md) §2–§3 |
+| API 契约 | **13 个 POST + 16 个 GET = 29 个 API** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
+| 发布包 | v0.3.1 lite（当前已发布）：**174 个文件 / 1,031,112 B**（解压后 2,771,469 B）；v0.3.2 发布后回写 | [`docs/release-v0.3.1.md`](docs/release-v0.3.1.md) §2–§3 |
 | MCP | **7** 个工具，零第三方依赖 | [`mcp/wireshark-mcp/server.py`](mcp/wireshark-mcp/server.py) 的 `TOOLS` |
 | 运行时依赖 | 核心 **0 个 pip 依赖**（仅标准库） | 源码 import 检查；CI 不装第三方包 |
 
@@ -218,7 +229,7 @@ NetDiag/
 ├── ui/index.html                # 单文件控制台（无构建链、无前端框架）
 ├── mcp/wireshark-mcp/server.py  # MCP stdio 服务，7 个工具
 ├── scripts/                     # 发布打包 / 启动器编译 / API 文档生成 / 特征导出 / 图标生成
-├── tests/                       # 35 个测试文件，722 条用例
+├── tests/                       # 47 个测试文件，955 条用例
 ├── captures/faults_demo.pcap    # 首次试跑样本
 ├── reports/faults_demo.md|json  # 入库报告快照
 ├── docs/                        # 交接、API、日志、许可、构建、发布记录
@@ -235,7 +246,9 @@ NetDiag/
 | [`docs/logging.md`](docs/logging.md) | 日志目录、字段、轮转与保留策略 |
 | [`docs/log-collection.md`](docs/log-collection.md) | 诊断包三个入口、脱敏规则、raw 警告 |
 | [`docs/build.md`](docs/build.md) | lite / internal / internal-npcap 三种包怎么构建与验包 |
-| [`docs/startup.md`](docs/startup.md) | 三个启动入口、启动不提权、按需提权权限卡、首屏自检、常见启动失败 |
+| [`docs/startup.md`](docs/startup.md) | 三个启动入口、启动不提权、按需提权权限卡、首屏自检、splash、启动计时、常见启动失败 |
+| [`docs/path-probe.md`](docs/path-probe.md) | 路径剖面（MTR）：scapy / 系统 `tracert` 两条实现路径、逐跳表怎么读、劣化阈值与声明例外 |
+| [`docs/conclusion-boundary.md`](docs/conclusion-boundary.md) | 结论边界：`confidence` / `basis` / `coverage` / `not_covered` 语义、置信三档、六出口一致 |
 | [`docs/licensing.md`](docs/licensing.md) | 第三方许可、公开/内部分发边界 |
 | [`docs/api-reference.md`](docs/api-reference.md) | 自动生成的公开符号与签名（禁止手改） |
 | [`docs/release-v0.3.1.md`](docs/release-v0.3.1.md) | v0.3.1 发布资产、包内容、构建自检、红线证据与干净 checkout |
@@ -244,6 +257,7 @@ NetDiag/
 
 ## Roadmap
 
+- [x] **v0.3.2**：启动 splash / 双击只开一个浏览器 / 右侧统一面板 / 左侧减负 / 缺组件不阻塞 / 文本通用化 / 逐跳 tracert 降级 / 页面状态显式化
 - [x] **v0.3.1**：结论与边界（`confidence` / `basis` / `coverage` / `not_covered`，六出口一致）/ E 批次
 - [x] **v0.3.0**：UI 2.0 / B2 命名与反馈 / B3 清尾修复与联动 / D+ 路径剖面与取证 / C 启动体验（`NetDiag.exe`、按需提权、首屏自检）
 - [x] **v0.2.0**：四层定位、方向归因、证据充分性、诊断包脱敏、品牌与发布
