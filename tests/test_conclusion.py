@@ -658,13 +658,15 @@ class CliConclusionTests(unittest.TestCase):
         self.assertIn(conclusion.render_conclusion_markdown(block).rstrip("\n"), out)
 
     def test_help_documents_json_behavior_change(self):
+        # CI 的 Windows runner 控制台是 cp1252；``_harden_console`` 会把中文转成
+        # ``\uXXXX`` 可见转义。断言只取 ASCII 片段，避免测试依赖终端编码。
         proc = subprocess.run(
             [sys.executable, str(ROOT / "core" / "diagnose.py"), "--help"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=120)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--json", proc.stdout)
-        self.assertIn("完整结论对象", proc.stdout)
+        self.assertIn("summary + conclusion", proc.stdout)
 
 
 # ---------------------------------------------------------------- V11 取证单
