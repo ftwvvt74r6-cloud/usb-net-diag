@@ -105,12 +105,18 @@ class PreflightPayloadTest(unittest.TestCase):
 
     def test_payload_reuses_collect_cached_and_matches_selfcheck(self):
         snap = _snapshot()
+        # S7：真正「全绿」且每一项都带 fix_url 时，修复索引必须为空。
+        for item in snap["checks"]:
+            item["ok"] = True
+            item["fix_url"] = "https://www.wireshark.org/download.html"
+        snap["ok"] = True
         with mock.patch.object(server.selfcheck, "collect_cached",
                                return_value=snap) as collect:
             payload = server.preflight_payload()
             again = server.preflight_payload()
         self.assertEqual(collect.call_count, 2, "每次调用都走 collect_cached（缓存负责单飞）")
         self.assertEqual(payload, again)
+        self.assertTrue(payload["ok"], "构造的全绿快照应投影为 ok=true")
         self.assertEqual([item["key"] for item in payload["checks"]], EXPECTED_KEYS)
         self.assertEqual(payload["capabilities"], snap["capabilities"])
         self.assertEqual(payload["ui_copy"], snap["ui_copy"])
