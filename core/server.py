@@ -421,12 +421,18 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
                     bpf=res.get("bpf", ""), logger=log)
                 if fallback is not None:
                     # 降级卡也必须落盘（复审遗留 #7）：历史报告/导出里要能查到。
-                    try:
-                        fallback["report"] = report.save_degraded(fallback, REPORTS)
-                        log(f"[提示] 降级结论报告已生成："
-                            f"{fallback['report']['markdown']}")
-                    except Exception as exc:  # noqa: BLE001 落盘失败不改变降级结论
-                        log(f"[警告] 降级结论报告落盘失败：{type(exc).__name__}: {exc}")
+                    # 只落「真实卡片」：没有 kind/card_title 的结构不是本函数的产物
+                    # （测试替身 / 上游改动），写出去只会得到一份空报告污染 reports/。
+                    if isinstance(fallback, dict) and (
+                            fallback.get("kind") or fallback.get("card_title")):
+                        try:
+                            fallback["report"] = report.save_degraded(fallback, REPORTS)
+                            log(f"[提示] 降级结论报告已生成："
+                                f"{fallback['report']['markdown']}")
+                        except Exception as exc:  # noqa: BLE001 落盘失败不改变降级结论
+                            log(f"[警告] 降级结论报告落盘失败：{type(exc).__name__}: {exc}")
+                    else:
+                        log("[提示] 降级结论结构不完整，跳过落盘（界面结论不受影响）")
                     res = fallback
         with LOCK:
             if res.get("ok"):

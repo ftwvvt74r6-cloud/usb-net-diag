@@ -4114,20 +4114,20 @@ Returns:
 | `BodyTooLarge` | class | 186 | ✅ |
 | `doctor_cached` | function | 265 | ✅ |
 | `log` | function | 319 | ✅ |
-| `start_job` | function | 476 | ✅ |
-| `report_index` | function | 536 | ✅ |
-| `request_elevation` | function | 570 | ✅ |
-| `engine_info` | function | 603 | ✅ |
-| `passive_start` | function | 646 | ✅ |
-| `passive_status` | function | 681 | ✅ |
-| `link_actions` | function | 755 | ✅ |
-| `Handler` | class | 802 | ✅ |
-| `Handler.log_message` | method | 848 | ✅ |
-| `Handler.do_GET` | method | 986 | ✅ |
-| `Handler.do_POST` | method | 1003 | ✅ |
-| `DiagServer` | class | 1214 | ✅ |
-| `create_server` | function | 1226 | ✅ |
-| `main` | function | 1273 | ✅ |
+| `start_job` | function | 482 | ✅ |
+| `report_index` | function | 542 | ✅ |
+| `request_elevation` | function | 576 | ✅ |
+| `engine_info` | function | 609 | ✅ |
+| `passive_start` | function | 652 | ✅ |
+| `passive_status` | function | 687 | ✅ |
+| `link_actions` | function | 761 | ✅ |
+| `Handler` | class | 808 | ✅ |
+| `Handler.log_message` | method | 854 | ✅ |
+| `Handler.do_GET` | method | 992 | ✅ |
+| `Handler.do_POST` | method | 1009 | ✅ |
+| `DiagServer` | class | 1220 | ✅ |
+| `create_server` | function | 1232 | ✅ |
+| `main` | function | 1279 | ✅ |
 
 ### `touch`
 
