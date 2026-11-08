@@ -1,8 +1,8 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.2.0`；写作基线 `main` = `ad6ae46`（PR #16 合并后）。
-> **时效性**：文中数字是 2026-11-07 在本仓库实测的；合并新 PR 后 sha 会变，以
+> **对齐版本**：`VERSION` = `0.2.0`；写作基线 `main` = `d6a10c4`（PR #25 合并后）。
+> **时效性**：文中数字是 2026-11-08 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
 > fork 后没有 `tools/` 时，用系统 `python`（同样只用标准库）。
@@ -67,6 +67,7 @@ MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`sca
 | L4 | TCP 建连无响应、握手期 RST、重传、乱序、零窗口/窗口满 | 严重/警告；重传方向需 dup-ACK 证据 |
 | L7 | DNS 失败率/耗时、HTTP 5xx/耗时、TLS alert | 严重/警告；按「服务端慢 vs 网络慢」区分 |
 | 观察 | 高危端口外联、明文凭证 | 只列事实，不抢主判定 |
+| 基线 | 实时抓包时每 5 秒一轮轻量探针（网关 ICMP / 目标 TCP SYN） | 「探针基线」区块 + 两侧对照；探针流量双过滤隔离（见 `docs/shadow-probe.md`） |
 
 另有「通信观察（被动监听）」（Scapy/tshark 抓包 → 会话表）与「连通与速度测试（链路体检）」（对单个 TCP 目标按协议
 自适应探测 DNS/TCP/TLS/HTTP/SMB/RDP/SSH/Opaque TCP 分段耗时）。
@@ -75,7 +76,8 @@ MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`sca
 
 | 限制 | 事实 / 原因 |
 |---|---|
-| **UDP 丢包率** | UDP 无序号，单点抓包算不出丢包率；只有 DNS 超时等协议感知信号，或主动探测能间接判断（`docs/plan-review.md` §3.3） |
+| **UDP 丢包率** | UDP 无序号，单点抓包算不出丢包率；只有 DNS 超时等协议感知信号，或主动探测能间接判断（`docs/plan-review.md` §3.3）；影子探测给的是「探针自己的丢包」不是业务 UDP 丢包 |
+| **探针覆盖范围** | 探针只测网关 / 业务目标（DNS 角色待 `winapi.dns_servers()` 落地）；不测中间每跳（MTR 未实现）；被动监听与离线分析**恒不发包** |
 | **全网体检 / 单目标诊断** | 依赖 Npcap 驱动 + 管理员权限；未提权只能分析抓包文件（`start.bat` 会降级，不崩） |
 | **通信观察（被动监听）** | 同上，且要有真实流量；CI/沙箱环境会 skip |
 | **TLS 自检（selftest）** | 需要本机 `openssl` 生成自签证书；没有就 skip，不伪装通过 |
@@ -141,6 +143,10 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    测试/部分包模块用仓库根做包导入（`from core.version import read_version`）。
    `core/config.py` 用相对导入（`from .platform import paths`），只能包导入；
    新增模块要么同时兼容两套（参考 `analyzer.py` 顶部的 try/except），要么明确限制调用方式。
+5. **影子探测只在实时路径**：`capture_live(shadow=True)` 起 `ShadowProber` 线程，
+   `run_scan` 把账本聚合成 `meta["probe_baseline"]`；离线分析（`--pcap`）与
+   `core/passive.py` **都不引用 `core/pathprobe.py` 的发送逻辑**。探针隔离靠
+   「抓包 BPF + 分析 `-Y`」双过滤，细节见 `docs/shadow-probe.md`。
 
 ### 3.2 契约：哪些是内部结构，哪些是对外契约
 
@@ -251,7 +257,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    当前 demo 期望：`verdict.level=严重`、`layer=L4 传输层｜TCP`、严重 3 / 警告 5。
 2. **`reports/` 零改动**：`reports/faults_demo.md` 与 `.json` 是入库快照；测试/实验用
    `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 235 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+3. **测试只增不减**：当前 405 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -342,7 +348,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 235，但 **skip 数会变成 19**（本机完整环境是 skipped=2）。这是正常现象，不是失败。
+> 测试数为 405，但 **skip 数会变成 23**（本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
 
@@ -386,14 +392,14 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 235 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 405 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
 
 | 步骤 | 命令 | 作用 |
 |---|---|---|
-| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 204/204 = 100.0%（29 模块） |
+| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 257/257 = 100.0%（30 模块） |
 | 文档与源码同步 | `python scripts/gen_api_doc.py` + `git diff --exit-code docs/api-reference.md docs/docstring-gaps.md` | 禁止手改生成文档 |
 
 ### 7.3 CI 里会 skip 什么
@@ -414,7 +420,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 ---
 
-## 8. 代码地图（`core/` 28 个 .py + 外围）
+## 8. 代码地图（`core/` 29 个 .py + 外围）
 
 > 每个文件一句话职责。行数/签名细节看 `docs/api-reference.md`（自动生成，签名永远是真的）。
 
@@ -446,7 +452,8 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/extract/fields.py` | tshark 字段清单 + 原始字符串 → Python 值（`"1,1"`、`True`、空串） |
 | `core/extract/aggregate.py` | 逐行聚合 → `Features`（纯函数，不 import analyzer） |
 | `core/logstore.py` | 唯一日志出口：日文件、裁剪、`env.json`、`runs/`、`crashes/`、异常钩子 |
-| `core/passive.py` | 通信观察（被动监听）：Scapy 优先/tshark 兜底，按会话聚合 + 端口/首包识别协议 |
+| `core/passive.py` | 通信观察（被动监听）：Scapy 优先/tshark 兜底，按会话聚合 + 端口/首包识别协议（**只听不发**） |
+| `core/pathprobe.py` | 影子探测：目标发现、探针收发（scapy）、账本、排除 BPF/显示过滤、按角色聚合基线；`run()`（MTR）留后续 PR |
 | `core/platform/__init__.py` | 平台适配层包标记（只做 OS 交互，不含业务判断） |
 | `core/platform/paths.py` | 目录约定与根目录探测（`Paths`） |
 | `core/platform/winapi.py` | Windows 能力：管理员、Npcap、网卡、默认网关、DNS |
@@ -470,7 +477,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（1,451 行；无构建链、无前端框架） |
-| `tests/` | 17 个 `test_*.py`（235 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 26 个 `test_*.py`（405 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -486,8 +493,9 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `AGENTS.md` | 硬约束清单（不推 main、不改模块边界等） | ⚠️ 部分目录表是目标架构 |
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
-| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 29/204 |
+| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 30/257 |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
+| `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/log-collection.md` | 诊断包三个入口、脱敏、raw 警告 | ✅ 当前 |
 | `docs/overview.md` | 一页看懂产品与**目标**分层 | ⚠️ §2 数据流是目标架构，不是 `analyze()` 现状 |
 | `docs/START-HERE.md` | v0.1.0 的历史交接包（54 用例/骨架/COPY-MAP） | ❌ 历史，数字已过期 |
@@ -529,7 +537,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 235 条，OK (skipped=19)
+python -m unittest discover -s tests        # 期望 405 条，OK (skipped=23)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -623,7 +631,7 @@ python -m unittest discover -s tests        # 期望 235 条，OK (skipped=19)
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 235 tests ... OK (skipped=19)
+# 期望：Ran 405 tests ... OK (skipped=23)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：
