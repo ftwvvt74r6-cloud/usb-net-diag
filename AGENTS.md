@@ -36,7 +36,7 @@
 | `core/history.py` | sqlite3 基线库 | 新增 |
 | `core/analyzer.py` | 现有采集+聚合+规则（待拆） | 只允许**新增**字段/函数，不许删 |
 | `core/probe.py` | 协议自适应体检（946 行，核心差异化） | ⛔ 不许重写，只允许搬路径/加类型 |
-| `core/passive.py` | 被动监听（483 行，scapy 唯一使用者） | ⛔ 同上 |
+| `core/passive.py` | 通信观察（被动监听，483 行，scapy 唯一使用者） | ⛔ 同上 |
 | `ui/index.html` | 单文件控制台 | 拆分前不要动结构 |
 | `mcp/wireshark-mcp/server.py` | MCP stdio 服务 | 加工具可以，改已有工具名/参数名不行 |
 | `skills/network-diagnose/SKILL.md` | 工作流固化 | 改流程要同步 `README.md` |
@@ -119,7 +119,7 @@ tools\python\python.exe scripts\gen_api_doc.py --check 0.95  REM 合格率 <95% 
 |---|---|---|
 | `tools/`（约 360MB 便携环境） | 不存在 | 任何断言 `tools/...` 存在或可执行的测试都会红 |
 | `tshark.exe`（PATH 或 Program Files） | 未安装 Wireshark | 依赖真抓包的测试必须 `skipUnless`，否则红 |
-| 管理员权限 + Npcap | 没有 | 实时抓包、被动监听不可用 |
+| 管理员权限 + Npcap | 没有 | 实时抓包、通信观察（被动监听）不可用 |
 | Windows + `core.autocrlf=true` | Linux，两端都是 LF | 生成脚本必须**固定写 LF**，否则产物不可复现 |
 | `logs/` `reports/` `captures/` 历史产物 | 不存在 | 测试不要依赖历史文件 |
 

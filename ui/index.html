@@ -1879,9 +1879,8 @@ async function poll() {
       const res = s.result || {};
       stopRun();
       if (RUN_MODE) setMode(RUN_MODE);
-      if (res.degraded) renderDegraded(res);
-      else render(res);
-      appendLog("任务完成：结果已渲染到右侧", "s");
+      if (res.degraded) renderDegraded(res, s.link_actions || []);
+      else render(res, s.link_actions || []);
     } else if (s.state === "error") {
       const why = s.error || "未知错误";
       RUN_MODE = s.mode || RUN_MODE;
