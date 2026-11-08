@@ -12,6 +12,8 @@ API:
   GET  /api/report?path=    读取报告文件
   GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
+  GET  /api/selfcheck       首屏准备检查（五项只读环境检查 + 首次运行标记）
+  POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
   POST /api/ai/test         用当前或临时参数测试连通性
@@ -61,6 +63,7 @@ import passive  # noqa: E402
 import pathprobe  # noqa: E402
 import probe  # noqa: E402
 import report  # noqa: E402
+import selfcheck  # noqa: E402
 import tshark  # noqa: E402
 import verdict  # noqa: E402
 import version  # noqa: E402
@@ -1195,6 +1198,10 @@ class Handler(BaseHTTPRequestHandler):
                                "idle_exit_min": SERVER.get("idle_exit_min", 0),
                                "auto_quit": bool(SERVER.get("idle_exit_min", 0)),
                                "admin": tshark.is_admin(),
+                               # 加法字段：首屏自检与权限卡文案随应用信息一起下发，
+                               # 前端不另存一份中文（文案唯一来源仍是 copy/zh-CN.json）。
+                               "first_run": selfcheck.is_first_run(),
+                               "ui_copy": {"startup": selfcheck.ui_copy()},
                                "auto_open_browser": bool(cfg.get("auto_open_browser", True))})
         if path in ("/", "/index.html"):
             f = UI_DIR / "index.html"
@@ -1249,6 +1256,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(evidence_payload(latest, full=full, fmt=fmt))
         if path == "/api/doctor":
             return self._json(doctor_cached())
+        if path == "/api/selfcheck":
+            # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程。
+            return self._json(selfcheck.collect())
         if path == "/api/passive":
             return self._json(passive_status())
         if path == "/api/ai":
@@ -1280,6 +1290,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/elevate":
             self._discard_body()
             return self._json(request_elevation())
+        if parsed.path == "/api/selfcheck/ack":
+            self._discard_body()
+            # 写失败（U 盘只读 / 目录被锁）返回 ok:false 但绝不阻塞界面。
+            return self._json(selfcheck.ack_first_run())
 
         if parsed.path == "/api/ai":
             payload = self._read_json()

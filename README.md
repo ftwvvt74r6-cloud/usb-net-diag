@@ -135,7 +135,8 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 ### ② 公开 lite 包（需自装 Python / Wireshark）
 
 从 [Releases](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.2.0) 下载
-`NetDiag-0.2.0-lite.zip`（142 个受控文件，669,357 B），解压后：
+`NetDiag-0.2.0-lite.zip`（142 个受控文件，669,357 B），解压后**推荐直接双击 `NetDiag.exe`**
+（首次运行先做五项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 
 ```bat
 自检.bat

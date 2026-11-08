@@ -14,6 +14,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -126,6 +127,32 @@ def find_running() -> str:
         except Exception:  # noqa: BLE001
             continue
     return ""
+
+
+def first_free_port(base: int = 8787, count: int = 10) -> int | None:
+    """在 ``127.0.0.1`` 上找一个当前能绑定的端口（只探测，不占用）。
+
+    与 :func:`find_running` 互补：先看有没有本程序实例，再看端口预算。实现只做
+    ``bind`` / ``close``，不监听、不发包；端口被占或处于 ``TIME_WAIT`` 时继续试下一个。
+    首屏自检与 ``server.create_server`` 用同一段 8787~8796，所以这里默认也是 10 个。
+
+    Args:
+        base: 起始端口，默认 8787。
+        count: 顺延个数，默认 10（8787~8796）；非正数时返回 ``None``。
+
+    Returns:
+        int | None: 第一个可绑定的端口号；全部被占用时 ``None``。
+    """
+    for port in range(int(base), int(base) + max(0, int(count))):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            continue
+        finally:
+            sock.close()
+    return None
 
 
 # --------------------------------------------------------------------- 主流程

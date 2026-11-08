@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**31** 个（有模块说明 31 个）
-- 公开符号：**281** 个（有 docstring 281 个，合格 281 个）
+- 扫描模块：**32** 个（有模块说明 32 个）
+- 公开符号：**292** 个（有 docstring 292 个，合格 292 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -308,12 +308,13 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `redirect_output` | function | 35 | ✅ |
-| `msgbox` | function | 53 | ✅ |
-| `is_admin` | function | 70 | ✅ |
-| `relaunch_as_admin` | function | 82 | ✅ |
-| `find_running` | function | 105 | ✅ |
-| `main` | function | 132 | ✅ |
+| `redirect_output` | function | 36 | ✅ |
+| `msgbox` | function | 54 | ✅ |
+| `is_admin` | function | 71 | ✅ |
+| `relaunch_as_admin` | function | 83 | ✅ |
+| `find_running` | function | 106 | ✅ |
+| `first_free_port` | function | 132 | ✅ |
+| `main` | function | 159 | ✅ |
 
 ### `redirect_output`
 
@@ -391,6 +392,27 @@ def find_running() -> str
 
 Returns:
     str: 已运行实例的界面地址（如 ``http://127.0.0.1:8787/``）；没有则空串。
+```
+
+### `first_free_port`
+
+```python
+def first_free_port(base: int=8787, count: int=10) -> int | None
+```
+
+```text
+在 ``127.0.0.1`` 上找一个当前能绑定的端口（只探测，不占用）。
+
+与 :func:`find_running` 互补：先看有没有本程序实例，再看端口预算。实现只做
+``bind`` / ``close``，不监听、不发包；端口被占或处于 ``TIME_WAIT`` 时继续试下一个。
+首屏自检与 ``server.create_server`` 用同一段 8787~8796，所以这里默认也是 10 个。
+
+Args:
+    base: 起始端口，默认 8787。
+    count: 顺延个数，默认 10（8787~8796）；非正数时返回 ``None``。
+
+Returns:
+    int | None: 第一个可绑定的端口号；全部被占用时 ``None``。
 ```
 
 ### `main`
@@ -4718,33 +4740,215 @@ Returns:
     object: 与入参同构的新对象；字符串值已按 :func:`mask_text` 脱敏。
 ```
 
+## `core/selfcheck.py`
+
+**职责**：首屏「准备检查」的五项只读环境检查 + 首次运行标记（C2）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `ui_copy` | function | 72 | ✅ |
+| `marker_path` | function | 85 | ✅ |
+| `is_first_run` | function | 98 | ✅ |
+| `ack_first_run` | function | 113 | ✅ |
+| `check_python` | function | 187 | ✅ |
+| `check_tshark` | function | 206 | ✅ |
+| `check_npcap` | function | 245 | ✅ |
+| `check_port` | function | 258 | ✅ |
+| `check_admin` | function | 286 | ✅ |
+| `collect` | function | 299 | ✅ |
+
+### `ui_copy`
+
+```python
+def ui_copy() -> dict
+```
+
+```text
+返回首屏自检 / 权限卡需要的 ``startup`` 文案表。
+
+Returns:
+    dict: ``core/copy/zh-CN.json`` 的 ``startup`` section；读取失败时 ``{}``。
+        界面把它挂在 ``ui_copy.startup`` 上取用，不在 HTML 里再抄一份长文案。
+```
+
+### `marker_path`
+
+```python
+def marker_path(root: Path | None=None) -> Path
+```
+
+```text
+首次运行标记文件的绝对路径。
+
+Args:
+    root: 仓库根目录；``None`` 表示本文件所在 ``core/`` 的上一级。测试传临时目录，
+        避免写真实 ``config/``。
+
+Returns:
+    Path: ``<root>/config/ui-first-run.json``（文件可能还不存在）。
+```
+
+### `is_first_run`
+
+```python
+def is_first_run(root: Path | None=None) -> bool
+```
+
+```text
+是否首次运行（标记文件不存在即首次）。
+
+Args:
+    root: 仓库根目录；``None`` 用运行时仓库根。
+
+Returns:
+    bool: 标记存在 → ``False``；不存在或读取失败 → ``True``（宁可直接显示检查）。
+```
+
+### `ack_first_run`
+
+```python
+def ack_first_run(root: Path | None=None) -> dict
+```
+
+```text
+写入首次运行标记（用户看过首屏检查后调用）。
+
+写入失败**不是错误**：U 盘可能只读、目录可能被安全软件锁定。此时返回
+``{"ok": False, "writable": False}`` 但绝不抛异常，界面照常进入主界面，
+只是下次启动会再显示一次检查。
+
+Args:
+    root: 仓库根目录；``None`` 用运行时仓库根。测试传临时目录。
+
+Returns:
+    dict: 成功 ``{"ok": True, "writable": True, "path": "config/ui-first-run.json"}``；
+    失败 ``{"ok": False, "writable": False, "error": "...", "path": ...}``。
+```
+
+### `check_python`
+
+```python
+def check_python() -> dict
+```
+
+```text
+检查 Python 版本是否 ≥ 3.11（实时抓包与离线分析都依赖它）。
+
+Returns:
+    dict: 通过时 ``detail`` 形如 ``Python 3.11.9（64 位，便携运行时）``；
+        版本过低时 ``ok=False`` 并给出升级入口（Python 官网）。
+```
+
+### `check_tshark`
+
+```python
+def check_tshark() -> dict
+```
+
+```text
+检查 tshark 是否存在，并读一次版本（失败时给 Wireshark 下载页与网卡命令）。
+
+Returns:
+    dict: 找到时 ``detail`` 含版本号（如 ``已找到 tshark 4.7.4``）；
+        找不到时 ``ok=False``、``fix_url`` 指向 Wireshark 下载页、
+        ``fix_command`` 是列出网卡的 ``--interfaces`` 命令。
+```
+
+### `check_npcap`
+
+```python
+def check_npcap() -> dict
+```
+
+```text
+检查 Npcap 抓包驱动是否就绪（离线分析不需要它，但实时抓包必须要）。
+
+Returns:
+    dict: 未安装时 ``ok=False``，``fix_url`` 指向 Npcap 官网下载页；
+        已安装时 ``detail`` 说明驱动就绪。
+```
+
+### `check_port`
+
+```python
+def check_port() -> dict
+```
+
+```text
+检查 8787~8796 是否有可用端口，或已有本程序实例在跑。
+
+两件事都复用 :mod:`app` 的既有实现：:func:`app.find_running` 探测本程序
+实例（读 ``/api/ping``），:func:`app.first_free_port` 只做 bind/close。
+已有实例时不需要空闲端口 —— 启动器会直接打开那个地址。
+
+Returns:
+    dict: 已有实例 ``detail`` 带地址；有空闲端口 ``detail`` 带端口号；
+        两者都没有 ``ok=False``，``fix_command`` 是查看端口占用的命令。
+```
+
+### `check_admin`
+
+```python
+def check_admin() -> dict
+```
+
+```text
+检查当前进程是否管理员（实时抓包 / 通信观察的前提）。
+
+Returns:
+    dict: 是管理员时 ``detail`` 说明可直接抓包；不是管理员时 ``ok=False``、
+        ``fix_kind="elevate"``（界面显示「以管理员身份重启」按钮），
+        但离线分析与连通与速度测试不受影响。
+```
+
+### `collect`
+
+```python
+def collect(root: Path | None=None) -> dict
+```
+
+```text
+跑完五项检查并组装 ``GET /api/selfcheck`` 的响应。
+
+纯读：不写标记文件、不请求 UAC、不启动抓包子进程。``first_run`` 只读
+``<root>/config/ui-first-run.json`` 是否存在。
+
+Args:
+    root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
+
+Returns:
+    dict: 键 ``ok``（五项是否全过）/ ``version``（``VERSION`` 文件）/
+        ``first_run``（标记不存在）/ ``checks``（固定 5 项，顺序为
+        :data:`CHECK_KEYS`）/ ``ui_copy``（``{"startup": {...}}`` 文案）。
+```
+
 ## `core/server.py`
 
 **职责**：本地 Web UI + HTTP API（仅监听 127.0.0.1，不对外暴露）。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 128 | ✅ |
-| `request_quit` | function | 133 | ✅ |
-| `cleanup_pid` | function | 181 | ✅ |
-| `BodyTooLarge` | class | 191 | ✅ |
-| `doctor_cached` | function | 270 | ✅ |
-| `log` | function | 366 | ✅ |
-| `evidence_payload` | function | 462 | ✅ |
-| `start_job` | function | 626 | ✅ |
-| `report_index` | function | 687 | ✅ |
-| `request_elevation` | function | 721 | ✅ |
-| `engine_info` | function | 760 | ✅ |
-| `passive_start` | function | 803 | ✅ |
-| `passive_status` | function | 838 | ✅ |
-| `link_actions` | function | 912 | ✅ |
-| `Handler` | class | 959 | ✅ |
-| `Handler.log_message` | method | 1005 | ✅ |
-| `Handler.do_GET` | method | 1143 | ✅ |
-| `Handler.do_POST` | method | 1160 | ✅ |
-| `DiagServer` | class | 1388 | ✅ |
-| `create_server` | function | 1400 | ✅ |
-| `main` | function | 1447 | ✅ |
+| `touch` | function | 131 | ✅ |
+| `request_quit` | function | 136 | ✅ |
+| `cleanup_pid` | function | 184 | ✅ |
+| `BodyTooLarge` | class | 194 | ✅ |
+| `doctor_cached` | function | 273 | ✅ |
+| `log` | function | 369 | ✅ |
+| `evidence_payload` | function | 465 | ✅ |
+| `start_job` | function | 629 | ✅ |
+| `report_index` | function | 690 | ✅ |
+| `request_elevation` | function | 724 | ✅ |
+| `engine_info` | function | 763 | ✅ |
+| `passive_start` | function | 806 | ✅ |
+| `passive_status` | function | 841 | ✅ |
+| `link_actions` | function | 915 | ✅ |
+| `Handler` | class | 962 | ✅ |
+| `Handler.log_message` | method | 1008 | ✅ |
+| `Handler.do_GET` | method | 1146 | ✅ |
+| `Handler.do_POST` | method | 1163 | ✅ |
+| `DiagServer` | class | 1402 | ✅ |
+| `create_server` | function | 1414 | ✅ |
+| `main` | function | 1461 | ✅ |
 
 ### `touch`
 
