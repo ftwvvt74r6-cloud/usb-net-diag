@@ -137,11 +137,10 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 
 ### ② 公开 lite 包（lite 包要求）
 
-当前已发布的是 **v0.3.1**：从 [Release v0.3.1](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.1)
-下载 `NetDiag-0.3.1-lite.zip`（**174 个文件 / 1,031,112 B / 解压后 2,771,469 B /
-SHA-256 `09fc93f463c82724a6a1a5ceabe85ea76b438e3549eee2e51303a7bc87ac8d53`**，同页附
-`SHA256SUMS.txt`）。**v0.3.2 的 Release 链接、包大小与 SHA-256 在发布后回写本文件**，
-本仓库当前只做版本进位与文档同步。解压后**推荐直接双击 `NetDiag.exe`**
+当前已发布的是 **v0.3.2**：从 [Release v0.3.2](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.2)
+下载 `NetDiag-0.3.2-lite.zip`（**187 个文件 / 1,199,811 B / 解压后 3,301,772 B /
+SHA-256 `da0c69b8b05eb52517c0550040cb5feef7d19b2580a335ed17a60f8a898e2e0e`**，同页附
+`SHA256SUMS.txt`）。解压后**推荐直接双击 `NetDiag.exe`**
 （启动时显示 splash 并做六项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 
 ```bat
@@ -196,7 +195,7 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 | 注释覆盖率 | **314 / 314 = 100.0%**，33 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
 | 判定可复现 | demo + 9 个确定性样本 = **20 / 20** 个产物逐字节相同 | `captures/faults_demo.pcap` + `scaffold/tests/fixtures/gen_pcap.py` |
 | API 契约 | **13 个 POST + 16 个 GET = 29 个 API** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
-| 发布包 | v0.3.1 lite（当前已发布）：**174 个文件 / 1,031,112 B**（解压后 2,771,469 B）；v0.3.2 发布后回写 | [`docs/release-v0.3.1.md`](docs/release-v0.3.1.md) §2–§3 |
+| 发布包 | v0.3.2 lite（当前已发布）：**187 个文件 / 1,199,811 B**（解压后 3,301,772 B） | [`docs/release-v0.3.2.md`](docs/release-v0.3.2.md) §2–§3 |
 | MCP | **7** 个工具，零第三方依赖 | [`mcp/wireshark-mcp/server.py`](mcp/wireshark-mcp/server.py) 的 `TOOLS` |
 | 运行时依赖 | 核心 **0 个 pip 依赖**（仅标准库） | 源码 import 检查；CI 不装第三方包 |
 
@@ -251,13 +250,14 @@ NetDiag/
 | [`docs/conclusion-boundary.md`](docs/conclusion-boundary.md) | 结论边界：`confidence` / `basis` / `coverage` / `not_covered` 语义、置信三档、六出口一致 |
 | [`docs/licensing.md`](docs/licensing.md) | 第三方许可、公开/内部分发边界 |
 | [`docs/api-reference.md`](docs/api-reference.md) | 自动生成的公开符号与签名（禁止手改） |
-| [`docs/release-v0.3.1.md`](docs/release-v0.3.1.md) | v0.3.1 发布资产、包内容、构建自检、红线证据与干净 checkout |
+| [`docs/release-v0.3.2.md`](docs/release-v0.3.2.md) | v0.3.2 发布资产、包内容、构建自检、红线证据与干净 checkout |
+| [`docs/release-v0.3.1.md`](docs/release-v0.3.1.md) | v0.3.1 发布资产、包内容、构建自检、红线证据与干净 checkout（历史） |
 | [`docs/release-v0.3.0.md`](docs/release-v0.3.0.md) | v0.3.0 发布资产、包内容、构建自检与红线证据（历史） |
 | [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) | v0.2.0 发布资产、包内容与红线证据（历史） |
 
 ## Roadmap
 
-- [x] **v0.3.2**：启动 splash / 双击只开一个浏览器 / 右侧统一面板 / 左侧减负 / 缺组件不阻塞 / 文本通用化 / 逐跳 tracert 降级 / 页面状态显式化
+- [x] **v0.3.2**（2026-11-09 已发布 lite）：启动 splash / 双击只开一个浏览器 / 右侧统一面板 / 左侧减负 / 缺组件不阻塞 / 文本通用化 / 逐跳 tracert 降级 / 页面状态显式化
 - [x] **v0.3.1**：结论与边界（`confidence` / `basis` / `coverage` / `not_covered`，六出口一致）/ E 批次
 - [x] **v0.3.0**：UI 2.0 / B2 命名与反馈 / B3 清尾修复与联动 / D+ 路径剖面与取证 / C 启动体验（`NetDiag.exe`、按需提权、首屏自检）
 - [x] **v0.2.0**：四层定位、方向归因、证据充分性、诊断包脱敏、品牌与发布

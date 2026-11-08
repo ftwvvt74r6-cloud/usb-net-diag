@@ -73,6 +73,7 @@ PACKAGE_EXCLUDE = (
     "docs/release-v0.2.0.md",
     "docs/release-v0.3.0.md",
     "docs/release-v0.3.1.md",
+    "docs/release-v0.3.2.md",
 )
 #: 所有模式都必须存在的入口 / 文档 / 示例。
 REQUIRED_COMMON = (
