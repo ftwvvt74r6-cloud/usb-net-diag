@@ -629,13 +629,16 @@
      也只在自己那一格内换行，不再推动别人。 */
   .appbar .brand{flex:0 0 auto}
   .appright{flex:0 1 auto;min-width:0;flex-wrap:nowrap}
+  /* 关键：徽章自己绝不能换行。换行会让「探测中」这类临时徽章掉到第二行、
+     被 56px 的顶栏裁掉一半，同时把整条顶栏撑高——这正是抖动观感的来源。 */
   #badges{flex:1 1 auto;min-width:0;justify-content:flex-end;
-    overflow:hidden;align-content:center}
+    flex-wrap:nowrap;overflow:hidden;align-content:center}
+  #badges .badge{flex:0 0 auto}
   /* 按钮按内容定宽：徽章再多也不许把按钮压窄 1~3px */
   .appright>button{flex:none}
-  /* 窄屏不让徽章区抢走按钮的空间：徽章自己收缩，按钮位置不变 */
+  /* 窄屏优先保住按钮，徽章之间收紧到 4px，尽量让 5 个常态徽章仍在一行内 */
   @media (max-width:1150px){
-    #badges{min-width:0}
+    #badges{min-width:0;gap:var(--sp-1)}
   }
 
   /* ---------------- 2. 阅读宽度 ----------------

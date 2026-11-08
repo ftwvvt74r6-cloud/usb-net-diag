@@ -158,5 +158,41 @@ class FocusAndModalTest(unittest.TestCase):
         self.assertIn("!e.shiftKey && document.activeElement === last", HTML)
 
 
+class AppBarStabilityTest(unittest.TestCase):
+    """顶栏不许因为「徽章多了一个」而重排。
+
+    原缺陷：``.appright`` 与 ``#badges`` 都是 ``flex-wrap:wrap``。多出一个
+    临时徽章（探测中 / 分析中）时，徽章换到第二行被 56px 的顶栏裁掉一半，
+    同时把按钮组挤动 1~3px。屏幕上读起来就是顶栏在「抖」。
+    断言取**层叠之后**的值，所以基准规则里写着 wrap 也不算过——
+    只要后面有一条更晚的 nowrap 把它盖掉即可（这正是本次修法）。
+    """
+
+    @staticmethod
+    def _last_decl(selector: str, prop: str) -> str | None:
+        """按出现顺序取某个选择器最后一条声明的 prop 值（够用的层叠模拟）。"""
+        stripped = re.sub(r"/\*.*?\*/", "", CSS, flags=re.S)
+        value = None
+        for m in re.finditer(r"([^{}]+)\{([^}]*)\}", stripped):
+            if selector not in [s.strip() for s in m.group(1).split(",")]:
+                continue
+            hit = re.search(rf"(?:^|;)\s*{prop}\s*:\s*([^;]+)", m.group(2))
+            if hit:
+                value = hit.group(1).strip()
+        return value
+
+    def test_badges_never_wrap(self):
+        self.assertEqual(self._last_decl("#badges", "flex-wrap"), "nowrap",
+                         "徽章换行 = 第二行被顶栏裁掉 + 按钮位移，必须 nowrap")
+
+    def test_badge_container_absorbs_width_not_buttons(self):
+        self.assertEqual(self._last_decl(".appright", "flex-wrap"), "nowrap")
+        self.assertEqual(self._last_decl(".appbar .brand", "flex"), "0 0 auto",
+                         "品牌区一旦参与收缩，徽章变多时 logo 文案会被压出省略号")
+
+    def test_buttons_keep_intrinsic_width(self):
+        self.assertRegex(CSS, r"\.appright>button\{[^}]*flex:none")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
