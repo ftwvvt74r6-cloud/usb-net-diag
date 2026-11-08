@@ -19,7 +19,7 @@
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-<VERSION>-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
 | **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
 
-> `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.0`）。
+> `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.1`）。
 > 表中 **lite 行是 v0.3.0 实测**（2026-11-08 发布件：169 文件 / 974,570 B / 解压后 2,590,174 B）；
 > **internal 两行仍是 v0.2.0 历史实测**（v0.3.0 未重建内部包，不作为 v0.3.0 的预期值）。
 > v0.3.0 的精确条目数 / 哈希 / 构建自检见 `docs/release-v0.3.0.md`。
@@ -298,7 +298,7 @@ $zip.Dispose()
 发布件先在**干净目录**生成、验证通过后再上传：
 
 ```powershell
-$V = (Get-Content VERSION).Trim()     # 当前 0.3.0
+$V = (Get-Content VERSION).Trim()     # 当前 0.3.1
 $SHA = (git rev-parse HEAD)           # tag 指向的 main HEAD（必须完整 40 位 SHA）
 
 # 1) 生成公开 lite 包到独立目录（避免 SHA256SUMS 混入内部包）

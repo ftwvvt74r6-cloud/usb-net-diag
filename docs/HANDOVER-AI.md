@@ -725,7 +725,7 @@ curl.exe -X POST http://127.0.0.1:8787/api/quit
 
 | 结果 | 结论 |
 |---|---|
-| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.3.0 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
+| **已执行的步骤**全绿，UI 能开、`/api/ping` 返回 0.3.1 | ✅ 交接成功（无 tshark 时第 2 步跳过；此时第 3 步可能没有 `logs/env.json` —— 该文件由分析入口写，没跑分析就不会生成，可先跑任一分析或直接看 `start.bat` 启动后的 `logs/app-*.log`） |
 | 测试绿但 UI 打不开 | 看 `logs/app-*.log` / `logs/diag-*.log`，先查端口占用与 `ui/index.html` |
 | demo 报告层/计数不对 | 先确认 `captures/faults_demo.pcap` 未被改（sha256 应与入库一致），再看 `rows[]` |
 | 诊断包解压乱码/缺 README | 看 `core/diagpack.py` 的 `README_NAME` 与 zip 条目名脱敏（`*` → `_`） |
