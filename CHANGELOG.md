@@ -6,7 +6,7 @@
 > 被动监听 → **通信观察**、链路体检 → **连通与速度测试**、离线分析 → **分析抓包文件**。
 > 本文件 v0.2.0 及更早的历史条目沿用当时的旧名（v0.3.0 起统一用新名），对照表见上。
 
-## v0.3.1（未发布）— E 批次 · 结论边界结构化（E1）
+## v0.3.1（未发布）— E 批次 · 结论边界结构化（E1 + E2）
 
 结论不再只有一句话：新增 `confidence` / `basis` / `coverage` / `not_covered`，
 报告、CLI JSON、诊断包内报告与取证请求单都从同一个结论边界对象渲染。
@@ -34,12 +34,32 @@
   结论边界块；7 维 / 4 字段不变。
 - **诊断包**：包内 `README.txt` 说明「报告结论含边界字段，请整块阅读」。
 
+### E2：UI 结论卡 / MCP / 六出口
+
+- **UI**：结果页新增「结论与边界」卡（正常 / 故障 / 降级 / 失败四条路径），同帧连续
+  展示「结论 → 依据 → 本次覆盖 → 明确未覆盖 → 置信等级/关键边界」，**不可折叠、
+  不默认隐藏**；「复制给二线」复制服务端渲染的整块（含报告标识）；「导出结论（含边界）」
+  下载 `.md`（同一渲染器）与 `.json`（`{meta, conclusion}`，7 键与 CLI `--json` 逐键相同）。
+  旧数据缺字段时显示「未知（原因：旧数据缺少边界字段）」+ 低（0.30），不空白。
+- **MCP**：`capture_live_packets` / `scan_network_threats` / `analyze_pcap` 返回结构化
+  JSON `{ok, conclusion, markdown, summary}`，`basis` / `coverage` / `not_covered` 为
+  outputSchema **required**；工具 description 写明「返回的结论必须连同边界字段一起读取，
+  单独展示结论视为误用」。工具名 / 参数名不变；`probe_link` / `listen_flows` 不产生
+  分层诊断结论，返回保持原样。
+- **六出口一致**：报告 `.md`/`.json`、CLI 人读/`--json`、诊断包、取证单、UI、MCP 全部
+  调用同一 `build_conclusion`；CLI 人读与 `--json` 同源（E1 已落地，E2 未改）。
+- **降级报告**：`reports/degraded_*.md|json` 也输出同一「结论与边界」整块与同一 7 键
+  对象（B1 复审修复；0 包 = 无有效样本 → 0.3/低）。
+- **测试**：新增 `tests/test_ui_conclusion.py` 与 `tests/test_mcp_conclusion.py`，
+  全套 689 → 722（E2 +30、复审 B1 +3；只增不减）。
+
 ### 声明例外
 
 - 以 v0.3.0 发布 commit `e3f2c97` 为基线，demo + 9 样本 20 个产物：
-  JSON 差异仅 verdict 块新增四键；Markdown 差异仅结论/边界相关**新增行**
-  （去掉新增行后与基线逐字节相等）。`reports/faults_demo.{md,json}` 已按新格式
-  重生成。
+  **JSON 差异 = report 载荷新增四键 + `analyze.provenance.schema_version` 2.1→2.2
+  （契约升级）**；证明 = 删除四键并把 `schema_version` 归一后逐字节相等 **20/20**。
+  Markdown 差异仅结论/边界相关**新增行**（去掉新增行后与基线逐字节相等）。
+  `reports/faults_demo.{md,json}` 已按新格式重生成。
 
 ## v0.3.0 — 2026-11-08
 

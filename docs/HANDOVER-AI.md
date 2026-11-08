@@ -292,7 +292,7 @@ core/diagnose.py --pcap x.pcap --json
    E2 只改 UI / MCP / 文档，**没有新的报告结构变化**；20/20 复核仍成立。
    重生成必须用 CLI 真跑并把 `generated_at` 归一化回基线值；测试/实验用
    `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 **719 条**（v0.3.0 基线 620；E1 结论边界 +69、E2 UI/MCP +30）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+3. **测试只增不减**：当前 **722 条**（v0.3.0 基线 620；E1 结论边界 +69、E2 UI/MCP +30、复审 B1 +3）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -383,7 +383,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 719（v0.3.0 基线 620；E1 +69、E2 +30），但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> 测试数为 722（v0.3.0 基线 620；E1 +69、E2 +30、复审 B1 +3），但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
 > （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
@@ -428,14 +428,14 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 719 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 722 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
 
 | 步骤 | 命令 | 作用 |
 |---|---|---|
-| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 298/298 = 100.0%（33 模块） |
+| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 302/302 = 100.0%（33 模块） |
 | 文档与源码同步 | `python scripts/gen_api_doc.py` + `git diff --exit-code docs/api-reference.md docs/docstring-gaps.md` | 禁止手改生成文档 |
 
 ### 7.3 CI 里会 skip 什么
@@ -518,7 +518,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（3,300+ 行；无构建链、无前端框架；首屏自检/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 34 个 `test_*.py`（719 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 34 个 `test_*.py`（722 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -593,7 +593,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 719 条，OK (skipped≈27，取决于环境)
+python -m unittest discover -s tests        # 期望 722 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -687,7 +687,7 @@ python -m unittest discover -s tests        # 期望 719 条，OK (skipped≈27�
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 719 tests ... OK (skipped≈27，取决于环境)
+# 期望：Ran 722 tests ... OK (skipped≈27，取决于环境)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：

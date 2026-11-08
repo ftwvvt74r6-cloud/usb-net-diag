@@ -179,8 +179,8 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 
 | 项目 | 实测值 | 出处 / 复现方式 |
 |---|---|---|
-| 自动化测试 | **719** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
-| 测试文件 | **34** 个（33 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
+| 自动化测试 | **722** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
+| 测试文件 | **35** 个（34 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
 | CI | **2 个 job**：Windows 语法 + 启动器契约；Ubuntu 注释覆盖率 + 文档同步 | [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) |
 | 注释覆盖率 | **302 / 302 = 100.0%**，33 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
 | 判定可复现 | demo + 9 个确定性样本 = **20 / 20** 个产物逐字节相同 | `captures/faults_demo.pcap` + `scaffold/tests/fixtures/gen_pcap.py` |
@@ -218,7 +218,7 @@ NetDiag/
 ├── ui/index.html                # 单文件控制台（无构建链、无前端框架）
 ├── mcp/wireshark-mcp/server.py  # MCP stdio 服务，7 个工具
 ├── scripts/                     # 发布打包 / 启动器编译 / API 文档生成 / 特征导出 / 图标生成
-├── tests/                       # 34 个测试文件，719 条用例
+├── tests/                       # 35 个测试文件，722 条用例
 ├── captures/faults_demo.pcap    # 首次试跑样本
 ├── reports/faults_demo.md|json  # 入库报告快照
 ├── docs/                        # 交接、API、日志、许可、构建、发布记录

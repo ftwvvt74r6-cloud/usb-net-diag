@@ -82,6 +82,11 @@
 | 中 | `CONFIDENCE_SINGLE_SIDE = 0.65` | 仅单侧证据：只有抓包无对照 / 只有一侧探针 |
 | 低 | `CONFIDENCE_INDIRECT = 0.3` | 无有效样本、`sufficiency.ok=False`、仅 ICMP 超时、采样异常（0 包或窗口 ≤0）、渲染填充失败 |
 
+> **高置信 0.9 目前只有合成用例**：真实触发需要网关 + 对端**双侧探针**同时有样本
+> （管理员权限 + Npcap，实时抓包路径）。当前真机/CI 未覆盖这条路径；本次验收的
+> 20 个离线报告产物最高为 0.65（中，无对照组），0.9/高只由注入 `probe_baseline`
+> 的单测验证。真机验证前，0.9 不得当作「已实测能力」对外宣称。
+
 约束：
 
 - **自动推导，不许人工填**。没有 `set_confidence` / `confidence_score` 之类入口；
@@ -125,6 +130,8 @@ CONFIDENCE_MEDIUM_MIN = 0.5  # 0.5 <= conf < 0.85 → 中
 - CLI 人读：打印完整报告（同一 Markdown 渲染器）；
 - 取证单 `core/evidence.py`：清单前前置同一块（md/txt/API content 同步）；
 - 诊断包：收进的报告已含结论块，README 写明「请整块阅读」；
+- 0 包降级报告 `reports/degraded_*.md|json`：md 插入同一块，json 带同一 7 键对象
+  （B1：只给结论不给边界的导出路径已修掉）；
 - UI：`/api/status` 下发 `conclusion` + 服务端预渲染的 `conclusion_text` /
   `conclusion_markdown` / `conclusion_export`，前端只排版/复制/下载；
 - MCP：`build_diagnostic_payload()` 返回 `{ok, conclusion, markdown, summary}`，
@@ -166,8 +173,8 @@ UI「复制给二线」复制的是 `render_conclusion_text(block, report_id)` �
 
 | 按钮 | 内容 |
 |---|---|
-| 导出结论（.md） | `render_conclusion_markdown(block, report_id)`：结论 + 依据 + 覆盖 + 未覆盖 + 置信/边界 + 报告标识 |
-| 导出结论（.json） | `{"meta": {"report_id", "generated_at", "pcap_name", "report"}, "conclusion": {7 键}}` |
+| 导出结论（含边界）（.md） | `render_conclusion_markdown(block, report_id)`：结论 + 依据 + 覆盖 + 未覆盖 + 置信/边界 + 报告标识 |
+| 导出结论（含边界）（.json） | `{"meta": {"report_id", "generated_at", "pcap_name", "report"}, "conclusion": {7 键}}` |
 
 `.json` 里的 `conclusion` 与 CLI `--json`、MCP 返回的 `conclusion` **逐键相同**；
 `meta` 只补报告标识/生成时间/抓包文件名，不引入第二套结论字段。
@@ -217,6 +224,15 @@ UI `conclusionData()` 返回：
 `{"headline": <降级标题>}`，不伪造 level/points；置信度仍按「无有效样本」→
 0.3/低，`key_limit` 取低档文案。
 
+降级报告 `reports/degraded_*.md|json` 也走**同一个** `build_conclusion`：
+`render_degraded` 用 `capture` / `target` / `link` / `duration` 拼最小输入
+（标题取 `card_title`，没有时退 `headline`），md 在「一、结论」节内插入同一
+「结论与边界」整块（结论/依据/本次覆盖/明确未覆盖/置信+关键边界，同帧连续），
+json 增加同一 7 键对象（`conclusion/basis/coverage/not_covered/confidence/
+confidence_level/key_limit`）。降级结果没有 `meta`/`rows`，因此最小输入把
+`packets` 固定为 0，置信度由推导器自动落 0.3/低，**不手工写**；也绝不伪造
+`probe_baseline`（否则 0 包也可能推出高置信）。普通报告 JSON 的五块约定不变。
+
 ### 6.4 报告 JSON 的兼容边界
 
 报告 JSON 的 `verdict` 块只多 `confidence/basis/coverage/not_covered` 四个键，
@@ -247,6 +263,7 @@ UI `conclusionData()` 返回：
   copy 表写死运行时数据、模块级缓存串味、MCP 缺 required、UI 只复制结论句、
   导出只含结论、结论/边界分帧或折叠、某出口绕过 `build_conclusion`、
   MCP description 缺指定措辞。
-- 红线：demo + 9 样本 20 个报告产物，JSON 删新增四键后与 v0.3.0 基线
+- 红线：demo + 9 样本 20 个**报告五块载荷**产物，JSON 删新增四键（并归一
+  `analyze.provenance.schema_version 2.1→2.2` 这一契约升级）后与 v0.3.0 基线
   `e3f2c97` 逐字节相等；MD 去掉新增行后逐字节相等。E2 只改 UI/MCP/文档，
   **不得再改变报告/判定输出**（复核仍为 20/20）。

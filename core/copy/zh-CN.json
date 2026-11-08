@@ -624,7 +624,8 @@
     "text_confidence": "置信度：{level}（{confidence:.2f}）",
     "text_key_limit": "关键边界：{key_limit}",
     "template": "{headline}（基于 {basis_short}；{key_limit}）",
-    "basis_short": "本次抓包 {packets} 个报文、TCP 会话 {streams} 个，判定 {finding_count} 项",    "basis": {
+    "basis_short": "本次抓包 {packets} 个报文、TCP 会话 {streams} 个，判定 {finding_count} 项",
+    "basis": {
       "capture": "抓包窗口 {duration} 秒，报文 {packets} 个、TCP 会话 {streams} 个",
       "target": "诊断目标 {target}，涉及端口 {ports}",
       "probe": "探针角色 {probe_roles}：发出 {probe_sent} 个、收到 {probe_recv} 个、丢包 {probe_loss}%",
@@ -667,8 +668,8 @@
     "ui_not_covered_heading": "明确未覆盖",
     "ui_confidence_line": "置信度：{level}（{confidence:.2f}） · 关键边界：{key_limit}",
     "btn_copy": "复制给二线",
-    "btn_export_md": "导出结论（.md）",
-    "btn_export_json": "导出结论（.json）",
+    "btn_export_md": "导出结论（含边界）（.md）",
+    "btn_export_json": "导出结论（含边界）（.json）",
     "copy_ok": "已复制 ✓",
     "copy_fail": "复制失败，请手动选择文本",
     "export_fail": "导出失败：{reason}",

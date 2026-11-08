@@ -595,6 +595,84 @@ class ReportConclusionTests(unittest.TestCase):
         self.assertEqual(set(doc), {"summary", "meta", "metrics", "rows", "verdict"})
 
 
+# ---------------------------------------------------------------- B1 降级报告
+
+def _degraded_result(target: str = "10.255.255.1", duration: int = 10) -> dict:
+    """造一份与 ``diagnose.degraded_empty_capture_result`` 同形的降级结果。"""
+    return {
+        "ok": True, "degraded": True, "kind": "target_unreachable",
+        "card_title": "目标不可达",
+        "headline": "未捕获业务报文，但本地链路可达",
+        "plain": (f"抓包窗口内没有业务报文；目标 {target} 当前没有响应，"
+                  "但本机到默认网关 192.0.2.1 的链路可达。"),
+        "capture": {"target": target, "interface": "WLAN",
+                    "duration": duration, "bpf": f"host {target}", "error": ""},
+        "link": {"via": "gateway", "host": "192.0.2.1", "avg_ms": 2.0,
+                 "jitter_ms": 0.5, "loss_pct": 0.0},
+        "reasons": ["目标对 ICMP 探测没有响应"], "next_steps": ["先查路由"],
+        "at": "2026-11-08 20:00:00",
+    }
+
+
+class DegradedReportBoundaryTests(unittest.TestCase):
+    """B1：0 包降级报告也是导出路径，必须同帧输出结论+边界（E-SPEC §1-四）。"""
+
+    def setUp(self):
+        self.result = _degraded_result()
+        self.md = report.render_degraded(self.result)
+
+    def test_degraded_markdown_has_conclusion_and_five_boundary_parts(self):
+        """降级 md 同帧连续包含：结论 / 依据 / 本次覆盖 / 明确未覆盖 / 置信+边界。"""
+        start = self.md.index("### 结论与边界")
+        end = self.md.index(COPY["degraded_report"]["section_facts"])
+        block = self.md[start:end]
+        order = ["**结论**：", "**依据**", "**本次覆盖**", "**明确未覆盖**", "**置信度**"]
+        positions = [block.index(label) for label in order]
+        self.assertEqual(positions, sorted(positions), "降级结论块五要素顺序不对")
+        self.assertIn("目标不可达（基于", block, "降级结论句没有用 card_title")
+        self.assertIn("**置信度**：低（0.30）", block)
+        self.assertIn("**关键边界**：本次无有效样本或采样异常", block)
+        # 边界不是空壳：依据/覆盖/未覆盖都要有实际条目。
+        for heading in ("**依据**", "**本次覆盖**", "**明确未覆盖**"):
+            after = block[block.index(heading):]
+            self.assertRegex(after, r"\n- \S", f"{heading} 下没有条目")
+
+    def test_degraded_markdown_uses_shared_renderer_and_json_carries_same_object(self):
+        """md 整块就是 ``render_conclusion_markdown`` 的输出；json 存同一 7 键对象。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = report.save_degraded(self.result, Path(tmp))
+            md = Path(paths["markdown"]).read_text(encoding="utf-8")
+            doc = json.loads(Path(paths["json"]).read_text(encoding="utf-8"))
+        keys = ("conclusion", "basis", "coverage", "not_covered",
+                "confidence", "confidence_level", "key_limit")
+        for key in keys:
+            self.assertIn(key, doc, f"降级 json 缺结论键：{key}")
+        block = {key: doc[key] for key in keys}
+        rendered = conclusion.render_conclusion_markdown(block)
+        self.assertIn(rendered, md, "降级 md 与 json 不是同一个结论对象")
+        self.assertEqual(block["confidence"], 0.3)
+        self.assertEqual(block["confidence_level"], "低")
+        self.assertEqual(block["key_limit"], CONCL["key_limit"]["low"])
+        for key in ("basis", "coverage", "not_covered"):
+            self.assertTrue(block[key], f"{key} 为空")
+            self.assertTrue(all(isinstance(item, str) and item.strip()
+                                for item in block[key]))
+
+    def test_degraded_conclusion_facts_come_from_capture(self):
+        """facts 取 capture（target/duration），不能退回空结果或写死样本值。"""
+        res = _degraded_result(target="198.51.100.7", duration=42)
+        md = report.render_degraded(res)
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = report.save_degraded(res, Path(tmp))
+            doc = json.loads(Path(paths["json"]).read_text(encoding="utf-8"))
+        joined = "\n".join(doc["basis"] + doc["coverage"])
+        self.assertIn("抓包窗口 42 秒", joined)
+        self.assertIn("诊断目标 198.51.100.7", joined)
+        self.assertIn("本次无有效样本或采样异常", doc["conclusion"])
+        self.assertNotIn("16 秒", md)
+        self.assertNotIn("54 个报文", md)
+
+
 # ---------------------------------------------------------------- V8 CLI
 
 
