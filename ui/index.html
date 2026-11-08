@@ -107,12 +107,13 @@
   .navitem.active{background:var(--accent-soft);border-color:#dbeafe}
   .navitem.active .t{color:var(--accent-2)}
   .navitem.locked{opacity:.5;cursor:not-allowed}
-  .navitem.locked .t::after{content:" · 需管理员";font-size:9.5px;font-weight:600;
+  /* 角标文案不再写死：paintLocks() 按锁定原因写 data-lock（缺 tshark/缺 Npcap/需管理员） */
+  .navitem.locked .t::after{content:attr(data-lock);font-size:9.5px;font-weight:600;
     color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;
     padding:0 5px;margin-left:5px;white-space:nowrap}
   .navitem.locked:hover{background:#fffdf6}
   .navhead.locked{opacity:.62}
-  .navhead.locked .t::after{content:" · 需管理员";font-size:9.5px;font-weight:600;
+  .navhead.locked .t::after{content:attr(data-lock);font-size:9.5px;font-weight:600;
     color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;
     padding:0 5px;margin-left:5px;white-space:nowrap}
 
@@ -491,11 +492,21 @@
   .startup-check b{font-size:12.5px;display:block;color:var(--text)}
   .startup-check p{margin:2px 0 0;font-size:11.8px;line-height:1.6;color:var(--text-2)}
   .startup-check .fix{margin-top:5px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-  .startup-check .fix a,.startup-check .fix button{font:inherit;font-size:11.8px;color:var(--accent-2);
-    background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}
+  .startup-check .fix a,.startup-check .fix button,.startup-check .fixtext a{font:inherit;
+    font-size:11.8px;color:var(--accent-2);background:none;border:0;padding:0;cursor:pointer;
+    text-decoration:underline}
   .startup-check .fix code{font-family:var(--mono);font-size:11px;background:#eef2f7;border-radius:4px;
     padding:1px 5px;word-break:break-all}
-  #startup-msg:empty{display:none}
+  .startup-check .impact{margin:4px 0 0;font-size:11.5px;line-height:1.6;color:#92400e}
+  .startup-check .fixtext{margin:4px 0 0;font-size:11.5px;line-height:1.6;color:var(--text-2)}
+  #startup-msg:empty,#cap-msg:empty{display:none}
+  /* 能力说明卡（点击置灰项弹出）：缺什么 / 缺了会怎样 / 怎么修复 */
+  .capsec{margin:0 0 11px;font-size:12.2px;line-height:1.7;color:var(--text-2)}
+  .capsec b{display:block;font-size:10.8px;color:var(--muted);letter-spacing:.4px;
+    font-weight:800;margin-bottom:3px}
+  .capsec a{color:var(--accent-2);cursor:pointer}
+  .capsec code{font-family:var(--mono);font-size:11px;background:#eef2f7;border-radius:4px;
+    padding:1px 5px;word-break:break-all}
   .json{background:#0b1220;color:#a7f3d0;border-radius:9px;padding:10px;font:11.5px/1.55 var(--mono);
     overflow:auto;margin-top:9px;max-height:220px}
   .fname{font-family:var(--mono);font-size:11.5px}
@@ -659,9 +670,11 @@
     </nav>
 
     <div class="lockbanner hidden" id="lock-banner">
-      当前是非管理员：全网体检 / 单目标诊断 / 通信观察已置灰，<b>连通与速度测试 / 分析抓包文件照常可用</b>。
+      <span id="lock-banner-text"></span>
       <a id="lock-elevate">以管理员身份重启</a>
     </div>
+
+    <div class="msg wait hidden" id="selfcheck-note" role="status"></div>
 
     <div class="pane" id="pane-capture">
       <div class="guide" id="mode-guide"></div>
@@ -853,6 +866,7 @@
         <div id="sysinfo-ifaces"></div>
         <div class="toolbar" style="margin-top:12px">
           <button class="btn ghost" id="sysinfo-refresh">重新检测</button>
+          <button class="btn ghost" id="sysinfo-startup" data-copy="startup_open">准备检查</button>
         </div>
       </div></div>
     </div>
@@ -940,6 +954,28 @@
     <div class="mfoot">
       <button class="btn ghost" id="perm-cancel" data-copy="elevate_cancel">取消</button>
       <button class="btn" id="perm-elevate" data-copy="elevate_button">以管理员身份重启</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask hidden" id="cap-mask">
+  <div class="modal small" role="dialog" aria-modal="true" aria-labelledby="cap-title">
+    <div class="mhead">
+      <div>
+        <b id="cap-title" data-copy="disabled_title">这个功能暂时不可用</b>
+        <em id="cap-sub"></em>
+      </div>
+      <button class="xbtn" id="cap-close" title="关闭">✕</button>
+    </div>
+    <div class="mbody">
+      <p id="cap-need" class="capsec"></p>
+      <p id="cap-impact" class="capsec"></p>
+      <p id="cap-fix" class="capsec"></p>
+      <div id="cap-msg"></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="cap-recheck" data-copy="disabled_recheck">重新检测</button>
+      <button class="btn" id="cap-close2" data-copy="disabled_close">知道了</button>
     </div>
   </div>
 </div>
@@ -1213,6 +1249,9 @@ const FORM_FIELDS = [
 let UI_COPY = {};          // copy/zh-CN.json 的 startup section（由 /api/selfcheck 下发）
 let CONCLUSION_COPY = {};  // copy/zh-CN.json 的 conclusion section（由 /api/status 下发）
 let STARTUP_DATA = null;   // 最近一次 /api/selfcheck 结果（重新检测时复用）
+let BOOT_STARTUP = null;   // /api/app 已下发的同一份检查结果（boot 只跑一次全套自检）
+let CAPS = null;           // 能力矩阵（/api/selfcheck 或 /api/app）；null = 旧后端，退回仅管理员锁
+let CHECKS = [];           // 最近一次五项检查（能力说明卡按 key 取 impact/fix_url）
 let FORM_CACHE = null;     // 最近一次读/写的表单快照
 
 /* ---------- 文案 / 首次运行 / 表单（C2） ---------- */
@@ -1351,12 +1390,44 @@ function setStartupMsg(html, cls) {
   box.innerHTML = html ? '<div class="msg ' + (cls || "wait") + '">' + html + '</div>' : "";
 }
 
+function setSelfcheckNote(text) {
+  /* 轻提示：selfcheck 请求失败时不改锁，只告诉用户「能力状态可能不准」（S5）。 */
+  const box = $("#selfcheck-note");
+  if (!box) return;
+  box.textContent = text || "";
+  box.classList.toggle("hidden", !text);
+}
+
+function checkByKey(key) {
+  return (CHECKS || []).find((c) => c && c.key === key) || null;
+}
+
+function fixTextFor(key) {
+  /* copy 表里的 fix_* 已带「详见 docs/startup.md」；界面另有可点击文档链接，
+     显示时去掉重复的那半句（来源仍是 copy 表，不在这里另写文案）。 */
+  return String(UI_COPY["fix_" + String(key || "")] || "")
+    .replace(/[；;]?\s*详见\s*docs\/startup\.md/g, "");
+}
+
+function startupDocLink() {
+  /* 文档链接来自 copy 表（docs_url）；没配时退回接口下发的相对 doc_url，绝不自己编 URL。 */
+  const url = UI_COPY.docs_url || (checkByKey("tshark") || {}).doc_url || "";
+  if (!url) return "";
+  return '<a href="' + esc(url) + '" target="_blank" rel="noopener">'
+    + esc(UI_COPY.docs_hint || url) + "</a>";
+}
+
 function renderStartup(data) {
   const checks = Array.isArray(data && data.checks) ? data.checks : [];
   $("#startup-checks").innerHTML = checks.map((c, index) => {
     const ok = !!c.ok;
     let fix = "";
+    let extra = "";
     if (!ok) {
+      /* 失败项必须同时给「缺了会怎样」与可操作指引，不能只有一个 ❌。 */
+      if (c.impact) extra += '<p class="impact">' + esc(c.impact) + "</p>";
+      const fixText = fixTextFor(c.key);
+      if (fixText) extra += '<p class="fixtext">' + esc(fixText) + "</p>";
       if (c.fix_kind === "url" && c.fix_url) {
         fix += '<a href="' + esc(c.fix_url) + '" target="_blank" rel="noopener">'
           + esc(UI_COPY.fix_url || "打开下载页") + "</a>";
@@ -1370,12 +1441,23 @@ function renderStartup(data) {
         fix += '<button type="button" data-startup-elevate="1">'
           + esc(UI_COPY.fix_elevate || "以管理员身份重启") + "</button>";
       }
+      const doc = startupDocLink();
+      if (doc) fix += doc;
     }
     return '<div class="startup-check ' + (ok ? "ok" : "bad") + '" data-check="'
       + esc(c.key || "") + '"><span class="ico">' + (ok ? "✓" : "✗")
       + '</span><div><b>' + esc(c.name || c.key || "") + '</b><p>' + esc(c.detail || "")
-      + '</p>' + (fix ? '<div class="fix">' + fix + "</div>" : "") + "</div></div>";
+      + "</p>" + extra + (fix ? '<div class="fix">' + fix + "</div>" : "") + "</div></div>";
   }).join("");
+}
+
+function setStartupEnter(allGreen) {
+  /* 全绿时按钮从「受限进入」换成「进入主界面」；文案仍只从 copy 表取。 */
+  const btn = $("#startup-limited");
+  if (!btn) return;
+  const key = allGreen ? "enter" : "limited_enter";
+  btn.setAttribute("data-copy", key);
+  btn.textContent = UI_COPY[key] || (allGreen ? "进入主界面" : "受限进入");
 }
 
 function showStartup() { $("#startup-mask").classList.remove("hidden"); }
@@ -1409,34 +1491,181 @@ async function finishStartup(allPassed) {
   }
 }
 
-async function initStartup() {
+async function loadSelfcheck() {
+  /* 不管是否首次运行都请求：CAPS 是置灰矩阵的唯一依据，CHECKS 供说明卡取 impact/修复。 */
   let data = null;
   try {
-    data = await fetch("/api/selfcheck", { cache: "no-store" }).then((x) => x.json());
+    const resp = await fetch("/api/selfcheck", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    data = await resp.json();
+    if (!data || typeof data !== "object") throw new Error("bad payload");
   } catch (e) {
     data = null;
   }
-  if (data && data.ui_copy && data.ui_copy.startup) {
+  if (!data) {
+    /* S5：失败时保留上一次成功的 CAPS/CHECKS（applyCapabilities(null) 不再清空），
+       否则能力锁会被全部放开（fail-open）。只做一条轻提示 + 控制台记录。 */
+    const note = UI_COPY.selfcheck_failed || "准备检查失败，能力状态可能不准；可点「重新检测」再试。";
+    setSelfcheckNote(note);
+    appendLog(note, false);
+    return null;
+  }
+  setSelfcheckNote("");
+  if (data.ui_copy && data.ui_copy.startup) {
     UI_COPY = data.ui_copy.startup;
     applyCopy();
     paintPermCopy();
   }
-  /* 旧后端没有 first_run 字段：不显示面板（不能把老载荷当成首次运行）。 */
-  if (!data || typeof data !== "object" || data.first_run !== true) {
-    hideStartup();
-    return;
-  }
   STARTUP_DATA = data;
+  applyCapabilities(data);
+  paintLocks();   // 重新检测后立即重绘置灰矩阵与角标，不等下一次刷新
+  return data;
+}
+
+async function initStartup(opts) {
+  const manual = !!(opts && opts.manual);
+  const force = !!(opts && opts.force);
+  let data = null;
+  if (!manual && !force && BOOT_STARTUP) {
+    /* /api/app 已带同一份 checks/capabilities：首屏直接复用，避免再跑一次全套自检。
+       只复用一次；之后的「重新检测」仍走 /api/selfcheck 拿最新状态。 */
+    data = BOOT_STARTUP;
+    BOOT_STARTUP = null;
+    STARTUP_DATA = data;
+    applyCapabilities(data);
+    paintLocks();
+  } else {
+    data = await loadSelfcheck();
+  }
+  /* 旧后端没有 first_run 字段：`data.first_run !== true` 时不能当成首次运行。
+     旧后端也没有 capabilities → 退回 C2 现状（不显示缺件面板、只按 admin 锁）。 */
+  if (!data || typeof data !== "object" || data.first_run !== true) {
+    if (!shouldShowStartup(data)) {
+      hideStartup();
+      return data;
+    }
+  }
+  if (!force && !shouldShowStartup(data)) {
+    hideStartup();
+    return data;
+  }
   renderStartup(data);
   const checks = Array.isArray(data.checks) ? data.checks : [];
   const failed = checks.filter((c) => !c.ok).length;
+  const allGreen = checks.length === 5 && checks.every((c) => !!(c && c.ok));
+  setStartupEnter(allGreen);
   showStartup();
-  if (!failed && checks.length === 5) {
-    setStartupMsg(esc(UI_COPY.all_ok || ""), "ok");
-    await finishStartup(true);
-    return;
+  if (allGreen) {
+    if (data.first_run === true && !manual && !force) {
+      setStartupMsg(esc(UI_COPY.all_ok || ""), "ok");
+      await finishStartup(true);   // C2：全绿首次运行自动 ack 并进入
+      return data;
+    }
+    /* 重新检测 / 手动打开时恢复：停在面板，显示「可以开始了」并给「进入主界面」。 */
+    setStartupMsg(esc(UI_COPY.ready_enter || ""), "ok");
+    return data;
   }
   setStartupMsg(esc(copyFill(UI_COPY.some_failed || "", { count: failed })), "wait");
+  return data;
+}
+
+function setCapMsg(html, cls) {
+  const box = $("#cap-msg");
+  if (!box) return;
+  box.innerHTML = html ? '<div class="msg ' + (cls || "wait") + '">' + html + '</div>' : "";
+}
+
+function hideCapCard() { $("#cap-mask").classList.add("hidden"); }
+
+function needForMode(mode, lock) {
+  const missing = String((lock && lock.missing) || "");
+  const hasTshark = missing.indexOf("tshark") >= 0 || missing.indexOf("scapy") >= 0;
+  const hasNpcap = missing.indexOf("npcap") >= 0;
+  if (mode === "passive") return UI_COPY.need_passive || UI_COPY.need_tshark || "";
+  if (hasTshark && hasNpcap) return UI_COPY.need_both || UI_COPY.need_tshark || "";
+  if (hasNpcap) return UI_COPY.need_npcap || "";
+  return UI_COPY.need_tshark || "";
+}
+
+function showCapabilityCard(mode) {
+  /* 能力锁点击入口：缺什么 + 缺了会怎样 + 怎么修复 + [重新检测]/[知道了]。
+     复用权限卡同款 modal；与管理员锁分开，非管理员仍走 C2 的按需提权卡片。 */
+  const lock = capLockInfo(mode);
+  if (!lock) { showPermModal(); return; }   // 锁已解除的竞态：回到正常入口
+  const cfg = UI.modes[mode] || {};
+  const names = [];
+  if (lock.missing.indexOf("tshark") >= 0 || lock.missing.indexOf("scapy") >= 0) names.push("tshark");
+  if (lock.missing.indexOf("npcap") >= 0) names.push("npcap");
+  $("#cap-mask").dataset.mode = mode;
+  $("#cap-title").textContent = UI_COPY.disabled_title || "这个功能暂时不可用";
+  $("#cap-sub").textContent = (cfg.label || mode) + "：" + needForMode(mode, lock);
+  const needItems = names.map((k) => (k === "npcap" ? UI_COPY.missing_npcap
+    : UI_COPY.missing_tshark)).filter(Boolean).join("、");
+  $("#cap-need").innerHTML = '<b>' + esc(UI_COPY.disabled_need_label || "缺少什么") + "</b>"
+    + esc(copyFill(UI_COPY.disabled_need || "缺少：{items}", { items: needItems }));
+  const impacts = [];
+  const fixes = [];
+  names.forEach((key) => {
+    const item = checkByKey(key) || {};
+    const impact = item.impact || UI_COPY["impact_" + key] || "";
+    const fixText = fixTextFor(key);
+    if (impact && impacts.indexOf(impact) < 0) impacts.push(impact);
+    if (fixText && fixes.indexOf(fixText) < 0) fixes.push(fixText);
+    const fixUrl = item.fix_url || UI_COPY[key + "_url"] || "";
+    if (fixUrl) {
+      fixes.push('<a href="' + esc(fixUrl) + '" target="_blank" rel="noopener">'
+        + esc(UI_COPY.fix_url || "打开下载页") + "</a>");
+    }
+  });
+  $("#cap-impact").innerHTML = '<b>' + esc(UI_COPY.disabled_impact_label || "缺了会怎样") + "</b>"
+    + impacts.map((t) => esc(t)).join("<br>");
+  const doc = startupDocLink();
+  $("#cap-fix").innerHTML = '<b>' + esc(UI_COPY.disabled_fix_label || "怎么修复") + "</b>"
+    + fixes.map((t) => (t.indexOf("<a ") === 0 ? t : esc(t))).join("<br>")
+    + (doc ? "<br>" + doc : "");
+  setCapMsg("");
+  $("#cap-recheck").textContent = UI_COPY.disabled_recheck || "重新检测";
+  $("#cap-close2").textContent = UI_COPY.disabled_close || "知道了";
+  $("#cap-mask").classList.remove("hidden");
+}
+
+async function recheckSelfcheck() {
+  /* 说明卡里的「重新检测」：重新拉一次 selfcheck → 重绘矩阵；
+     恢复了就切到全绿首屏，没恢复就刷新说明卡原因。 */
+  setCapMsg(esc(UI_COPY.disabled_rechecking || "正在重新检测…"), "wait");
+  const data = await loadSelfcheck();
+  if (!data) {
+    /* 请求失败：保留上一次成功的 CAPS/CHECKS 与说明卡内容，只提示状态可能不准（S5）。 */
+    setCapMsg(esc(UI_COPY.selfcheck_failed || ""), "bad");
+    return null;
+  }
+  const checks = Array.isArray(data && data.checks) ? data.checks : [];
+  const failed = checks.filter((c) => !c.ok).length;
+  if (checks.length === 5 && !failed) {
+    hideCapCard();
+    renderStartup(data);
+    setStartupEnter(true);
+    showStartup();
+    setStartupMsg(esc(UI_COPY.recheck_all_ok || UI_COPY.ready_enter || ""), "ok");
+    return data;
+  }
+  const capMode = $("#cap-mask").dataset.mode;
+  if (!$("#cap-mask").classList.contains("hidden") && capMode) {
+    if (capLockInfo(capMode)) {
+      showCapabilityCard(capMode);
+    } else {
+      /* 该模式的能力锁已解除：关掉说明卡；若只剩管理员锁，按 C2 交回权限卡。 */
+      hideCapCard();
+      if (IS_ADMIN === false) showPermModal();
+    }
+  }
+  setCapMsg(esc(copyFill(UI_COPY.recheck_still || "", { count: failed })), "wait");
+  if (!$("#startup-mask").classList.contains("hidden")) {
+    renderStartup(data);
+    setStartupEnter(false);
+    setStartupMsg(esc(copyFill(UI_COPY.some_failed || "", { count: failed })), "wait");
+  }
+  return data;
 }
 
 function waitForElevatedReload() {
@@ -1466,24 +1695,152 @@ function waitForElevatedReload() {
 }
 
 
-/* ---------- 导航 / 模式 ---------- */
-function isLocked(mode) { return LOCKED.has(mode) && IS_ADMIN === false; }
+/* ---------- 能力锁矩阵：纯函数（tests/test_startup_ui.py 抽取本段用 Node 跑矩阵；不碰 DOM） ---------- */
+function capKeyFor(mode) {
+  /* 模式 → capabilities 字段；probe / 报告 / 设置不在表里 = 永不因缺组件置灰。 */
+  return { scan: "live", live: "live", passive: "passive", offline: "offline" }[mode] || "";
+}
+
+function capTag(missing) {
+  const parts = String(missing || "").split("|");
+  const hasTshark = parts.indexOf("tshark") >= 0 || parts.indexOf("scapy") >= 0;
+  const hasNpcap = parts.indexOf("npcap") >= 0;
+  if (hasTshark && hasNpcap) return UI_COPY.lock_tag_both || "· 需 Wireshark 与 Npcap";
+  if (hasNpcap) return UI_COPY.lock_tag_npcap || "· 需 Npcap";
+  return UI_COPY.lock_tag_tshark || "· 需 Wireshark";
+}
+
+function capLockInfo(mode) {
+  /* 旧后端没有 capabilities：CAPS=null → 不按能力置灰（退回 C2 仅管理员锁）。 */
+  if (!CAPS) return null;
+  const key = capKeyFor(mode);
+  if (!key) return null;                    // probe / 报告 / 设置：永不锁
+  if (CAPS[key] !== false) return null;
+  const missing = String((CAPS.missing || {})[key] || "");
+  return { kind: "cap", cap: key, missing: missing, tag: capTag(missing) };
+}
+
+function lockInfo(mode) {
+  const cap = capLockInfo(mode);
+  if (cap) return cap;   // 缺组件优先：提权也修不好，先解释缺什么
+  if (LOCKED.has(mode) && IS_ADMIN === false) {
+    return { kind: "admin", tag: UI_COPY.lock_tag_admin || "· 需管理员" };
+  }
+  return null;
+}
+
+function isLocked(mode) { return !!lockInfo(mode); }
+
+function applyCapabilities(data) {
+  /* 唯一赋值点：成功载荷才覆盖 CAPS/CHECKS；data 为 null（请求失败）时保留上一次，
+     否则一次瞬时 503 就会把能力锁全放开（S5 fail-open）。
+     旧载荷没有 capabilities 时仍降级为 null（退回仅管理员锁）。 */
+  if (!data || typeof data !== "object") return CAPS;
+  CAPS = data && data.capabilities && typeof data.capabilities === "object"
+    ? data.capabilities : null;
+  CHECKS = Array.isArray(data && data.checks) ? data.checks : [];
+  return CAPS;
+}
+
+function criticalMissing(checks) {
+  const keys = ["python", "tshark", "npcap"];
+  return (Array.isArray(checks) ? checks : []).some(
+    (c) => c && keys.indexOf(c.key) >= 0 && !c.ok);
+}
+
+function allChecksPassed(checks) {
+  return Array.isArray(checks) && checks.length === 5 && checks.every((c) => !!(c && c.ok));
+}
+
+function shouldShowStartup(data) {
+  if (!data || typeof data !== "object") return false;
+  if (data.first_run === true) return true;
+  /* 关键缺项只在后端给了 capabilities 时才算数：旧载荷没有能力矩阵 →
+     不显示缺件面板（退回 C2 行为，不误弹）。 */
+  return !!(data.capabilities)
+    && criticalMissing(Array.isArray(data.checks) ? data.checks : []);
+}
+/* ---------- 能力锁矩阵结束 ---------- */
+
+function capNeedItems(missings) {
+  /* 把 capabilities.missing 的机器码翻成 copy 表文案（说明卡/横幅共用）。 */
+  const names = [];
+  (Array.isArray(missings) ? missings : [missings]).forEach((m) => {
+    const parts = String(m || "").split("|");
+    if ((parts.indexOf("tshark") >= 0 || parts.indexOf("scapy") >= 0)
+        && names.indexOf("tshark") < 0) names.push("tshark");
+    if (parts.indexOf("npcap") >= 0 && names.indexOf("npcap") < 0) names.push("npcap");
+  });
+  return names.map((k) => (k === "npcap" ? (UI_COPY.missing_npcap || "Npcap")
+    : (UI_COPY.missing_tshark || "Wireshark（tshark）"))).filter(Boolean).join("、");
+}
+
+function guardMode(mode) {
+  /* 所有强制入口共用的闸门：能力锁 → 说明卡；管理员锁 → C2 权限卡。不许静默忽略。 */
+  if (!lockInfo(mode)) return true;
+  if (capLockInfo(mode)) showCapabilityCard(mode);
+  else showPermModal();
+  return false;
+}
 
 function paintLocks() {
+  const capModes = [];
   document.querySelectorAll("[data-mode]").forEach((b) => {
-    const cfg = UI.modes[b.dataset.mode] || {};
-    const lock = isLocked(b.dataset.mode);
-    b.classList.toggle("locked", lock);
+    const mode = b.dataset.mode;
+    const cfg = UI.modes[mode] || {};
+    const lock = lockInfo(mode);
+    const tag = lock ? lock.tag : "";
+    b.classList.toggle("locked", !!lock);
     b.setAttribute("aria-disabled", lock ? "true" : "false");
-    b.title = lock
-      ? `该功能需要管理员权限：${cfg.label || b.dataset.mode}。点击查看「以管理员身份重启」`
-      : (cfg.label || "") + (cfg.needs_admin ? "（需要管理员权限）" : "");
+    b.setAttribute("data-lock", tag);
+    const t = b.querySelector(".t");
+    if (t) t.setAttribute("data-lock", tag);   // ::after 的 attr() 取自 .t
+    if (!lock) {
+      b.title = (cfg.label || mode) + (cfg.needs_admin ? "（需要管理员权限）" : "");
+    } else if (lock.kind === "cap") {
+      b.title = (UI_COPY.disabled_title || "这个功能暂时不可用") + "："
+        + (cfg.label || mode) + "；" + needForMode(mode, lock);
+    } else {
+      b.title = "该功能需要管理员权限：" + (cfg.label || mode)
+        + "。点击查看「以管理员身份重启」";
+    }
+    if (legacyCapMode(mode, lock)) capModes.push(mode);
   });
-  $("#lock-banner").classList.toggle("hidden", IS_ADMIN !== false);
-  if (MODE && UI.modes[MODE]) {
-    $("#run").classList.toggle("locked", isLocked(MODE));
-    $("#run").title = isLocked(MODE) ? "该功能需要管理员权限，点击查看如何提权" : "";
+  const banner = $("#lock-banner");
+  const text = $("#lock-banner-text");
+  const act = $("#lock-elevate");
+  if (capModes.length) {
+    /* 有缺组件时横幅优先说缺件（提权修不好缺件）；动作是「重新检测」而不是提权。 */
+    const labels = capModes.map((m) => (UI.modes[m] || {}).label || m).join(" / ");
+    text.textContent = copyFill(UI_COPY.lock_banner_caps || "", {
+      items: capNeedItems(capModes.map((m) => (capLockInfo(m) || {}).missing)),
+      modes: labels,
+    }) || UI_COPY.disabled_hint || "";
+    act.textContent = UI_COPY.disabled_recheck || "重新检测";
+    act.onclick = () => { recheckSelfcheck(); };
+    banner.classList.remove("hidden");
+  } else if (IS_ADMIN === false) {
+    text.textContent = UI_COPY.lock_banner_admin || "";
+    act.textContent = UI_COPY.elevate_button || "以管理员身份重启";
+    act.onclick = showPermModal;
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
   }
+  if (MODE && UI.modes[MODE]) {
+    const lock = lockInfo(MODE);
+    $("#run").classList.toggle("locked", !!lock);
+    $("#run").setAttribute("data-lock", lock ? lock.tag : "");
+    $("#run").title = !lock ? ""
+      : (lock.kind === "cap"
+        ? (UI_COPY.disabled_title || "这个功能暂时不可用") + "：" + needForMode(MODE, lock)
+        : "该功能需要管理员权限，点击查看如何提权");
+  }
+}
+
+function legacyCapMode(mode, lock) {
+  /* 横幅只列真正的能力锁模式（不含管理员锁）；保留独立函数方便测试定位。 */
+  return !!lock && lock.kind === "cap" && ["scan", "live", "passive", "offline"].indexOf(mode) >= 0;
 }
 
 $("#nav").addEventListener("click", (e) => {
@@ -1497,9 +1854,7 @@ $("#nav").addEventListener("click", (e) => {
   }
   const modeBtn = e.target.closest("[data-mode]");
   if (modeBtn) {
-    const mode = modeBtn.dataset.mode;
-    if (isLocked(mode)) { showPermModal(); return; }
-    setMode(mode);
+    switchMode(modeBtn.dataset.mode);   // 能力锁/管理员锁都由同一个闸门处理
     return;
   }
   const viewBtn = e.target.closest("[data-view]");
@@ -1526,6 +1881,13 @@ function markActive(mode, view) {
 function hideViews() {
   ["view-reports", "view-sysinfo", "view-export", "view-ai"].forEach((id) =>
     document.getElementById(id).classList.add("hidden"));
+}
+
+function switchMode(mode) {
+  /* 用户主动切模式（导航 / 空状态快捷入口 / 结果页复测）统一走这里，先过 guardMode。 */
+  if (!guardMode(mode)) return false;
+  setMode(mode);
+  return true;
 }
 
 function setMode(mode) {
@@ -1602,8 +1964,7 @@ function showIdle(mode) {
 document.addEventListener("click", (e) => {
   const q = e.target.closest("[data-quick]");
   if (!q) return;
-  if (isLocked(q.dataset.quick)) { showPermModal(); return; }
-  setMode(q.dataset.quick);
+  switchMode(q.dataset.quick);
 });
 
 /* ---------- 二级页：历史报告 / 导出 / 设置 ---------- */
@@ -1727,6 +2088,12 @@ async function boot() {
     ]);
     APP_INFO = app;
     IS_ADMIN = app && typeof app.admin === "boolean" ? app.admin : !!r.admin;
+    if (app && app.capabilities) {
+      /* 首屏只用 /api/app 一次：能力矩阵 + checks 都由它下发，initStartup 直接复用，
+         不再背靠背跑第二遍全套自检（S2）。 */
+      applyCapabilities(app);
+      BOOT_STARTUP = Array.isArray(app.checks) ? app : null;
+    }
     if (app && app.ui_copy && app.ui_copy.startup) {
       UI_COPY = app.ui_copy.startup;
       applyCopy();
@@ -1826,7 +2193,7 @@ function showPermModal() {
 function closePerm() { $("#perm-mask").classList.add("hidden"); }
 function checkAdmin() {
   if (!isLocked(MODE)) return true;
-  showPermModal();
+  guardMode(MODE);   // 能力锁 → 说明卡；管理员锁 → 权限卡（C2 行为不变）
   return false;
 }
 $("#perm-close").onclick = closePerm;
@@ -1880,7 +2247,7 @@ $("#perm-elevate").onclick = async () => {
 /* ---------- 首屏「准备检查」接线 ---------- */
 $("#startup-recheck").onclick = async () => {
   setStartupMsg(esc(UI_COPY.checking || "正在检查…"), "wait");
-  await initStartup();
+  await initStartup({ manual: true });
 };
 $("#startup-limited").onclick = () => { finishStartup(false); };
 $("#startup-checks").addEventListener("click", (e) => {
@@ -1901,6 +2268,16 @@ $("#startup-checks").addEventListener("click", (e) => {
     showPermModal();
   }
 });
+
+/* ---------- 能力说明卡接线（点击置灰项 / 横幅「重新检测」） ---------- */
+$("#cap-close").onclick = hideCapCard;
+$("#cap-close2").onclick = hideCapCard;
+$("#cap-mask").addEventListener("mousedown", (e) => {
+  if (e.target.id === "cap-mask") hideCapCard();
+});
+$("#cap-recheck").onclick = async () => {
+  await recheckSelfcheck();
+};
 
 /* ---------- 运行态：阶段 / 进度条 / 倒计时 ---------- */
 const STAGE_SETS = {
@@ -1969,6 +2346,8 @@ $("#target").addEventListener("keydown", (e) => { if (e.key === "Enter") startCa
 
 async function startCapture() {
   if (!MODE || VIEW) return;
+  /* 表单提交 / 回车快捷键的唯一强制入口：能力锁与管理员锁都在这里拦（不许绕锁）。 */
+  if (!guardMode(MODE)) return;
   if (MODE === "passive") {
     if (!checkAdmin()) return;
     startPassive();
@@ -2100,15 +2479,17 @@ function wireFailureActions(kind) {
   const retry = $("#err-retry");
   if (retry) retry.onclick = () => {
     if (!MODE) return;
-    if (isLocked(MODE)) { showPermModal(); return; }
+    if (!guardMode(MODE)) return;
     startCapture();
   };
   const elevate = $("#err-elevate");
   if (elevate) elevate.onclick = showPermModal;
   const probe = $("#err-probe");
-  if (probe) probe.onclick = () => setMode("probe");
+  if (probe) probe.onclick = () => switchMode("probe");
   const offline = $("#err-offline");
-  if (offline) offline.onclick = () => setMode("offline");
+  /* 失败卡里的快捷入口也必须过统一闸门：缺 tshark 时 offline 可能已被能力锁，
+     直接 setMode 会绕过说明卡（S3）。 */
+  if (offline) offline.onclick = () => switchMode("offline");
   const diagpack = $("#err-diagpack");
   if (diagpack) diagpack.onclick = exportDiagPack;
   const refresh = $("#err-iface-refresh");
@@ -2482,7 +2863,7 @@ function renderPassiveEmpty(res){
     + '<button class="btn ghost" id="pempty-probe">去连通与速度测试</button></div>';
   const retry = $("#pempty-retry");
   if (retry) retry.onclick = () => {
-    if (isLocked("passive")) { showPermModal(); return; }
+    if (!guardMode("passive")) return;
     startPassive();
   };
   const probe = $("#pempty-probe");
@@ -2585,6 +2966,7 @@ function applyLinkAction(action){
     $("#hint").textContent = "已预填网关 " + action.display + "；端口留空，按协议自动识别。";
     setTimeout(() => $("#probe-target").focus(), 60);
   } else {
+    if (!guardMode("live")) return;
     setMode("live");
     $("#target").value = action.target || "";
     $("#hint").textContent = "已预填发现的对端 " + action.display
@@ -3294,9 +3676,9 @@ function renderDegraded(res, actions) {
   const retry = $("#deg-retry");
   if (retry) retry.onclick = () => {
     const mode = cap.target && cap.target !== "全网" ? "live" : "scan";
-    setMode(isLocked(mode) ? MODE : mode);
+    if (!guardMode(mode)) return;
+    setMode(mode);
     if (mode === "live") $("#target").value = cap.target === "全网" ? "" : cap.target;
-    if (isLocked(mode)) { showPermModal(); return; }
     startCapture();
   };
   const probe = $("#deg-probe");
@@ -3635,7 +4017,11 @@ async function quitApp() {
 }
 
 async function loadAppInfo() {
-  const r = await fetch("/api/app").then((x) => x.json()).catch(() => null);
+  /* boot 已经拉过 /api/app：直接复用，避免首屏再发一次（S2）。 */
+  let r = APP_INFO;
+  if (!r || typeof r !== "object") {
+    r = await fetch("/api/app").then((x) => x.json()).catch(() => null);
+  }
   if (r && r.ok) {
     APP_INFO = r;
     if (!document.title.includes("端口")) {
@@ -3692,6 +4078,7 @@ $("#diagpack").onclick = exportDiagPack;
 $("#export-run").onclick = exportDiagPack;
 $("#ai-panel-open").onclick = openAI;
 $("#sysinfo-refresh").onclick = loadSysInfo;
+$("#sysinfo-startup").onclick = () => { initStartup({ manual: true, force: true }); };
 
 $("#quit-app").onclick = quitApp;
 

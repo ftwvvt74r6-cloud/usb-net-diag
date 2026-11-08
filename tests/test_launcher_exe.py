@@ -149,6 +149,32 @@ class LauncherSourceContractTest(unittest.TestCase):
         self.assertIn("启动不提权", source,
                       "启动日志缺少「启动不提权」说明")
 
+    def test_no_python_copy_is_friendly_and_has_no_local_path(self):
+        """缺 Python 的 MessageBox 文案面向一线：现象 + 安装指引 + 文档，不拼本机路径。"""
+        source = LAUNCHER_SRC.read_text(encoding="utf-8")
+        start = source.index("private static string NoPythonMessage()")
+        end = source.index("private static void WriteDryRunReport", start)
+        body = source[start:end]
+        self.assertIn("Python 3.11", body)
+        self.assertIn("python.org", body)
+        self.assertIn("docs/startup.md", body)
+        self.assertNotIn("Path.Combine", body,
+                         "缺 Python 文案不许运行时拼接本机绝对路径")
+        self.assertNotIn("C:\\\\", body)
+
+    def test_dry_run_missing_python_is_structured_and_never_shows_msgbox(self):
+        """--dry-run 缺 Python 只写 ok:false/error + exit 2，绝不弹框。"""
+        source = LAUNCHER_SRC.read_text(encoding="utf-8")
+        start = source.index("private static int RunDryRun")
+        end = source.index("private static PythonCandidate FindPython()", start)
+        body = source[start:end]
+        self.assertIn('error = NoPythonMessage();', body)
+        self.assertIn("WriteDryRunReport", body)
+        self.assertIn("ExitNoPython", body)
+        self.assertNotIn("ShowError", body,
+                         "--dry-run 缺 Python 不许弹 MessageBox（自动化会挂住）")
+        self.assertNotIn("MessageBoxW", body)
+
     def test_start_bat_default_does_not_runas(self):
         text = START_BAT.read_text(encoding="utf-8")
         occurrences = text.count("-Verb RunAs")
@@ -280,7 +306,12 @@ class LauncherBinaryTest(unittest.TestCase):
         data = json.loads(report.read_text(encoding="utf-8"))
         self.assertFalse(data["ok"])
         self.assertIn("Python", data["error"])
+        self.assertIn("3.11", data["error"])
+        self.assertIn("docs/startup.md", data["error"])
         self.assertEqual(data["python"], "")
+        self.assertTrue(data["dry_run"])
+        self.assertFalse(data["started"], "--dry-run 缺 Python 不许启动 app")
+        self.assertFalse(data["browser_opened"], "--dry-run 缺 Python 不许开浏览器")
 
     @unittest.skipUnless(shutil.which("git") and (ROOT / ".git").exists(),
                          "需要 git 工作区（发布包解压目录里没有 .git）")

@@ -10,8 +10,12 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -80,6 +84,59 @@ class LauncherContract(unittest.TestCase):
         for name in ("core/server.py", "core/bootstrap.py"):
             with self.subTest(name=name):
                 self.assertTrue((ROOT / name).is_file(), f"核心入口缺失：{name}")
+
+    # ------------------------------------------------ S1：缺 tshark 不阻塞
+    def test_missing_tshark_block_warns_and_continues(self):
+        """start.bat 是 lite 回退入口：缺 tshark 只提示，不 pause、不 exit。"""
+        text = START_BAT.read_text(encoding="utf-8", errors="replace")
+        self.assertIn("if errorlevel 3 goto :no_tshark", text,
+                      "bootstrap 的缺 tshark 退出码必须仍被识别")
+        begin = text.index(":no_tshark")
+        end = text.index("\n:check_npcap", begin)
+        block = text[begin:end]
+        self.assertIn("未找到 tshark", block)
+        self.assertIn("其余功能照常", block)
+        self.assertIn("goto :check_npcap", block,
+                      "提示后必须继续走 Npcap 检测与启动流程")
+        self.assertNotRegex(block, r"(?im)^\s*pause\b", "缺 tshark 不许 pause")
+        self.assertNotRegex(block, r"(?im)^\s*exit\s+/b\b", "缺 tshark 不许硬退出")
+        # 旧的开发者硬路径提示已删除（S4 文案红线）。
+        self.assertNotIn("请将 Wireshark 便携版解压到", block)
+        self.assertNotIn("WiresharkPortable", block)
+
+    @unittest.skipUnless(os.name == "nt" and shutil.which("python"),
+                         "需要 Windows + 可用的 Python 才能真实执行 start.bat")
+    def test_missing_tshark_rc_is_zero_in_temp_harness(self):
+        """真跑一份临时 start.bat：bootstrap 返回 3 时仍继续启动并 rc=0。
+
+        临时目录里放两个桩：``core/bootstrap.py``（--npcap 之外返回 3）与
+        ``core/server.py``（立即返回 0）；PATH 指向当前 Python，保证能走到
+        「缺包内运行时 → 系统 Python」这条真实回退路径。不碰仓库文件/网络。
+        """
+        with tempfile.TemporaryDirectory(prefix="netdiag-startbat-") as tmp:
+            root = Path(tmp)
+            shutil.copyfile(START_BAT, root / "start.bat")
+            (root / "core").mkdir()
+            (root / "core" / "bootstrap.py").write_text(
+                "import sys\n"
+                "raise SystemExit(0 if '--npcap' in sys.argv else 3)\n",
+                encoding="utf-8", newline="\n")
+            (root / "core" / "server.py").write_text(
+                "raise SystemExit(0)\n", encoding="utf-8", newline="\n")
+            env = dict(os.environ)
+            env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+            proc = subprocess.run(
+                ["cmd", "/c", "start.bat"], cwd=str(root), env=env,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60,
+            )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        self.assertEqual(proc.returncode, 0,
+                         f"缺 tshark 不该让 start.bat 失败：{output[-1500:]}")
+        self.assertIn("未找到 tshark", output)
+        self.assertIn("其余功能照常", output)
+        self.assertIn("服务已退出", output,
+                      "start.bat 必须继续调用 core/server.py（进入主界面）")
 
     def test_ui_present(self):
         ui = ROOT / "ui" / "index.html"

@@ -1327,6 +1327,9 @@ class Handler(BaseHTTPRequestHandler):
                                "started_at": SERVER.get("started_at", 0)})
         if path == "/api/app":
             cfg = diagnose.load_config()
+            # 首屏会先要 /api/app：这里复用 selfcheck 的短 TTL 结果，别把
+            # 五项检查（tshark 版本 / 端口 / scapy 导入）再跑一遍。
+            snap = selfcheck.collect_cached()
             return self._json({"ok": True, "app": APP_NAME, "version": APP_VERSION,
                                "pid": os.getpid(), "port": SERVER.get("port", 0),
                                "url": SERVER.get("url", ""),
@@ -1335,8 +1338,12 @@ class Handler(BaseHTTPRequestHandler):
                                "admin": tshark.is_admin(),
                                # 加法字段：首屏自检与权限卡文案随应用信息一起下发，
                                # 前端不另存一份中文（文案唯一来源仍是 copy/zh-CN.json）。
-                               "first_run": selfcheck.is_first_run(),
-                               "ui_copy": {"startup": selfcheck.ui_copy()},
+                               "first_run": snap["first_run"],
+                               "ui_copy": snap["ui_copy"],
+                               # 加法字段：首屏不用等 /api/selfcheck 就能先按能力置灰；
+                               # checks 同批下发，UI 首屏可直接画面板、不再跑第二次全套检查。
+                               "checks": snap["checks"],
+                               "capabilities": snap["capabilities"],
                                "auto_open_browser": bool(cfg.get("auto_open_browser", True))})
         if path in ("/", "/index.html"):
             f = UI_DIR / "index.html"
@@ -1399,8 +1406,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/doctor":
             return self._json(doctor_cached())
         if path == "/api/selfcheck":
-            # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程。
-            return self._json(selfcheck.collect())
+            # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程；短 TTL 缓存
+            # 让紧接着的 /api/app 或「重新检测」复用同一份结果。
+            return self._json(selfcheck.collect_cached())
         if path == "/api/passive":
             return self._json(passive_status())
         if path == "/api/ai":
@@ -1435,7 +1443,11 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/selfcheck/ack":
             self._discard_body()
             # 写失败（U 盘只读 / 目录被锁）返回 ok:false 但绝不阻塞界面。
-            return self._json(selfcheck.ack_first_run())
+            result = selfcheck.ack_first_run()
+            # ack 改了 first_run：缓存里的旧载荷必须作废，否则 TTL 内
+            # 下一次 /api/selfcheck 还会把「首次运行」下发一遍。
+            selfcheck.invalidate_cache()
+            return self._json(result)
 
         if parsed.path == "/api/ai":
             payload = self._read_json()

@@ -31,6 +31,9 @@ import logstore  # noqa: E402
 MB_ICONERROR = 0x10
 MB_ICONINFO = 0x40
 
+#: 缺组件/启动失败时的排查文档（相对仓库根；日志里给出可复制路径，不写死盘符）。
+DOCS_STARTUP = "docs/startup.md"
+
 
 # ----------------------------------------------------------------- 基础工具
 def redirect_output() -> None:
@@ -163,8 +166,8 @@ def main() -> int:
     启动路径**不请求提权**；`--elevated` 只用于 /api/elevate 拉起的新进程。
 
     Returns:
-        int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」）；
-            1 = 初始化失败 / 找不到 tshark / 端口全被占用。
+        int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」、缺可选组件但
+            服务已启动）；1 = 初始化失败 / 端口全被占用（物理上无法起本地服务）。
     """
     # 日志基建（每次启动一次）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
     # 必须在 redirect_output 之前裁剪：此时当天的 app 日志还没被本进程打开。
@@ -213,21 +216,26 @@ def main() -> int:
                f"请确认项目目录完整：\n{ROOT}", flags=MB_ICONERROR)
         return 1
 
+    # 3. 缺抓包引擎只降级，不阻塞启动：连通与速度测试、报告与设置仍可用，
+    #    UI 读 /api/selfcheck 的 capabilities 置灰不可用模式并给修复指引。
+    #    这是 F1 的核心行为：绝不因为可选组件缺失弹原生错误框退出。
     if not tshark.find_tshark():
-        msgbox("没找到 tshark，抓包与分析抓包文件都不可用。\n\n"
-               "请把 Wireshark 便携版解压到：\n"
-               f"{ROOT}\\tools\\WiresharkPortable\\App\\Wireshark\\",
-               flags=MB_ICONERROR)
-        return 1
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [警告] 未找到 tshark："
+              f"实时抓包/通信观察/分析抓包文件不可用；其余功能继续"
+              f"（安装 Wireshark（含 tshark）或设置环境变量 TSHARK_PATH 后重启；"
+              f"详见 {DOCS_STARTUP}）")
 
-    # 3. 起服务。idle_exit_min：浏览器关了没人访问就自动退出，
+    # 4. 起服务。idle_exit_min：浏览器关了没人访问就自动退出，
     #    避免「窗口看不见、进程还在」的僵尸状态
     idle_min = int(cfg.get("idle_exit_min", 30) or 0)
     httpd, url = server.create_server(int(cfg.get("server_port", 8787)),
                                       idle_exit_min=idle_min, quiet=True)
     if httpd is None:
-        msgbox("端口 8787-8796 都被占用了，无法启动本地服务。\n"
-               "请关掉占用端口的程序后重试。", flags=MB_ICONERROR)
+        # 8787~8796 全被占 = 物理上无法起本地服务，属于 SPEC 声明的例外；
+        # 提示面向一线、可操作，不出现本机绝对路径/开发者口吻。
+        msgbox("本地服务端口 8787~8796 都被占用了，界面暂时打不开。\n\n"
+               "请关掉占用这些端口的程序（可能是另一个 NetDiag 窗口或调试工具），"
+               "或重启电脑后再试。", flags=MB_ICONERROR)
         return 1
 
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 启动 {url} pid={os.getpid()} "
