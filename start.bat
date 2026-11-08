@@ -1,14 +1,24 @@
 @echo off
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
-title NetDiag · 网络矩阵 - 网络诊断工具
+title NetDiag - portable network diagnostics
 color 0B
 
 REM ============================================================
-REM  推荐入口：双击 NetDiag.exe（无控制台、启动不提权、自动开浏览器）
-REM  本文件是 Python 回退入口：不依赖 exe，便于查看日志/排查启动问题。
-REM  需要管理员权限时运行 start.bat --admin（会请求 UAC）；
-REM  默认以当前权限启动，实时抓包/通信观察在界面里按需提权。
+REM  This file MUST stay pure ASCII (every byte < 0x80).
+REM  Reason: after "chcp 65001" cmd keeps reading this batch by
+REM  BYTE offset, so a multi-byte character on a line boundary
+REM  gets split and its tail is executed as a command (the
+REM  garbled "is not recognized" lines seen in a GBK console).
+REM  All Chinese messages are printed by core\startmsg.py.
+REM ============================================================
+REM  Recommended entry: double-click NetDiag.exe (no console,
+REM  no UAC at start, opens the browser automatically).
+REM  This file is the Python fallback entry: no exe required,
+REM  handy for reading logs / debugging startup problems.
+REM  Use "start.bat --admin" when you want UAC up front;
+REM  by default it starts with current rights and the UI asks
+REM  for elevation only when a mode really needs it.
 REM ============================================================
 
 set "ROOT=%~dp0"
@@ -17,38 +27,11 @@ set "PY=%ROOT%\tools\python\python.exe"
 set "PYARGS="
 set "PY_FLAVOR=portable"
 
-echo.
-echo  ============================================================
-echo    NetDiag · 网络矩阵   便携网络诊断工具
-echo    运行目录: %ROOT%
-echo  ============================================================
-echo.
-
-REM ---------- 1. 管理员权限（默认不提权；只在 --admin 时请求）----------
-REM 为什么默认不提权：启动即弹 UAC 是「双击没反应 / 慢」的主因之一；
-REM 需要权限的功能由界面按需请求，离线分析、链路体检不需要管理员。
-net session >nul 2>&1
-if not errorlevel 1 goto :have_admin
-if /i not "%~1"=="--admin" goto :no_admin_tip
-echo  [*] 正在请求管理员权限（UAC 请点"是"）...
-powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop; exit 0 } catch { exit 1 }"
-if not errorlevel 1 exit /b
-echo  [!] 提权被取消，以普通权限继续：实时抓包/通信观察可能不可用。
-echo.
-goto :have_admin
-
-:no_admin_tip
-echo  [i] 当前以普通权限运行（启动不请求管理员权限）。
-echo      分析抓包文件、连通与速度测试不受影响；
-echo      实时抓包 / 通信观察需要管理员权限时，请在界面里按需提权，
-echo      或关闭本窗口后运行: start.bat --admin
-echo.
-:have_admin
-
-REM ---------- 2. Python 运行时（包内优先，回退系统 Python）----------
+REM ---------- 1. Python runtime (bundled first, then system) ----------
+REM Order is a hard contract: bundled -> "where python" -> "where py".
 if exist "%PY%" goto :have_python
 
-REM 回退 1：系统 PATH 里的 python（要求 3.11+）
+REM Fallback 1: python on PATH (requires 3.11+)
 set "PY=python"
 set "PYLABEL=python"
 where python >nul 2>&1
@@ -60,7 +43,7 @@ if not errorlevel 1 (
     )
 )
 
-REM 回退 2：Python Launcher 的 py -3
+REM Fallback 2: Python Launcher, "py -3"
 set "PY=py"
 set "PYARGS=-3"
 set "PYLABEL=py -3"
@@ -74,59 +57,81 @@ if not errorlevel 1 (
 )
 
 echo.
-echo  [X] 未找到可用的 Python 运行时（需要 Python 3.11+）。
-echo      已尝试：① 包内 tools\python\python.exe  ② 系统 python  ③ py -3
-echo      请安装 Python 3.11 或更高版本（安装时勾选 "Add python.exe to PATH"）：
+echo  [X] No usable Python runtime found (Python 3.11+ required).
+echo      Tried: 1) bundled tools\python\python.exe  2) python  3) py -3
+echo      Install Python 3.11 or newer and tick "Add python.exe to PATH":
 echo      https://www.python.org/downloads/windows/
-echo      或重新解压带 tools\python\ 的完整内部离线包。
+echo      Or unzip the full offline package that ships tools\python\.
 echo.
 pause
 exit /b 1
 
 :have_python
+call :say banner "%ROOT%"
+echo.
 if /i not "%PY_FLAVOR%"=="portable" (
-    echo  [i] 未找到包内 Portable Python，回退到系统运行时：%PYLABEL%
+    call :say portable_fallback "%PYLABEL%"
     echo.
 )
 
-REM ---------- 3. 环境自检 + 按当前盘符生成配置 ----------
+REM ---------- 2. Administrator rights (default: do NOT elevate) ----------
+REM Why no UAC by default: a UAC prompt at startup is the main cause of
+REM "double-click does nothing / feels slow". Modes that need admin ask
+REM from the UI; offline analysis and link probing never need it.
+net session >nul 2>&1
+if not errorlevel 1 goto :have_admin
+if /i not "%~1"=="--admin" goto :no_admin_tip
+call :say admin_elevating
+powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop; exit 0 } catch { exit 1 }"
+if not errorlevel 1 exit /b
+call :say admin_cancelled
+echo.
+goto :have_admin
+
+:no_admin_tip
+call :say no_admin
+echo.
+:have_admin
+
+REM ---------- 3. Environment self-check + per-drive config ----------
 "%PY%" %PYARGS% "%ROOT%\core\bootstrap.py"
 if errorlevel 3 goto :no_tshark
 goto :check_npcap
 
 :no_tshark
-REM 缺 tshark 只降级、不阻塞（与 F 目标一致）：界面首屏会显示缺件与修复指引，
-REM 离线分析 / 连通与速度测试仍可用，所以这里只提示一行，继续启动 app。
-echo  [警告] 未找到 tshark：实时抓包 / 通信观察 / 分析抓包文件不可用；其余功能照常，界面会提示怎么修复。
+REM A missing tshark only degrades, it never blocks: the first screen shows
+REM what is missing and how to fix it, offline analysis still works. So print
+REM one line and keep going (the message text lives in core\startmsg.py).
+call :say no_tshark
 goto :check_npcap
 
-REM ---------- 4. Npcap 驱动（只检测 + 交互式安装，不再静默安装）----------
-REM 为什么去掉 /S：Npcap 免费版不支持静默安装（会弹「Silent installation is
-REM only supported in Npcap OEM」），用户只看到一个看不懂的警告；改为打开向导。
+REM ---------- 4. Npcap driver (detect + interactive install only) ----------
+REM Why /S is gone: Npcap free edition does not support silent install (it
+REM pops "Silent installation is only supported in Npcap OEM"), so we open
+REM the wizard instead of leaving the user with an incomprehensible warning.
 :check_npcap
 "%PY%" %PYARGS% "%ROOT%\core\bootstrap.py" --npcap
 if not errorlevel 1 goto :npcap_ready
 
 echo.
-echo  [*] Npcap 驱动未就绪，启动交互式安装向导（需 UAC 授权）...
+call :say npcap_missing
 for %%f in ("%ROOT%\tools\npcap-*.exe") do (
-    echo      正在启动安装向导: %%~nxf
-    echo      请在向导里完成安装（免费版不支持 /S 静默安装）。
+    call :say npcap_file "%%~nxf"
+    call :say npcap_hint
     start /wait "" "%%~f"
 )
 "%PY%" %PYARGS% "%ROOT%\core\bootstrap.py" --npcap
 if not errorlevel 1 (
-    echo  [OK] Npcap 安装完成。
+    call :say npcap_installed
 ) else (
-    echo  [!] Npcap 仍未就绪，实时抓包不可用；「分析抓包文件」（离线分析，上传 pcap）不受影响。
-    echo      可手动安装：https://npcap.com/#download
+    call :say npcap_failed
 )
 goto :launch
 
 :npcap_ready
-echo  [OK] Npcap 驱动就绪。
+call :say npcap_ready
 
-REM ---------- 5. 可选：拉起 DeepSeek Harness（Agent 底座）----------
+REM ---------- 5. Optional: start DeepSeek Harness (agent backend) ----------
 :launch
 set "HARNESS_FOUND="
 if exist "%ROOT%\harness\windows.bat" set "HARNESS_FOUND=1"
@@ -134,7 +139,7 @@ for %%f in ("%ROOT%\harness\*.exe") do set "HARNESS_FOUND=1"
 if not defined HARNESS_FOUND goto :start_ui
 
 echo.
-echo  [i] 检测到 DeepSeek Harness（Agent 底座）。如需同时启动请运行: start.bat ai
+call :say harness_hint
 if /i not "%~1"=="ai" goto :start_ui
 
 if exist "%ROOT%\harness\windows.bat" (
@@ -142,7 +147,7 @@ if exist "%ROOT%\harness\windows.bat" (
     goto :start_ui
 )
 for %%f in ("%ROOT%\harness\*.exe") do (
-    echo  [*] 启动 Agent 底座: %%~nxf
+    call :say harness_start "%%~nxf"
     start "" /D "%ROOT%\harness" "%%~ff"
     goto :start_ui
 )
@@ -150,14 +155,19 @@ for %%f in ("%ROOT%\harness\*.exe") do (
 :start_ui
 
 echo.
-echo  [*] 启动本地诊断服务，浏览器将自动打开...
-echo      （关闭本窗口即停止服务；界面右上角「退出」也可以）
-echo  [i] 日常使用建议双击 NetDiag.exe：无控制台窗口、启动不提权
-echo      本文件（start.bat）是 Python 回退入口，需要管理员时用 start.bat --admin
+call :say start_ui
 echo.
 "%PY%" %PYARGS% "%ROOT%\core\server.py"
 
 echo.
-echo  服务已退出。
+call :say bye
 pause
 endlocal
+goto :eof
+
+REM ---------- helper: print one Chinese message block ----------
+REM Usage: call :say <key> [args...]
+REM The text lives in core\startmsg.py so this file can stay pure ASCII.
+:say
+"%PY%" %PYARGS% "%ROOT%\core\startmsg.py" %*
+exit /b 0
