@@ -26,10 +26,45 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from typing import Any, Iterable, Mapping, Sequence
 
-SCHEMA_VERSION = "2.1"
+SCHEMA_VERSION = "2.2"
 
 #: ``RULE_ID`` 形态：大写点分，如 ``L4.RETRANS.HIGH`` / ``L7.DNS.FAIL``。
 RULE_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(\.[A-Z0-9_]+)+$")
+
+#: 结论级置信度的分级阈值（用户 2026-11-08 定稿，只在这里写一次）。
+#: ≥0.85 为「高」、≥0.5 为「中」、其余（含证据缺失）为「低」。
+CONFIDENCE_HIGH_MIN = 0.85
+CONFIDENCE_MEDIUM_MIN = 0.5
+
+
+def confidence_level_of(confidence: float) -> str:
+    """把结论级置信度映射成「高/中/低」（阈值唯一出处）。
+
+    等级不是可人工填写的字段，而是由 ``confidence`` 派生的展示态；
+    渲染层（:mod:`core.conclusion`）与 :class:`Verdict` 的属性都调用本函数，
+    避免两处阈值写不一致。
+
+    Args:
+        confidence: 结论级置信度，必须落在 ``[0, 1]`` 区间内。
+
+    Returns:
+        str: ``"高"``（≥ :data:`CONFIDENCE_HIGH_MIN`）、``"中"``
+            （≥ :data:`CONFIDENCE_MEDIUM_MIN`）或 ``"低"``。
+
+    Raises:
+        ValueError: 传入值不是数字、为 ``NaN`` 或超出 ``[0, 1]``。
+    """
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"confidence 必须是 [0,1] 区间内的数字：{confidence!r}") from exc
+    if not 0.0 <= value <= 1.0:          # NaN 比较恒为 False，也在这里被拒
+        raise ValueError(f"confidence 必须落在 [0,1]：{confidence!r}")
+    if value >= CONFIDENCE_HIGH_MIN:
+        return "高"
+    if value >= CONFIDENCE_MEDIUM_MIN:
+        return "中"
+    return "低"
 
 
 # ---------------------------------------------------------------- 枚举
@@ -601,7 +636,7 @@ class LayerStatus:
 
 @dataclass(frozen=True)
 class Verdict:
-    """最终判定 —— 一句话结论 + 四层状态 + 下一步做什么。
+    """最终判定 —— 一句话结论 + 四层状态 + 本次结论的证据边界。
 
     字段：
         level: 总体严重度。
@@ -610,6 +645,16 @@ class Verdict:
         next_step_keys: 处置建议的 key 列表，按优先级排列。
         sufficiency: 证据是否够；``ok=False`` 时 ``level`` 必须是降级后的结论
             （见 ``VERDICT.INSUFFICIENT``），不能拿「没样本」当「正常」。
+        confidence: 结论级置信度（**不是** ``Finding.confidence``），由证据推导，
+            必须落在 ``[0,1]``；推断类结论不得为 1.0。
+        basis / coverage / not_covered: 本次结论的依据 / 覆盖 / 明确未覆盖，
+            已是可读句子的运行时事实（静态模板在 ``copy/zh-CN.json`` 的
+            ``conclusion`` section）。三者都落库进报告 JSON 的 verdict 块。
+
+    注意：
+        ``confidence_level`` 是派生 ``@property``，**不是** dataclass 字段，因此
+        无法在构造器里人工填写、也无法赋值；``key_limit`` 只存在于渲染层，
+        两者都**不落库**（见 E-IMPL-SPEC §1）。
     """
     level: Severity
     headline_key: str
@@ -619,17 +664,44 @@ class Verdict:
     finding_ids: tuple[str, ...] = ()
     next_step_keys: tuple[str, ...] = ()
     sufficiency: Sufficiency = field(default_factory=Sufficiency)
+    confidence: float = 1.0
+    basis: tuple[str, ...] = ()
+    coverage: tuple[str, ...] = ()
+    not_covered: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "level", Severity(self.level))
         object.__setattr__(self, "layers", tuple(self.layers))
+        try:
+            confidence = float(self.confidence)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"confidence 必须落在 [0,1]：{self.confidence!r}") from exc
+        if not 0.0 <= confidence <= 1.0:     # NaN 比较恒为 False，也在这里被拒
+            raise ValueError(f"confidence 必须落在 [0,1]：{self.confidence!r}")
+        object.__setattr__(self, "confidence", confidence)
+        for name in ("basis", "coverage", "not_covered"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+
+    @property
+    def confidence_level(self) -> str:
+        """派生置信等级（不是 dataclass 字段，无法人工填写）。
+
+        Returns:
+            str: ``"高"`` / ``"中"`` / ``"低"``，阈值见
+                :data:`CONFIDENCE_HIGH_MIN` 与 :data:`CONFIDENCE_MEDIUM_MIN`。
+        """
+        return confidence_level_of(self.confidence)
 
     def to_dict(self) -> dict:
         """转字典。
 
         Returns:
             dict: ``layers`` 是 ``LayerStatus.to_dict()`` 的列表，
-                ``sufficiency`` 是 ``Sufficiency.to_dict()``。
+                ``sufficiency`` 是 ``Sufficiency.to_dict()``；
+                ``confidence`` 为 float，``basis`` / ``coverage`` /
+                ``not_covered`` 为字符串列表。**不含** ``confidence_level``
+                与 ``key_limit``（二者是渲染期派生值，不落库）。
         """
         return to_jsonable(self)
 
@@ -866,7 +938,8 @@ def envelope_err(code: str, message: str, hint: str = "", trace_id: str = "",
 
 
 __all__ = [
-    "SCHEMA_VERSION", "RULE_ID_RE", "to_jsonable",
+    "SCHEMA_VERSION", "RULE_ID_RE", "CONFIDENCE_HIGH_MIN", "CONFIDENCE_MEDIUM_MIN",
+    "confidence_level_of", "to_jsonable",
     "Layer", "Severity", "Direction", "EndpointKind", "EvidenceKind", "Category", "JobState",
     "Endpoint", "Stats", "DirStat", "CaptureMeta", "StreamStat", "TcpFeatures", "Features",
     "Finding", "Sufficiency", "LayerStatus", "Verdict", "Provenance",

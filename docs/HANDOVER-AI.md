@@ -53,11 +53,16 @@ git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，
 |---|---|---|---|
 | **UI** | **`NetDiag.exe`（推荐，双击不提权）** / `start.bat`（Python 回退，`--admin` 才提权）/ `NetDiag.vbs`（兼容）/ `core\server.py` | 便携 Python 或系统 Python 3.11+；实时抓包另需 Npcap + 管理员 | 启动器 `test_launcher_exe.py`；HTTP 路由有 `test_http_drain.py` 等；首屏自检/权限卡/表单保留用 `test_selfcheck.py` + `test_startup_ui.py` 静态契约，CI 不跑浏览器（本机 headless 证据见 `review/`） |
 | **CLI** | `core\diagnose.py --pcap ...` | tshark（分析抓包文件也要） | `test_cli_report_out.py` 等 |
-| **MCP** | `mcp\wireshark-mcp\server.py`（stdio）+ `config\mcp-wireshark.json` | 一个 MCP 客户端；实时能力同 UI | 只做「文件存在 + 可编译」契约检查，**无协议级测试** |
+| **MCP** | `mcp\wireshark-mcp\server.py`（stdio）+ `config\mcp-wireshark.json` | 一个 MCP 客户端；实时能力同 UI | `test_mcp_conclusion.py`：output Schema / required 校验 / 结构化返回 / description / 工具名参数回归（不抓包） |
 | **诊断包** | 界面按钮 / `导出诊断包.bat` / `diagnose.py --export-diag` | 无（纯本地打包） | `test_diagpack.py`、`test_sanitize.py` |
 
 MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`scan_network_threats`、
 `analyze_pcap`、`probe_link`、`listen_flows`、`doctor`（见 `mcp/wireshark-mcp/server.py` 的 `TOOLS`）。
+其中三条诊断工具（`capture_live_packets` / `scan_network_threats` / `analyze_pcap`）返回
+`{ok, conclusion, markdown, summary?}`；`conclusion` 的 `basis` / `coverage` / `not_covered`
+是输出 Schema 的 **required**，返回前用本地最小校验器校验，缺字段就返回 `isError`。
+工具 description 写明「返回的结论必须连同边界字段一起读取，单独展示结论视为误用」；
+`probe_link` / `listen_flows` 不产生分层诊断结论，返回保持原样。
 
 ### 2.2 能测什么
 
@@ -88,7 +93,7 @@ MCP 服务暴露 7 个工具：`list_interfaces`、`capture_live_packets`、`sca
 | **UDP / ICMP 体检** | `probe.py` 只建 TCP 连接（`SOCK_STREAM`），不能探 UDP 服务 |
 | **持续监控 / 流量清洗 / 压测** | 产品明确不做；体检有并发闸门（3 个） |
 | **AI 外发脱敏** | 当前没有 `core/egress/` 实现；点「AI 解读」会把结构化结果（含 IP/域名/URI）发到你配置的模型端点，只在允许外发的环境使用 |
-| **MCP 协议行为** | 只有文件/语法契约测试；真实 MCP 交互需手工冒烟 |
+| **MCP 协议行为** | 已有 schema/返回结构/工具名参数回归测试；真实 stdio 会话仍需手工冒烟 |
 
 > **最重要的一条业务边界**：**「没抓到样本」不等于「网络正常」**。`verdict.build()` 会在
 > 证据不足时返回「证据不足」，四层状态里显示「无样本」；不要为了「好看」把它改成「正常」。
@@ -158,7 +163,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 
 | 层 | 内容 | 稳定性 |
 |---|---|---|
-| **代码级契约** | `core/contracts.py` 的 dataclass/Enum、`SCHEMA_VERSION = "2.1"`、`to_jsonable()`、`envelope_ok/err()` | 改形状 = 升版本；`envelope` 是目前**未被 HTTP 层使用**的目标契约 |
+| **代码级契约** | `core/contracts.py` 的 dataclass/Enum、`SCHEMA_VERSION = "2.2"`、`to_jsonable()`、`envelope_ok/err()` | 改形状 = 升版本；`envelope` 是目前**未被 HTTP 层使用**的目标契约 |
 | **对外 HTTP** | 各 `/api/*` 的请求键与响应键（见 §4） | 视为对外契约；改键名要同步 UI/测试/本文件 |
 | **报告文件** | `reports/<stem>.md` 与 `.json`；JSON 顶层固定 5 块 | 对外；`reports/faults_demo.*` 是提交进仓库的快照 |
 | **诊断包** | zip 内 `README.txt` / `env.json` / `logs/` / `runs/` / `crashes/`（可选 `reports/`） | 对外；`test_diagpack.py` 钉结构 |
@@ -170,7 +175,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 
 1. 改 `contracts.py` 的 dataclass 字段、Enum 取值，或 `Features` 的语义 → 升 `SCHEMA_VERSION`；
 2. 同步 `tests/fixtures/faults_features.json` 的 `schema_version`（`test_extract_features.py`
-   会断言 `"2.1"`，并比对特征数值）；
+   会断言 `"2.2"`，并比对特征数值）；
 3. 报告 JSON 故意不写 `schema_version`（见 §4.4），所以升版本不会改已提交的报告快照；
 4. `Provenance.schema_version` 会出现在 `analyze()` 结果里，供诊断包/排查用。
 
@@ -190,7 +195,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 `contracts.envelope_ok()` / `envelope_err()` 定义了标准信封：
 
 ```json
-{"schema_version": "2.1", "ok": true, "data": {}, "error": null, "trace_id": ""}
+{"schema_version": "2.2", "ok": true, "data": {}, "error": null, "trace_id": ""}
 ```
 
 但**当前 `core/server.py` 的路由还没有套这层信封**：成功响应是路由自己的
@@ -222,7 +227,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/ping` | 单实例/存活探测 | `ok/app/version/pid/url/started_at` |
 | `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser` |
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
-| `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed` |
+| `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed`；完成时另加 `conclusion`（7 键结论对象）、`result.conclusion_text` / `conclusion_markdown` / `conclusion_export`、`ui_copy.conclusion`（E2 加法字段） |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
 | `GET /api/captures` | 已有抓包 | `files[{name,size,mtime}]`（最多 50） |
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |
@@ -235,6 +240,20 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/evidence?full=0\|1&fmt=md\|txt` | 通用取证请求单（只读、纯计算、不写文件） | `ok/fmt/full/dimensions/content`；`full=1` 无结果也返回全 7 维 |
 
 注意 `/api/probe` 同时有 GET 与 POST；两者都受并发闸门 `MAX_CONCURRENT_PROBE = 3` 限制。
+
+### 4.4.1 CLI `--json` 的结论结构
+
+```
+core/diagnose.py --pcap x.pcap --json
+=> {"summary": {...},
+    "conclusion": {"conclusion","basis","coverage","not_covered",
+                   "confidence","confidence_level","key_limit"},
+    "level","headline","layer","next_steps"}
+```
+
+`conclusion` 与 MCP 返回、UI 状态响应里的同名对象逐键相同；人读模式（不带 `--json`）
+打印的报告第一节也走同一个 `render_conclusion_markdown`。旧版 `--json` 只打 `summary`，
+这一行为变更已在 `CHANGELOG.md` 记录。详见 [`docs/conclusion-boundary.md`](conclusion-boundary.md)。
 
 ### 4.4 报告快照为什么只写 5 块
 
@@ -266,11 +285,14 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    （`arp_no_reply` / `icmp_unreachable` / `dns_timeout` / `tcp_retransmission` /
    `zero_window_client` / `http_500` / `404_error` / `udp_no_response` / `empty_capture`）。
    当前 demo 期望：`verdict.level=严重`、`layer=L4 传输层｜TCP`、严重 3 / 警告 5。
-2. **`reports/` 冻结（仅 v0.3.0 声明例外）**：`reports/faults_demo.md` 与 `.json` 是入库
-   快照；v0.3.0 声明例外是 `reports/faults_demo.md` **末尾已带 D+ 追加的「取证请求单」区块**
-   （纯后缀，`reports/faults_demo.json` 逐字节未变）。除该已入库的后缀外 `reports/` 零改动；
-   测试/实验用 `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 **620 条**（v0.3.0 基线 565；C1 启动器 +14；C2 首屏自检/权限卡/表单 +41）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+2. **`reports/` 冻结（仅声明例外）**：`reports/faults_demo.md` 与 `.json` 是入库
+   快照；v0.3.0 声明例外是 md 末尾追加「取证请求单」区块；v0.3.1（E1）声明例外是
+   md 第一节追加「结论与边界」块、取证单前重复同一块，json 的 verdict 块新增
+   `confidence/basis/coverage/not_covered` 四键（删除四键后与基线逐字节相等）。
+   E2 只改 UI / MCP / 文档，**没有新的报告结构变化**；20/20 复核仍成立。
+   重生成必须用 CLI 真跑并把 `generated_at` 归一化回基线值；测试/实验用
+   `--report-out` 或临时目录，不要写仓库 `reports/`。
+3. **测试只增不减**：当前 **722 条**（v0.3.0 基线 620；E1 结论边界 +69、E2 UI/MCP +30、复审 B1 +3）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -361,7 +383,7 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 620（C1 前 565；C1 +14、C2 +41），但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> 测试数为 722（v0.3.0 基线 620；E1 +69、E2 +30、复审 B1 +3），但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
 > （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
@@ -406,14 +428,14 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 620 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 722 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
 
 | 步骤 | 命令 | 作用 |
 |---|---|---|
-| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 292/292 = 100.0%（32 模块） |
+| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 302/302 = 100.0%（33 模块） |
 | 文档与源码同步 | `python scripts/gen_api_doc.py` + `git diff --exit-code docs/api-reference.md docs/docstring-gaps.md` | 禁止手改生成文档 |
 
 ### 7.3 CI 里会 skip 什么
@@ -457,8 +479,9 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/analyzer.py` | 抓包分析引擎：一次 tshark 流式解析 → `meta/metrics/rows` + `findings_v2` + `provenance` |
 | `core/app.py` | 静默启动器：pythonw、单实例探测、空闲退出、错误弹窗；**启动不提权**（`--no-elevate`），提权只剩 `/api/elevate` 的 `--elevated` 新进程路径 |
 | `core/bootstrap.py` | 盘符自适应：按当前路径重写 MCP/Harness 配置 + 环境自检（`--check`/`--npcap`） |
+| `core/conclusion.py` | 结论边界唯一出处：`derive_confidence` 三档、`build_conclusion`、Markdown/纯文本整块渲染（E1）；可选 `report_id` 供 UI 复制/导出（E2） |
 | `core/config.py` | 统一配置加载：app/ai/thresholds/copy + `config_sha256()` |
-| `core/contracts.py` | 唯一数据契约：Enum/dataclass、`SCHEMA_VERSION=2.1`、`to_jsonable`、envelope |
+| `core/contracts.py` | 唯一数据契约：Enum/dataclass、`SCHEMA_VERSION=2.2`、`to_jsonable`、envelope |
 | `core/copytext.py` | 文案表唯一读取入口：mtime/size 缓存、`reload()`、缺 key 回退 key |
 | `core/diagnose.py` | CLI 主流程：采集/分析抓包文件、`run_scan()`、报告落盘、`--export-diag` |
 | `core/diagpack.py` | 诊断包：收集 logs/runs/crashes/reports → 脱敏 → 泄漏自检 → zip |
@@ -473,7 +496,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/platform/paths.py` | 目录约定与根目录探测（`Paths`） |
 | `core/platform/winapi.py` | Windows 能力：管理员、Npcap、网卡、默认网关、DNS |
 | `core/probe.py` | 连通与速度测试（链路体检）：TCP 建连 + Banner 识别 + 按协议分段计时（HTTP/TLS/SMB/RDP/SSH/Opaque） |
-| `core/report.py` | 报告渲染：Markdown + JSON 5 块；`tshark_path` 归一 |
+| `core/report.py` | 报告渲染：Markdown + JSON 5 块；`tshark_path` 归一；结论边界块走 `conclusion` |
 | `core/rules/__init__.py` | 规则包标记（渐进迁移中） |
 | `core/rules/legacy_map.py` | 旧 `rows[]` → `Finding` 的迁移桥（临时件；当前唯一规则相关实现） |
 | `core/sanitize.py` | 诊断包脱敏：IP/域名/用户名/MAC/路径 → 不可还原伪名（幂等） |
@@ -495,7 +518,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（3,300+ 行；无构建链、无前端框架；首屏自检/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 31 个 `test_*.py`（620 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 34 个 `test_*.py`（722 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -511,7 +534,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `AGENTS.md` | 硬约束清单（不推 main、不改模块边界等） | ⚠️ 部分目录表是目标架构 |
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
-| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 32/292 |
+| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 33/302 |
 | `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（C 批次启动器 + v0.3.0 实测数字） |
 | `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 当前（v0.3.0 已发布） |
 | `docs/release-v0.2.0.md` | v0.2.0 发布资产与法务修正回合证据 | ❌ 历史（v0.2.0） |
@@ -521,6 +544,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/path-probe.md` | 路径剖面（MTR）：逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2） |
 | `docs/evidence-checklist.md` | 通用取证请求单：7 个证据来源方、结论→维度映射、报告/界面/API 用法、隐私与回填边界 | ✅ 当前（D+ 增量 3） |
+| `docs/conclusion-boundary.md` | 结论边界：basis/coverage/not_covered 语义、置信三档与阈值、key_limit、六出口一致、旧数据降级、0.3.x 边界 | ✅ 当前（E2） |
 | `docs/log-collection.md` | 诊断包三个入口、脱敏、raw 警告 | ✅ 当前 |
 | `docs/overview.md` | 一页看懂产品与**目标**分层 | ⚠️ §2 数据流是目标架构，不是 `analyze()` 现状 |
 | `docs/START-HERE.md` | v0.1.0 的历史交接包（54 用例/骨架/COPY-MAP） | ❌ 历史，数字已过期 |
@@ -569,7 +593,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 620 条，OK (skipped≈27，取决于环境)
+python -m unittest discover -s tests        # 期望 722 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -663,7 +687,7 @@ python -m unittest discover -s tests        # 期望 620 条，OK (skipped≈27�
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 620 tests ... OK (skipped≈27，取决于环境)
+# 期望：Ran 722 tests ... OK (skipped≈27，取决于环境)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：

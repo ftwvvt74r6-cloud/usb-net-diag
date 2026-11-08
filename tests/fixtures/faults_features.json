@@ -21,7 +21,7 @@
   "missing": [
     "tls.sni"
   ],
-  "schema_version": "2.1",
+  "schema_version": "2.2",
   "source_pcap": "faults_demo.pcap",
   "tcp": {
     "bytes": 6397,

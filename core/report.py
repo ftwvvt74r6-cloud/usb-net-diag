@@ -19,6 +19,7 @@ from pathlib import Path
 
 import verdict as verdict_mod
 import evidence as evidence_mod
+import conclusion as conclusion_mod
 
 try:                                    # 扁平导入：core/ 在 sys.path 上（runtime / 测试）
     from copytext import text as _copy_text
@@ -388,6 +389,13 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     level_key = {"严重": "bad", "警告": "warn", "正常": "ok",
                  "证据不足": "insufficient"}.get(vd.get("level", ""), "ok")
     L += [_t("section_verdict"), "", f"### {STATUS_MARK.get(level_key, '')} {vd['headline']}", ""]
+    # E1：结论句 + 依据 + 本次覆盖 / 明确未覆盖 + 置信等级/关键边界，紧跟在标题之后。
+    # 只**追加行**、不改上面任何一行：红线要求「去掉新增行后与基线逐字节相等」。
+    conclusion_block = conclusion_mod.build_conclusion(result, vd)
+    rendered_conclusion = conclusion_mod.render_conclusion_markdown(conclusion_block)
+    if rendered_conclusion.strip():
+        L += rendered_conclusion.rstrip("\n").split("\n")
+        L.append("")
     L.append(_t("fault_layer_line", layer=vd.get("layer", "—"),
                 impact=vd.get("impact", "—")))
     L.append("")
@@ -632,6 +640,9 @@ def save(result: dict, out_dir: Path) -> dict:
     Note:
         JSON 侧**只挑** ``summary`` / ``meta`` / ``metrics`` / ``rows`` / ``verdict`` 五块写盘，
         因此新增的 ``findings_v2`` / ``provenance`` 不会改变已提交的报告快照。
+        E1 起 ``verdict`` 块新增 ``confidence`` / ``basis`` / ``coverage`` /
+        ``not_covered`` 四个键（声明例外）；``confidence_level`` / ``key_limit``
+        只在渲染层出现，**不落库**。
         文件名取自抓包文件名，并过滤掉路径分隔符等危险字符。
 
         落盘前把 ``meta.tshark_path`` 替换成固定占位：绝对路径是机器相关键，
@@ -651,6 +662,14 @@ def save(result: dict, out_dir: Path) -> dict:
     md_path = out_dir / f"{stem}.md"
     json_path = out_dir / f"{stem}.json"
     md_path.write_text(render_markdown(result), encoding="utf-8")
+    verdict_data = verdict_mod.build(result)
+    conclusion_block = conclusion_mod.build_conclusion(result, verdict_data)
+    # E1：verdict 块只新增 confidence / basis / coverage / not_covered 四键。
+    # confidence_level 与 key_limit 是渲染期派生值，**不许落库**（E-IMPL-SPEC §1）。
+    verdict_data["confidence"] = conclusion_block["confidence"]
+    verdict_data["basis"] = conclusion_block["basis"]
+    verdict_data["coverage"] = conclusion_block["coverage"]
+    verdict_data["not_covered"] = conclusion_block["not_covered"]
     json_path.write_text(
         json.dumps(
             {
@@ -658,7 +677,7 @@ def save(result: dict, out_dir: Path) -> dict:
                 "meta": result.get("meta", {}),
                 "metrics": result.get("metrics", {}),
                 "rows": result.get("rows", []),
-                "verdict": verdict_mod.build(result),
+                "verdict": verdict_data,
             },
             ensure_ascii=False,
             indent=2,
@@ -668,11 +687,60 @@ def save(result: dict, out_dir: Path) -> dict:
     return {"markdown": str(md_path), "json": str(json_path)}
 
 
+def _degraded_conclusion(result: dict) -> dict:
+    """为 0 包降级结果构造结论边界对象（B1：降级导出也必须带边界/置信）。
+
+    降级结果没有 ``meta`` / ``rows`` / ``verdict``，不能直接喂给
+    :func:`core.conclusion.build_conclusion`；这里用 ``capture`` / ``target`` /
+    ``link`` / ``duration`` 已有事实拼一个最小输入，标题取 ``card_title``
+    （没有时退 ``headline``）。
+
+    ``meta.packets`` 固定为 **0**：降级 = 没有有效样本，置信度由同一个推导器
+    自动落到 0.3（低），**不手工写置信度**。也正因如此，这里绝不伪造
+    ``probe_baseline``——真实数据都没有，不能凭空造出「高置信」的对照条件。
+
+    Args:
+        result: :func:`diagnose.degraded_empty_capture_result` 的返回值。
+
+    Returns:
+        dict: :func:`core.conclusion.build_conclusion` 的 7 键对象；结果不是
+            字典或字段缺失时同样返回可渲染对象（缺项由渲染器降级为「未知」）。
+    """
+    result = result if isinstance(result, dict) else {}
+    cap = result.get("capture")
+    cap = cap if isinstance(cap, dict) else {}
+    link = result.get("link")
+    link = link if isinstance(link, dict) else {}
+    target = str(cap.get("target") or "").strip() or "全网"
+    duration = cap.get("duration") or 0
+    headline = str(result.get("card_title") or result.get("headline") or "").strip()
+    minimal = {
+        "meta": {
+            "packets": 0,
+            "streams_total": 0,
+            "duration": duration,
+            "target": target,
+        },
+        "summary": {"target": target},
+        "rows": [],
+        # 保留降级特有事实（链路探测）：当前结论模板只消费 meta，但把
+        # capture/link 一起传入，避免将来扩展依据时又出现第二个取数出处。
+        "capture": dict(cap),
+        "link": dict(link),
+    }
+    return conclusion_mod.build_conclusion(minimal, {"headline": headline})
+
+
 def render_degraded(result: dict) -> str:
-    """把 0 包降级结论渲染成 Markdown（结论 + 事实 + 原因 + 建议）。
+    """把 0 包降级结论渲染成 Markdown（结论 + 边界 + 事实 + 原因 + 建议）。
 
     与正常诊断报告分开渲染：降级结果没有 ``rows`` / ``verdict``，强行套用
     :func:`render_markdown` 会出现空章节，反而又变成「结果区没有内容」。
+
+    B1 起在同一节里输出统一的「结论与边界」整块（结论 / 依据 / 本次覆盖 /
+    明确未覆盖 / 置信等级+关键边界）：降级报告也是可下载、可归档的导出路径，
+    按 E-SPEC §1-四不能只给结论不给边界。原有一、二、三、四节的字段含义与
+    顺序不变，结论块是纯插入。
 
     Args:
         result: :func:`diagnose.degraded_empty_capture_result` 的返回值，键含
@@ -680,7 +748,8 @@ def render_degraded(result: dict) -> str:
             ``reasons`` / ``next_steps`` / ``at``。
 
     Returns:
-        str: Markdown 正文（UTF-8 文本，LF 换行）。
+        str: Markdown 正文（UTF-8 文本，LF 换行），含同一渲染器生成的
+            「### 结论与边界」整块。
     """
     link = result.get("link") or {}
     cap = result.get("capture") or {}
@@ -701,6 +770,10 @@ def render_degraded(result: dict) -> str:
     # 非空 ≠ 单目标。旧实现只判真值，把全网体检误写成「单目标诊断」。
     target_text = str(cap.get("target") or "").strip()
     degraded_mode = ("单目标诊断" if target_text and target_text != "全网" else "全网体检")
+    # B1：与正常报告/UI/MCP 同一 build_conclusion + 同一渲染器。降级结果没有
+    # verdict/rows，用 capture/target/link/duration 拼最小输入，置信度自动 0.3/低。
+    conclusion_block = conclusion_mod.render_conclusion_markdown(
+        _degraded_conclusion(result)).rstrip("\n")
     lines = [
         _d("title"),
         "",
@@ -711,6 +784,8 @@ def render_degraded(result: dict) -> str:
         f"**{result.get('card_title') or result.get('headline') or '降级'}**",
         "",
         str(result.get("plain") or result.get("headline") or ""),
+        "",
+        conclusion_block,
         "",
         _d("section_facts"),
         "",
@@ -740,6 +815,12 @@ def save_degraded(result: dict, out_dir: Path) -> dict:
     路测要求：降级卡不能只活在界面上，历史报告 / 导出诊断包里也要能查到这次
     结论。文件名带时间戳，不覆盖任何既有报告。
 
+    B1 起 JSON 与 md 同步携带同一结论边界对象（``conclusion`` / ``basis`` /
+    ``coverage`` / ``not_covered`` / ``confidence`` / ``confidence_level`` /
+    ``key_limit``）。这是**独立导出**，允许出现渲染期派生字段；普通
+    :func:`save` 的五块报告 JSON 约定不变（仍不写 ``confidence_level`` /
+    ``key_limit``）。
+
     Args:
         result: :func:`diagnose.degraded_empty_capture_result` 的返回值。
         out_dir: 输出目录（通常是 ``reports/``）。
@@ -753,6 +834,7 @@ def save_degraded(result: dict, out_dir: Path) -> dict:
     md_path = out_dir / f"degraded_{stamp}.md"
     json_path = out_dir / f"degraded_{stamp}.json"
     md_path.write_text(render_degraded(result), encoding="utf-8")
+    block = _degraded_conclusion(result)
     payload = {
         "kind": result.get("kind", ""),
         "card_title": result.get("card_title", ""),
@@ -763,6 +845,14 @@ def save_degraded(result: dict, out_dir: Path) -> dict:
         "reasons": result.get("reasons", []),
         "next_steps": result.get("next_steps", []),
         "generated_at": result.get("at", ""),
+        # B1：降级导出与 md 用同一结论对象；字段含义与 CLI/UI 的 7 键一致。
+        "conclusion": block["conclusion"],
+        "basis": block["basis"],
+        "coverage": block["coverage"],
+        "not_covered": block["not_covered"],
+        "confidence": block["confidence"],
+        "confidence_level": block["confidence_level"],
+        "key_limit": block["key_limit"],
     }
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                          encoding="utf-8")

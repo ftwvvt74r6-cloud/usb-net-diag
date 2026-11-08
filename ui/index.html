@@ -354,6 +354,26 @@
     padding:3px 8px;font-size:11px;color:var(--muted)}
   .chip b{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums;margin-left:3px}
 
+  /* ---------------- 结论与边界卡（E2）：同卡片连续展示，禁止折叠 ---------------- */
+  .concl{border:1px solid #c7d2fe;border-radius:12px;background:#f8faff;
+    padding:14px 16px;margin:0 0 14px;box-shadow:var(--sh)}
+  .concl .ck{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .concl .ck b{font-size:12px;color:#334155}
+  .concl .ck span{font-size:10px;color:#475569;background:#eef2ff;border-radius:999px;
+    padding:2px 8px;font-weight:700}
+  .concl .cc{font-size:13px;line-height:1.78;font-weight:650;color:var(--text);
+    white-space:pre-wrap}
+  .concl .cc b{color:#1e293b}
+  .concl .cs{margin-top:9px}
+  .concl .cs h5{margin:0 0 3px;font-size:11px;color:#475569;letter-spacing:.3px}
+  .concl .cs ol,.concl .cs ul{margin:0;padding-left:18px;font-size:12px;
+    line-height:1.72;color:var(--text-2)}
+  .concl .cf{margin-top:9px;font-size:11.5px;line-height:1.7;color:#334155;
+    background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 9px}
+  .concl .toolbar{margin-top:10px;gap:7px}
+  .concl .toolbar .btn{width:auto;padding:6px 11px;font-size:12px}
+  .concl.legacy{border-color:#e2e8f0;background:#f8fafc}
+
   /* ---------------- 分层条 ---------------- */
   .layerbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 14px}
   @media (max-width:900px){.layerbar{grid-template-columns:repeat(2,1fr)}}
@@ -1191,6 +1211,7 @@ const FORM_FIELDS = [
   "#shadow-toggle", "#probe-path-toggle",
 ];
 let UI_COPY = {};          // copy/zh-CN.json 的 startup section（由 /api/selfcheck 下发）
+let CONCLUSION_COPY = {};  // copy/zh-CN.json 的 conclusion section（由 /api/status 下发）
 let STARTUP_DATA = null;   // 最近一次 /api/selfcheck 结果（重新检测时复用）
 let FORM_CACHE = null;     // 最近一次读/写的表单快照
 
@@ -2189,8 +2210,10 @@ function renderFailureCard(kind, why) {
     + '<p class="how"><b>怎么办：</b>' + esc(how) + '</p>'
     + (note ? '<div class="note">' + esc(note) + '</div>' : "")
     + '<div id="iface-list"></div>'
-    + '<div class="acts">' + acts + '</div></div>';
+    + '<div class="acts">' + acts + '</div></div>'
+    + conclusionCard(null);
   wireFailureActions(kind);
+  wireConclusionActions(null);
   scrollMainTop();
 }
 
@@ -2206,8 +2229,10 @@ function failedResult(title, detail, code) {
     + '<div class="raw">如果以上步骤仍无法解决，点「查看日志」看完整过程，'
     + '或到「报告与导出 → 导出诊断包」把脱敏日志发回给维护者。</div>'
     + '<div class="acts"><button class="btn" id="err-log">查看日志</button>'
-    + '<button class="btn ghost" id="err-retry">重试</button></div></div>';
+    + '<button class="btn ghost" id="err-retry">重试</button></div></div>'
+    + conclusionCard(null);
   wireFailureActions("");
+  wireConclusionActions(null);
   scrollMainTop();
 }
 
@@ -2285,6 +2310,8 @@ async function poll() {
   try {
     const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
     if (!s) return;
+    /* 结论卡文案随状态下发（唯一来源 copy/zh-CN.json）；旧后端没有该字段时保持空表。 */
+    if (s.ui_copy && s.ui_copy.conclusion) CONCLUSION_COPY = s.ui_copy.conclusion;
     if ((s.logs || []).length < lastLogCount) lastLogCount = 0;
     (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
     lastLogCount = (s.logs || []).length;
@@ -2809,6 +2836,162 @@ function wireFixedEvidenceButtons() {
 }
 wireFixedEvidenceButtons();
 
+/* ---------- 结论与边界（E2）：同卡片连续展示、不可折叠、复制/导出同源 ----------
+   后端把 build_conclusion 的产物 + 服务端预渲染文本随 /api/status 下发：
+   res.conclusion / conclusion_text / conclusion_markdown / conclusion_export。
+   前端只负责排版和放进剪贴板/Blob，不再自己拼一份结论文案。
+   旧载荷没有这些字段时走降级：显式「未知（原因：旧数据缺少边界字段）」+ 低等级。 */
+function conclusionCopy() {
+  return CONCLUSION_COPY || {};
+}
+
+function conclusionReportId(res) {
+  const meta = (res && res.meta) || {};
+  const rep = (res && res.report) || {};
+  const name = String(rep.markdown || "").split(/[\\/]/).pop();
+  const parts = [];
+  parts.push(name || meta.pcap_name || "本次诊断（未落盘报告）");
+  if (meta.generated_at) parts.push(String(meta.generated_at));
+  return parts.join(" · ");
+}
+
+function conclusionData(res) {
+  const copy = conclusionCopy();
+  const legacy = copy.fallback_unknown || "未知（原因：旧数据缺少边界字段）";
+  const lowKey = (copy.key_limit && copy.key_limit.low) || "本次无有效样本或采样异常";
+  const clean = (v) => (Array.isArray(v) ? v : []).map((x) => String(x == null ? "" : x).trim()).filter(Boolean);
+  const c = res && res.conclusion;
+  if (c && typeof c === "object" && typeof c.conclusion === "string" && c.conclusion.trim()) {
+    const conf = Number(c.confidence);
+    const level = (c.confidence_level === "高" || c.confidence_level === "中" || c.confidence_level === "低")
+      ? c.confidence_level : "低";
+    return {
+      conclusion: c.conclusion.trim(),
+      basis: clean(c.basis).length ? clean(c.basis) : [legacy],
+      coverage: clean(c.coverage).length ? clean(c.coverage) : [legacy],
+      not_covered: clean(c.not_covered).length ? clean(c.not_covered) : [legacy],
+      confidence: isFinite(conf) ? conf : 0.3,
+      confidence_level: level,
+      key_limit: (typeof c.key_limit === "string" && c.key_limit.trim()) ? c.key_limit.trim() : lowKey,
+      legacy: false,
+    };
+  }
+  return {
+    conclusion: legacy, basis: [legacy], coverage: [legacy], not_covered: [legacy],
+    confidence: 0.3, confidence_level: "低", key_limit: lowKey, legacy: true,
+  };
+}
+
+function conclusionTextFallback(res) {
+  const d = conclusionData(res), copy = conclusionCopy();
+  const lines = [copy.text_title || "结论与边界", ""];
+  lines.push((copy.text_conclusion || "结论：{conclusion}").replace("{conclusion}", d.conclusion));
+  lines.push("", copy.text_basis || "依据：");
+  d.basis.forEach((x, i) => lines.push((i + 1) + ". " + x));
+  lines.push("", copy.text_coverage || "本次覆盖：");
+  d.coverage.forEach((x, i) => lines.push((i + 1) + ". " + x));
+  lines.push("", copy.text_not_covered || "明确未覆盖：");
+  d.not_covered.forEach((x, i) => lines.push((i + 1) + ". " + x));
+  lines.push("", (copy.text_confidence || "置信度：{level}（{confidence:.2f}）")
+    .replace("{level}", d.confidence_level).replace("{confidence:.2f}", Number(d.confidence).toFixed(2)));
+  lines.push((copy.text_key_limit || "关键边界：{key_limit}").replace("{key_limit}", d.key_limit));
+  const rid = conclusionReportId(res);
+  if (rid) lines.push((copy.report_line || "报告标识：{report_id}").replace("{report_id}", rid));
+  return lines.join("\n") + "\n";
+}
+
+function conclusionMarkdownFallback(res) {
+  const d = conclusionData(res), copy = conclusionCopy();
+  const lines = [copy.section_title || "### 结论与边界", ""];
+  lines.push((copy.conclusion_label || "**结论**：") + d.conclusion, "");
+  lines.push(copy.basis_heading || "**依据**");
+  d.basis.forEach((x) => lines.push("- " + x));
+  lines.push("", copy.coverage_heading || "**本次覆盖**");
+  d.coverage.forEach((x) => lines.push("- " + x));
+  lines.push("", copy.not_covered_heading || "**明确未覆盖**");
+  d.not_covered.forEach((x) => lines.push("- " + x));
+  lines.push("", (copy.confidence_line || "**置信度**：{level}（{confidence:.2f}）　**关键边界**：{key_limit}")
+    .replace("{level}", d.confidence_level).replace("{confidence:.2f}", Number(d.confidence).toFixed(2))
+    .replace("{key_limit}", d.key_limit));
+  lines.push((copy.report_line || "报告标识：{report_id}").replace("{report_id}", conclusionReportId(res)));
+  return lines.join("\n") + "\n";
+}
+
+function conclusionCard(res) {
+  const d = conclusionData(res), copy = conclusionCopy();
+  const label = copy.ui_conclusion_label || "结论";
+  const confTpl = copy.ui_confidence_line
+    || "置信度：{level}（{confidence:.2f}） · 关键边界：{key_limit}";
+  const confLine = confTpl.replace("{level}", d.confidence_level)
+    .replace("{confidence:.2f}", Number(d.confidence).toFixed(2))
+    .replace("{key_limit}", d.key_limit);
+  const list = (heading, key, items, ordered) => '<div class="cs" data-concl="' + key + '">'
+    + '<h5>' + esc(heading) + '</h5>'
+    + (ordered ? '<ol>' : '<ul>') + items.map((x) => '<li>' + esc(x) + '</li>').join("")
+    + (ordered ? '</ol>' : '</ul>') + '</div>';
+  return '<section class="concl' + (d.legacy ? " legacy" : "") + '" id="conclusion-card"'
+    + ' data-conclusion-card="1" data-legacy="' + (d.legacy ? "1" : "0") + '">'
+    + '<div class="ck"><b>' + esc(copy.ui_title || "结论与边界") + '</b>'
+    + '<span>' + esc(copy.ui_kicker || "整块阅读 · 不可折叠") + '</span></div>'
+    + '<div class="cc" data-concl="conclusion"><b>' + esc(label) + '：</b>'
+    + esc(d.conclusion) + '</div>'
+    + list(copy.ui_basis_heading || "依据", "basis", d.basis, true)
+    + list(copy.ui_coverage_heading || "本次覆盖", "coverage", d.coverage, false)
+    + list(copy.ui_not_covered_heading || "明确未覆盖", "not_covered", d.not_covered, false)
+    + '<div class="cf" data-concl="confidence">' + esc(confLine) + '</div>'
+    + '<div class="toolbar">'
+    + '<button class="btn ghost" id="conclusion-copy">' + esc(copy.btn_copy || "复制给二线") + '</button>'
+    + '<button class="btn ghost" id="conclusion-export-md">' + esc(copy.btn_export_md || "导出结论（含边界）（.md）") + '</button>'
+    + '<button class="btn ghost" id="conclusion-export-json">' + esc(copy.btn_export_json || "导出结论（含边界）（.json）") + '</button>'
+    + '</div></section>';
+}
+
+function downloadText(text, mime, filename) {
+  const blob = new Blob([text], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function wireConclusionActions(res) {
+  const copy = conclusionCopy();
+  const btnCopy = $("#conclusion-copy");
+  if (btnCopy) btnCopy.onclick = async () => {
+    /* 复制的是服务端 render_conclusion_text 的整块（含依据/覆盖/未覆盖/置信/边界/报告标识），
+       不是只有结论句。旧载荷没有预渲染文本时才走前端降级整块。 */
+    const text = (res && typeof res.conclusion_text === "string" && res.conclusion_text)
+      || conclusionTextFallback(res);
+    const ok = await copyPlainText(text);
+    if (ok) {
+      const original = btnCopy.textContent;
+      btnCopy.textContent = copy.copy_ok || "已复制 ✓";
+      setTimeout(() => (btnCopy.textContent = original), 1500);
+    } else {
+      appendLog(copy.copy_fail || "复制失败，请手动选择文本", "e");
+    }
+  };
+  const btnMd = $("#conclusion-export-md");
+  if (btnMd) btnMd.onclick = () => {
+    const md = (res && typeof res.conclusion_markdown === "string" && res.conclusion_markdown)
+      || conclusionMarkdownFallback(res);
+    const meta = (res && res.meta) || {};
+    const stem = String(meta.pcap_name || "report").replace(/\.[^.]+$/, "");
+    downloadText(md, "text/markdown;charset=utf-8", stem + "-conclusion.md");
+  };
+  const btnJson = $("#conclusion-export-json");
+  if (btnJson) btnJson.onclick = () => {
+    const payload = (res && res.conclusion_export && res.conclusion_export.conclusion)
+      ? res.conclusion_export
+      : { meta: { report_id: conclusionReportId(res) }, conclusion: conclusionData(res) };
+    const meta = (res && res.meta) || {};
+    const stem = String(meta.pcap_name || "report").replace(/\.[^.]+$/, "");
+    downloadText(JSON.stringify(payload, null, 2), "application/json;charset=utf-8",
+      stem + "-conclusion.json");
+  };
+}
+
 function render(res, actions) {
   if (!res || !res.ok) return;
   hideQuestion();
@@ -2969,6 +3152,8 @@ function render(res, actions) {
       <div class="chips">${chips}</div>
     </div>
 
+    ${conclusionCard(res)}
+
     <div class="sectitle">采集概况</div>
     <div class="statgrid">${statGrid}</div>
 
@@ -3030,6 +3215,7 @@ function render(res, actions) {
   if (evCopyFull) evCopyFull.onclick = () => evidenceAction("copy-full", m.pcap_name || "", evCopyFull);
   const evDownloadFull = $("#evidence-download-full-result");
   if (evDownloadFull) evDownloadFull.onclick = () => evidenceAction("download-full", m.pcap_name || "", evDownloadFull);
+  wireConclusionActions(res);
   wireLinkActions(actions);
   scrollMainTop();
 }
@@ -3092,6 +3278,7 @@ function renderDegraded(res, actions) {
     + '</span><span class="vlay">采集有效性</span><h3>' + esc(title) + '</h3></div>'
     + '<p class="vplain">' + esc(res.plain || res.headline || "") + '</p>'
     + '<div class="chips">' + chips.join("") + '</div></div>'
+    + conclusionCard(res)
     + '<div class="sectitle">' + (unreachable ? "为什么判定目标不可达" : "为什么没看到 TCP/IP 会话（未捕获业务报文）") + '</div>'
     + '<div class="point"><div class="vl"><ol class="steps">' + reasons + '</ol></div></div>'
     + '<div class="sectitle">接下来怎么做（建议按顺序执行）</div>'
@@ -3117,6 +3304,7 @@ function renderDegraded(res, actions) {
     setMode("probe");
     if (cap.target && cap.target !== "全网") $("#probe-target").value = cap.target;
   };
+  wireConclusionActions(res);
   wireLinkActions(actions);
   scrollMainTop();
 }

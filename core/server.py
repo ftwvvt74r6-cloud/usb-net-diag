@@ -54,6 +54,7 @@ sys.path.insert(0, str(CORE))
 
 import ai  # noqa: E402
 import bootstrap  # noqa: E402
+import conclusion  # noqa: E402
 import copytext  # noqa: E402
 import diagnose  # noqa: E402
 import diagpack  # noqa: E402
@@ -544,6 +545,140 @@ def _attach_probe_ui_copy(result: dict | None) -> dict | None:
     if checklist.get("dimensions"):
         enriched["evidence_checklist"] = checklist
     enriched["ui_copy"] = payload
+    return enriched
+
+
+def _conclusion_ui_copy() -> dict:
+    """结论卡片的界面文案（唯一来源：``core/copy/zh-CN.json`` 的 ``conclusion``）。
+
+    页面上的标题、按钮、旧数据降级文案都从这里取；前端不另存一份中文。
+    文案表损坏时返回空表，前端使用内置最小回退（仍然不会空白）。
+
+    Returns:
+        dict: ``conclusion`` section 的字符串/列表映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "conclusion")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def _conclusion_verdict(result: dict) -> dict:
+    """为结论渲染挑一个可用的判定对象（旧/降级结果没有 ``verdict`` 时补标题）。
+
+    正常结果直接用 ``result["verdict"]``；0 包降级结果没有 verdict，但仍有
+    ``headline`` / ``card_title``。此时只补一个最小 ``{"headline": ...}``，让结论句
+    不至于变成「标题缺失」，置信度仍由 :func:`core.conclusion.build_conclusion`
+    按「无有效样本」自动降为低 —— **不伪造 level / points**。
+
+    Args:
+        result: 诊断结果字典。
+
+    Returns:
+        dict: 判定对象；两处都没有标题时返回 ``{}``（渲染器会显式降级为「未知」）。
+    """
+    stored = result.get("verdict")
+    if isinstance(stored, dict) and stored:
+        return stored
+    for key in ("headline", "card_title", "plain"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return {"headline": value.strip()}
+    return {}
+
+
+def conclusion_report_id(result: dict) -> str:
+    """生成给人看的「报告标识」（复制给二线 / 导出时用于追溯）。
+
+    优先用真实落盘文件名（``.md`` / ``.json``），退化为抓包文件名 + 生成时间；
+    都没有时返回「本次诊断（未落盘报告）」。只在状态响应/导出里出现，不写进报告。
+
+    Args:
+        result: 诊断结果字典（读 ``report`` / ``meta``）。
+
+    Returns:
+        str: 非空标识，如 ``faults_demo.md / faults_demo.json · 2026-11-07 21:49:03``。
+    """
+    report_files = result.get("report")
+    report_files = report_files if isinstance(report_files, dict) else {}
+    names = []
+    for key in ("markdown", "json"):
+        raw = report_files.get(key)
+        if raw:
+            name = Path(str(raw)).name
+            if name and name not in names:
+                names.append(name)
+    meta = result.get("meta")
+    meta = meta if isinstance(meta, dict) else {}
+    parts = [" / ".join(names) if names else
+             str(meta.get("pcap_name") or "本次诊断（未落盘报告）")]
+    generated = str(meta.get("generated_at") or "").strip()
+    if generated:
+        parts.append(generated)
+    return " · ".join(parts)
+
+
+def build_status_conclusion(result: dict) -> dict:
+    """为 ``/api/status`` 构造结论边界对象（与 CLI/报告/MCP 同一 ``build_conclusion``）。
+
+    Args:
+        result: ``JOB["result"]``（正常或 0 包降级结果）。
+
+    Returns:
+        dict: :func:`core.conclusion.build_conclusion` 的 7 键对象；任何字段填充
+            失败都由渲染器显式降级为「未知（原因：…）」+ 低置信，不返回空块。
+    """
+    return conclusion.build_conclusion(result, _conclusion_verdict(result))
+
+
+def _attach_conclusion(result: dict | None, block: dict | None = None) -> dict | None:
+    """给结果补结论对象与「复制/导出」预渲染文本（只进状态响应，不写报告）。
+
+    为什么把渲染好的文本也下发：UI 的「复制给二线」「导出 .md」必须与
+    :func:`core.conclusion.render_conclusion_text` / ``render_conclusion_markdown``
+    逐字一致。让服务端渲染一次，前端只负责放进剪贴板/Blob，避免第三份手写格式化。
+    ``conclusion_export`` 则是「CLI ``--json`` 的 conclusion 对象 + 元信息」的
+    固定结构，`.json` 导出直接序列化它。
+
+    Args:
+        result: 诊断结果字典；非字典原样返回。
+        block: 已算好的结论对象；省略时现算 :func:`build_status_conclusion`。
+
+    Returns:
+        dict | None: 浅拷贝 + ``conclusion`` / ``conclusion_text`` /
+            ``conclusion_markdown`` / ``conclusion_export``，并把同一份界面文案
+            并入 ``ui_copy.conclusion``；``result`` 非字典时原样返回。
+    """
+    if not isinstance(result, dict):
+        return result
+    block = block if isinstance(block, dict) else build_status_conclusion(result)
+    report_id = conclusion_report_id(result)
+    enriched = dict(result)
+    enriched["conclusion"] = block
+    enriched["conclusion_text"] = conclusion.render_conclusion_text(block, report_id)
+    enriched["conclusion_markdown"] = conclusion.render_conclusion_markdown(
+        block, report_id)
+    meta = result.get("meta")
+    meta = meta if isinstance(meta, dict) else {}
+    report_files = result.get("report")
+    report_files = report_files if isinstance(report_files, dict) else {}
+    report_names = {
+        key: Path(str(value)).name
+        for key, value in report_files.items()
+        if value and key in ("markdown", "json")
+    }
+    enriched["conclusion_export"] = {
+        "meta": {
+            "report_id": report_id,
+            "generated_at": meta.get("generated_at", ""),
+            "pcap_name": meta.get("pcap_name", ""),
+            "report": report_names,
+        },
+        "conclusion": block,
+    }
+    ui_copy = dict(enriched.get("ui_copy") or {})
+    ui_copy["conclusion"] = _conclusion_ui_copy()
+    enriched["ui_copy"] = ui_copy
     return enriched
 
 
@@ -1221,9 +1356,16 @@ class Handler(BaseHTTPRequestHandler):
             data["attempts"] = attempts
             # 加法字段：结果页「接下来怎么做」的一键复测按钮参数。
             # 只进状态响应，不进报告，所以 faults_demo 快照不受影响。
-            if data["state"] == "done" and data.get("result"):
+            if data["state"] == "done" and isinstance(data.get("result"), dict):
                 data["link_actions"] = link_actions(data["result"], _gateway_now())
                 data["result"] = _attach_probe_ui_copy(data["result"])
+                # E2：结论与边界作为**加法字段**随状态下发。同一 build_conclusion
+                # 产物 + 服务端预渲染文本，UI 只负责排版/复制/下载，不另写格式化。
+                data["conclusion"] = build_status_conclusion(data["result"])
+                data["result"] = _attach_conclusion(data["result"], data["conclusion"])
+            # 结论卡文案即使没有结果也要下发（失败/降级页也要显示边界卡）；
+            # 旧前端不读 ui_copy.conclusion，不受影响。
+            data["ui_copy"] = {"conclusion": _conclusion_ui_copy()}
             return self._json(data)
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]

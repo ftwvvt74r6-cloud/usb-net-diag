@@ -34,6 +34,11 @@ try:                                    # 判定结果缺失时按需现算（�
 except ModuleNotFoundError:             # 包导入
     from core import verdict as _verdict_mod
 
+try:                                    # 结论边界块（E1：取证单前置「结论+边界」）
+    import conclusion as _conclusion_mod
+except ModuleNotFoundError:             # 包导入
+    from core import conclusion as _conclusion_mod
+
 #: 清单模板的唯一位置（清单正文只在这里维护）。
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "copy" / "evidence_checklist.json"
 
@@ -348,7 +353,8 @@ def _select_dimensions(template: dict, keys: list[str]) -> list[dict]:
 
 
 def build_checklist(result: dict, full: bool = False, verdict: dict | None = None,
-                    template: dict | None = None) -> dict:
+                    template: dict | None = None,
+                    conclusion: dict | None = None) -> dict:
     """按本次结论生成清单；``full=True`` 生成覆盖 7 维的通用空白版。
 
     ``full=True`` 时**不依赖 ``result`` 与结论**：``result={}`` 也能返回完整的
@@ -359,12 +365,16 @@ def build_checklist(result: dict, full: bool = False, verdict: dict | None = Non
         full: 为 ``True`` 时忽略结论、输出全部 7 维（界面「复制通用空白版」用）。
         verdict: 可选的已算好判定；报告渲染/接口传入同一个判定，避免重复计算。
         template: 可选的模板对象（测试注入/变异用）；省略时用导入期加载的模板。
+        conclusion: 可选的已算好结论边界对象（E1）。报告/接口可传入同一个
+            :func:`core.conclusion.build_conclusion` 产物；省略且 ``full=False``
+            时按本次 ``result`` + ``verdict`` 现算一次，保证取证单与报告同源。
 
     Returns:
         dict: ``{"full": bool, "level": str, "layer": str, "dimensions": [...]}``；
             ``dimensions`` 每项 ``{"key", "name", "note", "items"}``，``items``
-            每项恰好 ``field/why/where/criteria`` 四键。模板不可用时返回空
-            ``dimensions``（调用方据此不渲染区块）。
+            每项恰好 ``field/why/where/criteria`` 四键。E1 起加法键
+            ``conclusion``（结论边界对象，``full=True`` 时为通用空白版不加）；
+            模板不可用时返回空 ``dimensions``（调用方据此不渲染区块）。
     """
     result = result if isinstance(result, dict) else {}
     chosen_template = template if isinstance(template, dict) else _TEMPLATE
@@ -380,12 +390,19 @@ def build_checklist(result: dict, full: bool = False, verdict: dict | None = Non
     else:
         vd = _verdict_of(result, verdict)
         keys = dimensions_for(result, verdict=vd)
-    return {
+    conclusion_block = conclusion if isinstance(conclusion, dict) else None
+    if conclusion_block is None and not full:
+        # 取证单/复制/导出路径也必须带边界；与报告调用同一 build_conclusion。
+        conclusion_block = _conclusion_mod.build_conclusion(result, vd)
+    payload = {
         "full": bool(full),
         "level": str(vd.get("level") or ""),
         "layer": str(vd.get("layer") or ""),
         "dimensions": _select_dimensions(chosen_template, keys),
     }
+    if conclusion_block is not None:
+        payload["conclusion"] = conclusion_block
+    return payload
 
 
 def _esc(value) -> str:
@@ -418,14 +435,19 @@ def _table(head: list[str], rows: list[list]) -> str:
     return "\n".join(out)
 
 
-def render_checklist_markdown(checklist: dict) -> str:
+def render_checklist_markdown(checklist: dict, include_conclusion: bool = True) -> str:
     """把清单渲染成报告内 Markdown 区块（维度小标题 + 四列表格）。
 
     维度与条目文字来自模板 JSON，标题/表头等标签来自 ``copy.evidence_checklist``；
-    没有维度时返回空串（调用方据此不追加区块）。
+    没有维度时返回空串（调用方据此不追加区块）。E1 起若 ``checklist`` 带
+    ``conclusion`` 边界对象，则在清单**之前**输出同一结论+边界块（与报告同源），
+    保证「任何只给结论不给边界的导出路径」不成立。
 
     Args:
         checklist: :func:`build_checklist` 的返回值。
+        include_conclusion: 是否在清单前输出结论边界块；报告正文第一节已经
+            输出过同一块时也**保留**（报告末尾的取证单是「整块可转发」的副本，
+            复制给二线时结论和边界不会丢）。
 
     Returns:
         str: 以 ``copy.evidence_checklist.section_title`` 开头、以换行结尾的 Markdown；
@@ -434,6 +456,10 @@ def render_checklist_markdown(checklist: dict) -> str:
     dims = checklist.get("dimensions") if isinstance(checklist, dict) else None
     if not dims:
         return ""
+    prefix = ""
+    if include_conclusion and isinstance(checklist.get("conclusion"), dict):
+        prefix = _conclusion_mod.render_conclusion_markdown(
+            checklist["conclusion"]) + "\n"
     if checklist.get("full"):
         intro = _e("intro_full")
     else:
@@ -453,14 +479,18 @@ def render_checklist_markdown(checklist: dict) -> str:
                   item.get("where", ""), item.get("criteria", "")] for item in items]))
             lines.append("")
     lines += [_e("footer"), ""]
-    return "\n".join(lines)
+    return prefix + "\n".join(lines)
 
 
-def render_checklist_text(checklist: dict) -> str:
+def render_checklist_text(checklist: dict, include_conclusion: bool = True) -> str:
     """把清单渲染成纯文本（方便直接发微信/工单，不含 Markdown 表格符号）。
+
+    E1 起若 ``checklist`` 带 ``conclusion`` 边界对象，则在清单前输出同一结论+
+    边界块的**纯文本版**（复制给二线时结论与边界一起走）。
 
     Args:
         checklist: :func:`build_checklist` 的返回值。
+        include_conclusion: 是否在清单前输出结论边界块；默认输出。
 
     Returns:
         str: 纯文本清单；无维度时返回 ``""``。正文不含 ``|`` 与 ``#`` 标题符号，
@@ -469,6 +499,9 @@ def render_checklist_text(checklist: dict) -> str:
     dims = checklist.get("dimensions") if isinstance(checklist, dict) else None
     if not dims:
         return ""
+    prefix = ""
+    if include_conclusion and isinstance(checklist.get("conclusion"), dict):
+        prefix = _conclusion_mod.render_conclusion_text(checklist["conclusion"]) + "\n"
     if checklist.get("full"):
         intro = _e("text_intro_full")
     else:
@@ -486,7 +519,7 @@ def render_checklist_text(checklist: dict) -> str:
             lines.append("    " + _e("text_criteria", value=item.get("criteria", "")))
         lines.append("")
     lines += [_e("text_footer"), ""]
-    return "\n".join(lines)
+    return prefix + "\n".join(lines)
 
 
 __all__ = [
