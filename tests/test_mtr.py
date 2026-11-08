@@ -640,6 +640,8 @@ class RunScanInjectionTest(unittest.TestCase):
                                       return_value={"markdown": "m", "json": "j"}), \
                     mock.patch.object(diagnose.logstore, "record_run"), \
                     mock.patch.object(diagnose, "REPORTS", Path(tmp)), \
+                    mock.patch.object(diagnose.tshark, "find_tshark",
+                                      return_value=Path("tshark.exe")), \
                     mock.patch.object(diagnose.pathprobe,
                                       "count_time_exceeded_packets",
                                       return_value=7) as counted:
