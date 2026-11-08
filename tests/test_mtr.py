@@ -740,6 +740,202 @@ class RunFallbackTest(unittest.TestCase):
         self.assertEqual(len(result.hops), 4, "ICMP 的逐跳数据必须保留")
 
 
+class TracertParseTest(unittest.TestCase):
+    """G2：系统 tracert 的命令形状与**结构化**解析（不依赖本地化关键词）。"""
+
+    def test_command_shape_and_clamping(self):
+        command = pathprobe._tracert_command(TARGET, 99, 0.05)
+        self.assertIn("-d", command, "必须 -d：只拿 IP，不做反向解析")
+        index = command.index("-h")
+        self.assertEqual(command[index + 1], "16", "max_hops 必须夹到 16")
+        wait = command.index("-w")
+        self.assertEqual(command[wait + 1], "200", "timeout 必须夹到 PATH_TIMEOUT_RANGE")
+        self.assertEqual(command[-1], TARGET)
+        slow = pathprobe._tracert_command(TARGET, 4, 9)
+        self.assertEqual(slow[slow.index("-h") + 1], "4")
+        self.assertEqual(slow[slow.index("-w") + 1], "3000")
+
+    def test_english_output_is_parsed_structurally(self):
+        text = (
+            "Tracing route to 198.51.100.20 over a maximum of 4 hops\n\n"
+            "  1    <1 ms    <1 ms    <1 ms  192.0.2.1\n"
+            "  2     5 ms     6 ms     7 ms  192.0.2.2\n"
+            "  3     *        *        *     Request timed out.\n"
+            "  4    12 ms    13 ms    14 ms  198.51.100.20\n\n"
+            "Trace complete.\n"
+        )
+        rows, malformed = pathprobe._parse_tracert_output(text)
+        self.assertEqual(malformed, 0)
+        self.assertEqual(len(rows), 12, "每跳固定 3 个采样")
+        hops = pathprobe.build_hop_stats(rows, target_ip=TARGET)
+        self.assertEqual([hop.ttl for hop in hops], [1, 2, 3, 4])
+        self.assertEqual((hops[0].sent, hops[0].lost, hops[0].rtt_n), (3, 0, 3))
+        self.assertEqual(hops[0].ip, GW)
+        self.assertEqual(hops[0].rtt_avg_ms, 0.5, "<1ms 取 0.5 作为代表值")
+        self.assertEqual(hops[1].rtt_avg_ms, 6.0)
+        self.assertEqual((hops[2].sent, hops[2].lost, hops[2].rtt_n), (3, 3, 0))
+        self.assertIsNone(hops[2].rtt_avg_ms, "没有 RTT 样本不许用 0.0 冒充")
+        self.assertEqual(hops[3].ip, TARGET)
+
+    def test_localized_timeout_text_is_ignored(self):
+        """中文/其它语言的「请求超时」不参与判定：只看前 3 个字段。"""
+        text = (
+            "通过最多 4 个跃点跟踪到 198.51.100.20 的路由\n\n"
+            "  1    <1 毫秒    <1 毫秒    <1 毫秒  192.0.2.1\n"
+            "  2     *        *        *     请求超时。\n"
+            "  3     4,5 ms   5 ms     6 ms  192.0.2.2\n"
+        )
+        rows, malformed = pathprobe._parse_tracert_output(text)
+        self.assertEqual(malformed, 0)
+        hops = pathprobe.build_hop_stats(rows, target_ip=TARGET)
+        self.assertEqual((hops[0].sent, hops[0].lost), (3, 0))
+        self.assertEqual((hops[1].sent, hops[1].lost), (3, 3))
+        self.assertEqual(hops[2].rtt_min_ms, 4.5, "小数逗号也要能解析")
+        self.assertNotIn("请求超时", str(rows), "本地化文字不得进入数据")
+
+    def test_rtt_without_ip_is_malformed_not_fabricated(self):
+        rows, malformed = pathprobe._parse_tracert_output(
+            "  1     5 ms     5 ms     5 ms\n")
+        self.assertEqual(rows, [])
+        self.assertEqual(malformed, 1, "有 RTT 没响应方 → 结构不完整，跳过而不是编 IP")
+
+    def test_no_hop_lines_returns_empty(self):
+        rows, malformed = pathprobe._parse_tracert_output(
+            "Tracing route to 198.51.100.20\nover a maximum of 30 hops:\n\n"
+            "Trace complete.\n")
+        self.assertEqual((rows, malformed), ([], 0))
+
+
+def _tracert_row(ttl, responded=True, rtt=1.0, responder=GW):
+    """造一条 tracert 采样记录（与 `_parse_tracert_output` 同构）。"""
+    return {"ttl": ttl, "seq": ttl, "responded": bool(responded),
+            "rtt_ms": float(rtt) if responded else None,
+            "responder": responder if responded else "",
+            "error": "" if responded else "timeout"}
+
+
+class TracertFallbackRunTest(unittest.TestCase):
+    """G2：``run()`` 在 scapy 不可用时降级系统 tracert，语义/报告字段不变。"""
+
+    def _run(self, tracert, *, logger=None, samples=5, max_hops=8):
+        with mock.patch.object(pathprobe, "scapy_available", return_value=False), \
+                mock.patch.object(pathprobe, "_tracert_rows",
+                                  side_effect=tracert) as called:
+            result = pathprobe.run(
+                TARGET, port=443, max_hops=max_hops, samples=samples,
+                timeout_s=0.8, tcp_checker=lambda *_a: False, logger=logger)
+        return result, called
+
+    def test_fallback_returns_tracert_result_with_three_samples(self):
+        def tracert(target, max_hops, timeout_s, should_stop=None):
+            return ([_tracert_row(1, True, 1.0, GW),
+                     _tracert_row(2, True, 8.0, TARGET)], 6, True, "")
+
+        result, called = self._run(tracert)
+        self.assertEqual(result.method, "tracert")
+        self.assertEqual(result.samples, 3, "tracert 固定每跳 3 次探测")
+        self.assertEqual(result.probes_sent, 6)
+        self.assertEqual(result.ledger["probes_sent"], 6)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_OK)
+        self.assertTrue(result.reached_target)
+        self.assertEqual(result.error, "")
+        self.assertEqual(called.call_count, 1)
+        self.assertEqual(called.call_args.args[1], 8, "max_hops 要传给 tracert")
+        self.assertEqual(called.call_args.args[2], 0.8)
+
+    def test_r5_middle_loss_with_healthy_target_stays_ok(self):
+        """tracert 中途丢包、目标正常 → PATH.OK + middle_loss_suspected（R5 不变）。"""
+        def tracert(target, max_hops, timeout_s, should_stop=None):
+            return ([_tracert_row(1, True, 1.0, GW),
+                     _tracert_row(2, False), _tracert_row(3, False),
+                     _tracert_row(4, True, 9.0, TARGET)], 12, True, "")
+
+        result, _ = self._run(tracert)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_OK)
+        self.assertIsNone(result.degraded_ttl)
+        self.assertTrue(result.middle_loss_suspected)
+        self.assertEqual(result.middle_loss_ttls, (2, 3))
+
+    def test_degraded_path_keeps_transport_net_verdict(self):
+        def tracert(target, max_hops, timeout_s, should_stop=None):
+            return ([_tracert_row(1, True, 1.0, GW),
+                     _tracert_row(2, False), _tracert_row(3, False),
+                     _tracert_row(4, False)], 12, True, "")
+
+        result, _ = self._run(tracert)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_TRANSPORT_NET)
+        self.assertEqual(result.degraded_ttl, 2)
+        self.assertEqual(result.degraded_ttl, pathprobe.first_degraded_hop(result.hops))
+
+    def test_parse_failure_is_explicit_no_data(self):
+        def tracert(target, max_hops, timeout_s, should_stop=None):
+            return ([], 0, False, "tracert 解析失败/不可用：命令没有输出")
+
+        result, _ = self._run(tracert)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_NO_DATA)
+        self.assertEqual(result.hops, ())
+        self.assertEqual(result.method, "tracert")
+        self.assertIn("tracert 解析失败/不可用", result.error)
+        self.assertNotIn("ModuleNotFoundError", result.error)
+
+    def test_unexpected_exception_does_not_escape(self):
+        def tracert(target, max_hops, timeout_s, should_stop=None):
+            raise RuntimeError("boom")
+
+        result, _ = self._run(tracert)
+        self.assertEqual(result.verdict_key, pathprobe.PATH_NO_DATA)
+        self.assertIn("tracert 不可用", result.error)
+        self.assertIn("RuntimeError", result.error)
+
+    def test_engine_is_logged(self):
+        log: list[str] = []
+
+        def tracert(target, max_hops, timeout_s, should_stop=None):
+            return ([_tracert_row(1, True, 1.0, TARGET)], 3, True, "")
+
+        self._run(tracert, logger=log.append)
+        text = "\n".join(log)
+        self.assertIn("路径剖面：scapy 不可用，使用系统 tracert 降级", text)
+        self.assertIn("每跳 3 次探测", text)
+
+    def test_scapy_available_still_uses_scapy_engine(self):
+        calls: list[dict] = []
+
+        def fake_sender(ip, method, probes, timeout_s, port):
+            calls.append({"method": method, "probes": len(probes)})
+            return [_row(probe["ttl"], responded=False) for probe in probes]
+
+        log: list[str] = []
+        with mock.patch.object(pathprobe, "scapy_available", return_value=True), \
+                mock.patch.object(pathprobe, "_scapy_send_batch", side_effect=fake_sender):
+            result = pathprobe.run(TARGET, port=443, max_hops=1, samples=1,
+                                   timeout_s=0.2, tcp_checker=lambda *_a: False,
+                                   logger=log.append)
+        self.assertEqual(result.method, "icmp", "有 scapy 时行为不变")
+        self.assertEqual(calls, [{"method": "icmp", "probes": 1}])
+        self.assertIn("使用 scapy 逐跳", "\n".join(log))
+
+    def test_injected_sender_works_even_without_scapy(self):
+        """sender 是单测接缝：没有 scapy 也必须按注入实现走，不被降级分支抢走。"""
+        class _Sender:
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, ip, method, probes, timeout_s, port):
+                self.calls.append(method)
+                return [_row(probe["ttl"], responded=False) for probe in probes]
+
+        sender = _Sender()
+        with mock.patch.object(pathprobe, "scapy_available", return_value=False), \
+                mock.patch.object(pathprobe, "_tracert_rows") as tracert_rows:
+            result = pathprobe.run(TARGET, port=443, max_hops=1, samples=1,
+                                   timeout_s=0.2, sender=sender,
+                                   tcp_checker=lambda *_a: False)
+        self.assertEqual(result.method, "icmp")
+        self.assertEqual(sender.calls, ["icmp"])
+        tracert_rows.assert_not_called()
+
+
 class PathProfilerTest(unittest.TestCase):
     """后台线程：可取消、失败只降级、快照带两种过滤串。"""
 
@@ -898,7 +1094,7 @@ class RunScanInjectionTest(unittest.TestCase):
         }
 
     def _run(self, cap: dict, profile_patch=None, analyze_side_effect=None,
-             logger=None, **kwargs):
+             logger=None, counted_icmp: int = 7, **kwargs):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(diagnose, "capture_live", return_value=cap), \
                     mock.patch.object(diagnose.analyzer, "analyze",
@@ -912,7 +1108,7 @@ class RunScanInjectionTest(unittest.TestCase):
                                       return_value=Path("tshark.exe")), \
                     mock.patch.object(diagnose.pathprobe,
                                       "count_time_exceeded_packets",
-                                      return_value=7) as counted:
+                                      return_value=counted_icmp) as counted:
                 result = diagnose.run_scan(
                     logger=logger or (lambda _m: None), **kwargs)
         return result, analyze, counted
@@ -941,6 +1137,25 @@ class RunScanInjectionTest(unittest.TestCase):
         display_filter = analyze.call_args.kwargs.get("display_filter") or ""
         self.assertIn("icmp.type == 11", display_filter)
         self.assertIn("tcp.srcport", display_filter)
+
+    def test_zero_excluded_icmp_log_omits_exclusion_sentence(self):
+        """S5：日志与报告同口径 —— 0 个 ICMP 超时包时不写「剔除 0」。"""
+        logs: list[str] = []
+        self._run(self._cap(_profile()), target=TARGET, shadow=True, duration=5,
+                  logger=logs.append, counted_icmp=0)
+        text = "\n".join(logs)
+        self.assertIn("路径剖面", text)
+        self.assertNotIn("ICMP 超时包", text,
+                         f"0 值不应打印排除句：\n{text}")
+        self.assertNotIn("剔除", text)
+
+    def test_positive_excluded_icmp_log_keeps_exclusion_sentence(self):
+        """N>0 时排除句保留，且数字来自 count_time_exceeded_packets。"""
+        logs: list[str] = []
+        self._run(self._cap(_profile()), target=TARGET, shadow=True, duration=5,
+                  logger=logs.append, counted_icmp=7)
+        text = "\n".join(logs)
+        self.assertIn("剔除 7 个 ICMP 超时包", text)
 
     def test_display_filter_failure_always_retries_without_filter(self):
         """R7：显示过滤失败（错误串不含 filter）也必须无条件回退一次。"""
@@ -1037,12 +1252,44 @@ class PathReportTest(unittest.TestCase):
         self.assertIn("6 为上限", md)
         self.assertIn("含非探针流量", md)
 
+    def test_zero_excluded_icmp_omits_count_line(self):
+        """S5：没有样本就明说 —— ``excluded_icmp=0`` 时不打印「剔除 0 个」。"""
+        md = report.render_markdown(_result(_profile(excluded_icmp=0)))
+        block = md.split("路径剖面", 1)[1].split("\n## ", 1)[0]
+        self.assertNotIn("剔除 0", block)
+        self.assertNotIn("业务统计", block,
+                         "0 值没有信息量，不能和 G3 的 N=0 静默口径相矛盾")
+        self.assertIn("路径剖面", md, "有逐跳数据时区块本身仍必须存在")
+
+    def test_missing_excluded_icmp_old_payload_omits_count_line(self):
+        """旧载荷没有 ``excluded_icmp`` 键时按 0 处理，同样不打印。"""
+        profile = _profile()
+        profile.pop("excluded_icmp")
+        block = report.render_markdown(_result(profile)).split("路径剖面", 1)[1]
+        self.assertNotIn("剔除", block.split("\n## ", 1)[0])
+
     def test_tcp_method_and_icmp_filtered_wording(self):
         md = report.render_markdown(_result(_profile(
             method="tcp", icmp_filtered=True, verdict_key=pathprobe.PATH_ICMP_FILTERED,
             degraded_ttl=None, middle_loss_suspected=False, middle_loss_ttls=[])))
         self.assertIn("ICMP 被过滤，改用 TCP 探测", md)
         self.assertIn("ICMP 被过滤", md)
+
+    def test_tracert_method_uses_tracert_wording_not_tcp_fallback(self):
+        md = report.render_markdown(_result(_profile(
+            method="tracert", icmp_filtered=True,
+            verdict_key=pathprobe.PATH_ICMP_FILTERED,
+            degraded_ttl=None, middle_loss_suspected=False, middle_loss_ttls=[])))
+        self.assertIn("基于系统 tracert", md)
+        self.assertIn("样本数 3（每跳 3 次探测）", md)
+        self.assertNotIn("本次已改用 TCP 探测", md,
+                         "tracert 降级没有 TCP 重扫，不能照抄 TCP 文案")
+        self.assertIn("未做 TCP 逐跳重扫", md)
+
+    def test_tracert_plain_method_line(self):
+        md = report.render_markdown(_result(_profile(method="tracert")))
+        self.assertIn("基于系统 tracert", md)
+        self.assertNotIn("TCP SYN", md)
 
     def test_verdict_keys_have_text(self):
         keys = {
@@ -1162,6 +1409,45 @@ class ProbeApiPathTest(unittest.TestCase):
         self.assertIn('_to_bool((q.get("path") or [None])[0], True)', source)
         self.assertIn('params = {"target"', source)
 
+    def test_path_probe_has_time_budget_and_cancellation_hook(self):
+        """S6：同步 ``/api/probe?path=true`` 必须带时间预算（不干等约 60s）。"""
+        captured: dict = {}
+
+        def fake_run(target, port=None, **kwargs):
+            captured.update(kwargs)
+            return self._path_result()
+
+        with mock.patch.object(server.pathprobe, "run", side_effect=fake_run), \
+                mock.patch.object(server, "log"):
+            profile = server._probe_path_profile("example.com", 443, budget_s=1)
+        self.assertIsNotNone(profile)
+        should_stop = captured.get("should_stop")
+        self.assertTrue(callable(should_stop), "必须把取消判定传给 pathprobe.run")
+        self.assertFalse(should_stop())
+        time.sleep(1.02)  # 预算最小 1s（防误传 0 立即取消）
+        self.assertTrue(should_stop(), "预算到点后必须让 pathprobe 收尾")
+
+    def test_budget_stop_keeps_partial_profile_and_marks_not_completed(self):
+        """到预算被取消时：保留已完成的跳、completed=false、日志明说未跑完。"""
+        partial = pathprobe.PathProbeResult(
+            target="example.com", target_ip=TARGET,
+            hops=(pathprobe.HopStat(ttl=1, ip=GW, sent=3, lost=0,
+                                    rtt_min_ms=1.0, rtt_avg_ms=1.0,
+                                    rtt_max_ms=1.0, jitter_ms=0.0, rtt_n=3),),
+            verdict_key=pathprobe.PATH_OK, method="tracert", reached_target=False,
+            completed=False, error="tracert 被取消，已保留部分跳",
+            max_hops=16, samples=3, timeout_s=1.0, probes_sent=3)
+        logs: list[str] = []
+        with mock.patch.object(server.pathprobe, "run", return_value=partial), \
+                mock.patch.object(server, "log", side_effect=logs.append):
+            profile = server._probe_path_profile("example.com", 443, budget_s=1)
+        self.assertIsNotNone(profile)
+        self.assertFalse(profile["completed"])
+        self.assertEqual(len(profile["hops"]), 1)
+        text = "\n".join(logs)
+        self.assertIn("部分降级", text)
+        self.assertIn("未跑完", text)
+
 
 class PathUiTest(unittest.TestCase):
     """UI：逐跳 checkbox 默认勾选、payload 带 path、结果页渲染路径剖面。"""
@@ -1204,7 +1490,8 @@ class PathUiTest(unittest.TestCase):
         for key in ("ui_title", "ui_hint", "th_ttl", "target_line", "verdict_ok",
                     "verdict_icmp_filtered", "tun_hint", "not_completed_line",
                     "excluded_icmp", "method_tcp", "middle_loss_hint",
-                    "status_rate_limited"):
+                    "status_rate_limited", "method_tracert",
+                    "verdict_icmp_filtered_tracert"):
             with self.subTest(key=key):
                 self.assertIn(key, path_copy)
         start = HTML.index("function renderPathProfile(pp, copy)")
@@ -1216,6 +1503,14 @@ class PathUiTest(unittest.TestCase):
             self.assertNotIn(hardcoded, body,
                              "路径区块的文案必须来自 copy 表，不能在页面里写死")
 
+    def test_tracert_method_and_verdict_branch(self):
+        start = HTML.index("function renderPathProfile(pp, copy)")
+        body = HTML[start:HTML.index("\nfunction ", start)]
+        self.assertIn('pp.method === "tracert"', body)
+        self.assertIn("copy.method_tracert", body)
+        self.assertIn("verdict_icmp_filtered_tracert", body,
+                      "tracert 降级不能显示「已改用 TCP 探测」")
+
     def test_status_ui_copy_includes_path_when_present(self):
         with mock.patch.object(server, "_probe_ui_copy", return_value={"ui_title": "x"}), \
                 mock.patch.object(server, "_path_ui_copy", return_value={"ui_title": "y"}):
@@ -1223,6 +1518,15 @@ class PathUiTest(unittest.TestCase):
                 {"meta": {"path_profile": _profile()}})
         self.assertEqual(enriched["ui_copy"]["path"], {"ui_title": "y"})
         self.assertNotIn("probe", enriched["ui_copy"])
+
+    def test_path_block_hides_zero_excluded_icmp(self):
+        """S5：UI 与报告/日志同口径，0 个 ICMP 超时包不渲染「剔除 0」。"""
+        start = HTML.index("function renderPathProfile(pp, copy)")
+        body = HTML[start:HTML.index("\nfunction ", start)]
+        self.assertIn("excludedIcmp > 0", body,
+                      "0 值必须跳过 excluded_icmp 文案（没有样本就明说）")
+        self.assertNotIn("? 0 : pp.excluded_icmp", body,
+                         "旧的无条件渲染写法必须消失")
 
 
 # ---------------------------------------------------------------- 隔离（硬性）

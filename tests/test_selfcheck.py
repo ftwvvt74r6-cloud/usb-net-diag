@@ -1,10 +1,11 @@
-"""C2 首屏自检：``GET /api/selfcheck`` 五项结构 + 首次运行标记 + FAIL-OPEN 契约。
+"""C2/G2 首屏自检：``GET /api/selfcheck`` 六项结构 + 首次运行标记 + FAIL-OPEN 契约。
 
 这个文件钉住三件容易「看起来能用、实际悄悄坏掉」的事：
 
-1. **五项固定结构**：``python`` / ``tshark`` / ``npcap`` / ``port`` / ``admin``，
-   每项都有 ``key/name/ok/detail/fix_kind/fix_url/fix_command``；失败项的
-   ``detail`` 必须可执行（含原因），修复信息必须指向官网链接或命令。
+1. **六项固定结构**：``python`` / ``tshark`` / ``npcap`` / ``scapy`` / ``port`` /
+   ``admin``，每项都有 ``key/name/ok/detail/fix_kind/fix_url/fix_command``；失败项的
+   ``detail`` 必须可执行（含原因），修复信息必须指向官网链接或命令。scapy 是可选
+   引擎：缺了不引导安装，只说明「逐跳降级系统 tracert」。
 2. **首次运行标记**：位置在 ``<root>/config/ui-first-run.json``；写了之后
    ``first_run`` 变 False；**写失败（U 盘只读）返回 ok:false 但绝不抛异常**，
    更不许阻塞界面（``collect`` 仍能正常返回）。
@@ -38,9 +39,9 @@ import server  # noqa: E402
 
 CHECK_FIELDS = {"key", "name", "ok", "detail", "fix_kind", "fix_url", "fix_command",
                 "impact", "doc_url"}
-EXPECTED_KEYS = ["python", "tshark", "npcap", "port", "admin"]
+EXPECTED_KEYS = ["python", "tshark", "npcap", "scapy", "port", "admin"]
 CAPABILITY_FIELDS = {"probe", "offline", "live", "passive", "reports", "settings",
-                     "missing", "scapy"}
+                     "path_probe", "mtr_engine", "missing", "scapy"}
 
 
 def _http(port: int, method: str, path: str, body: bytes | None = None,
@@ -68,15 +69,20 @@ def _mock_env():
         selfcheck.tshark, "version", return_value="TShark (Wireshark) 4.7.4"))
     stack.enter_context(mock.patch.object(selfcheck, "_npcap_installed", return_value=True))
     stack.enter_context(mock.patch.object(selfcheck, "_is_admin", return_value=True))
+    # scapy 是可选引擎：本机有/CI 没有都不该让「全绿」用例跟着环境漂移。
+    stack.enter_context(mock.patch.object(selfcheck, "_scapy_available",
+                                           return_value=True))
+    stack.enter_context(mock.patch.object(selfcheck, "_tracert_available",
+                                           return_value=True))
     stack.enter_context(mock.patch.object(selfcheck.app, "find_running", return_value=""))
     stack.enter_context(mock.patch.object(selfcheck.app, "first_free_port", return_value=8787))
     return stack
 
 
 class CollectContractTest(unittest.TestCase):
-    """五项固定 key/字段/顺序；通过时 ok=True；版本与 first_run 从注入的 root 读。"""
+    """六项固定 key/字段/顺序；通过时 ok=True；版本与 first_run 从注入的 root 读。"""
 
-    def test_five_checks_with_fixed_keys_and_fields(self):
+    def test_six_checks_with_fixed_keys_and_fields(self):
         with tempfile.TemporaryDirectory(prefix="netdiag_selfcheck_") as tmp:
             root = Path(tmp)
             (root / "VERSION").write_text("9.9.9\n", encoding="utf-8")
@@ -85,7 +91,7 @@ class CollectContractTest(unittest.TestCase):
         self.assertEqual([c["key"] for c in data["checks"]], EXPECTED_KEYS)
         self.assertEqual(data["version"], "9.9.9")
         self.assertTrue(data["first_run"], "临时目录没有标记文件 → 必须是首次运行")
-        self.assertTrue(data["ok"], "五项都 mock 成通过时 ok 必须为 True")
+        self.assertTrue(data["ok"], "六项都 mock 成通过时 ok 必须为 True")
         for item in data["checks"]:
             with self.subTest(key=item["key"]):
                 self.assertEqual(set(item), CHECK_FIELDS,
@@ -236,7 +242,7 @@ class PureReadBoundaryTest(unittest.TestCase):
                     mock.patch.object(selfcheck.app, "relaunch_as_admin") as relaunch, \
                     mock.patch.object(selfcheck.tshark, "run") as run:
                 data = selfcheck.collect(root=Path(tmp))
-        self.assertEqual(len(data["checks"]), 5)
+        self.assertEqual(len(data["checks"]), 6)
         relaunch.assert_not_called()
         run.assert_not_called()
 
@@ -253,12 +259,14 @@ class PureReadBoundaryTest(unittest.TestCase):
         admin.assert_called_once()
 
 
-def _cap_checks(tshark_ok: bool, npcap_ok: bool, admin_ok: bool = False) -> list[dict]:
-    """构造一份只关心 tshark/npcap/admin 的五项检查结果（其余恒通过）。"""
+def _cap_checks(tshark_ok: bool, npcap_ok: bool, admin_ok: bool = False,
+                scapy_ok: bool = True) -> list[dict]:
+    """构造一份只关心 tshark/npcap/admin/scapy 的六项检查结果（其余恒通过）。"""
     return [
         {"key": "python", "ok": True},
         {"key": "tshark", "ok": tshark_ok},
         {"key": "npcap", "ok": npcap_ok},
+        {"key": "scapy", "ok": scapy_ok},
         {"key": "port", "ok": True},
         {"key": "admin", "ok": admin_ok},
     ]
@@ -273,12 +281,19 @@ class CapabilitiesMatrixTest(unittest.TestCase):
                 for scapy_ok in (True, False):
                     with self.subTest(tshark=tshark_ok, npcap=npcap_ok, scapy=scapy_ok), \
                             mock.patch.object(selfcheck, "_scapy_available",
-                                              return_value=scapy_ok):
+                                              return_value=scapy_ok), \
+                            mock.patch.object(selfcheck, "_tracert_available",
+                                              return_value=False):
                         caps = selfcheck.capabilities(
                             _cap_checks(tshark_ok, npcap_ok))
                     self.assertTrue(caps["probe"], "probe 不依赖任何抓包组件")
                     self.assertTrue(caps["reports"])
                     self.assertTrue(caps["settings"])
+                    # 没有 tracert 时，逐跳能力只由 scapy 决定：缺 scapy 才置灰。
+                    self.assertEqual(caps["path_probe"], scapy_ok,
+                                     "path_probe = scapy 或系统 tracert")
+                    self.assertEqual(caps["mtr_engine"],
+                                     "scapy" if scapy_ok else None)
                     self.assertEqual(caps["offline"], tshark_ok,
                                      "offline 只取决于 tshark")
                     self.assertEqual(caps["live"], tshark_ok and npcap_ok,
@@ -333,6 +348,43 @@ class CapabilitiesMatrixTest(unittest.TestCase):
         self.assertFalse(caps["passive"])
         self.assertEqual(caps["missing"]["passive"], "npcap")
 
+    def test_tracert_only_keeps_path_probe_available(self):
+        """G2：缺 scapy 但系统有 tracert → 逐跳**不置灰**，只是降级。"""
+        with mock.patch.object(selfcheck, "_scapy_available", return_value=False), \
+                mock.patch.object(selfcheck, "_tracert_available", return_value=True):
+            caps = selfcheck.capabilities(_cap_checks(True, True, scapy_ok=False))
+        self.assertTrue(caps["path_probe"], "tracert 在就仍然能做逐跳")
+        self.assertEqual(caps["mtr_engine"], "tracert")
+        self.assertFalse(caps["scapy"])
+        # path_probe 不是模式锁：missing 只列既有模式，不新增 path 键。
+        self.assertNotIn("path", caps["missing"])
+
+    def test_no_engine_disables_path_probe(self):
+        """两个逐跳引擎都不可用 → path_probe=False / mtr_engine=None（UI 置灰）。"""
+        with mock.patch.object(selfcheck, "_scapy_available", return_value=False), \
+                mock.patch.object(selfcheck, "_tracert_available", return_value=False):
+            caps = selfcheck.capabilities(_cap_checks(True, True, scapy_ok=False))
+        self.assertFalse(caps["path_probe"])
+        self.assertIsNone(caps["mtr_engine"])
+
+    def test_check_scapy_missing_is_degradation_not_install_guide(self):
+        """scapy 是可选引擎：失败项说明「降级 tracert」，fix_kind 不是安装链接。"""
+        with mock.patch.object(selfcheck, "_scapy_available", return_value=False):
+            item = selfcheck.check_scapy()
+        self.assertFalse(item["ok"])
+        self.assertEqual(item["fix_kind"], "none")
+        self.assertEqual(item["fix_url"], "")
+        self.assertIn("tracert", item["impact"])
+        self.assertIn("tracert", item["detail"])
+        self.assertNotIn("必须安装", item["detail"] + item["impact"])
+
+    def test_check_scapy_ok_reuses_passive_engine_status(self):
+        with mock.patch.object(selfcheck.passive, "engine_status",
+                               return_value={"engine": "scapy", "scapy": True}):
+            item = selfcheck.check_scapy()
+        self.assertTrue(item["ok"])
+        self.assertIn("scapy", item["detail"])
+
     def test_passive_missing_reason_codes_are_specific(self):
         cases = [
             # (tshark, npcap, scapy, passive, missing["passive"])
@@ -354,11 +406,12 @@ class CapabilitiesMatrixTest(unittest.TestCase):
             else:
                 self.assertEqual(caps["missing"]["passive"], reason)
 
-    def test_default_runs_the_five_checks(self):
+    def test_default_runs_the_six_checks(self):
         fixture = {
             "python": {"key": "python", "ok": True},
             "tshark": {"key": "tshark", "ok": True},
             "npcap": {"key": "npcap", "ok": True},
+            "scapy": {"key": "scapy", "ok": True},
             "port": {"key": "port", "ok": True},
             "admin": {"key": "admin", "ok": False},
         }
@@ -463,7 +516,7 @@ class CollectResilienceTest(unittest.TestCase):
                 mock.patch.object(selfcheck, "check_npcap",
                                   side_effect=RuntimeError("driver query boom")):
             data = selfcheck.collect(root=Path(tmp))
-        self.assertEqual(len(data["checks"]), 5)
+        self.assertEqual(len(data["checks"]), 6)
         by_key = {item["key"]: item for item in data["checks"]}
         npcap = by_key["npcap"]
         self.assertFalse(npcap["ok"])

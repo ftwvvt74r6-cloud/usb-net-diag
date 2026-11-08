@@ -12,8 +12,11 @@ API:
   GET  /api/report?path=    读取报告文件
   GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
-  GET  /api/selfcheck       首屏准备检查（五项只读环境检查 + 首次运行标记）
+  GET  /api/selfcheck       首屏准备检查（六项只读环境检查 + 首次运行标记）
   POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
+  GET  /api/last-run        上次运行摘要（内存优先；进程重启后用 runs/ 历史兜底）
+  GET  /api/last-run/result 上次运行的完整结果（只在内存里；没有时返回 404 JSON）
+  POST /api/last-run/clear  清空内存里的上次结果（runs/ 历史记录保留）
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
   POST /api/ai/test         用当前或临时参数测试连通性
@@ -30,6 +33,7 @@ API:
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import re
@@ -47,6 +51,10 @@ from pathlib import Path
 MAX_JSON_BODY = 8 << 20
 MAX_UPLOAD = 2 << 30
 MAX_CONCURRENT_PROBE = 3  # 体检会发真实报文，限制并发避免把目标打挂
+#: ``/api/probe?path=true`` 的逐跳时间预算（秒）。
+#: 体检是同步 HTTP 请求，不能等满 tracert 的 60s 硬上限（S6）：到点后停止发新探测，
+#: 保留已拿到的跳并标 ``completed=False``，报告写「探测未完成…以上是已完成的跳」。
+PROBE_PATH_BUDGET_S = 20.0
 
 CORE = Path(__file__).resolve().parent
 ROOT = CORE.parent
@@ -101,6 +109,15 @@ PJOB = {
 ENGINE_CACHE: dict = {}
 DOCTOR_CACHE: dict = {"at": 0.0, "data": None}
 PROBE_SEM = threading.Semaphore(MAX_CONCURRENT_PROBE)
+
+# ---- 上次结果（G5）：页面刷新/重开时明确告诉用户「这是上次的结果」 ----
+#: 内存只保留最近一次分析：新运行覆盖，进程退出即失（不落盘、不联网）。
+LAST_RUN = {"summary": None, "result": None, "cleared_at": 0.0}
+#: 完整结果的内存上限（**序列化后的 UTF-8 字节数**，不是字符数）；超过时只留摘要
+#: （``full_result=False``），避免大结果长期占内存。
+LAST_RUN_MAX_BYTES = 8 << 20
+#: runs/*.json 兜底只认诊断类记录（probe / passive 没有 render() 可恢复的完整结果）。
+LAST_RUN_FALLBACK_MODES = ("live", "scan", "offline")
 
 # ---- 应用生命周期：单实例、优雅退出、空闲自动释放 ----
 APP_NAME = "USBNetDiag"
@@ -339,12 +356,19 @@ def _probe_guarded(target: str, port, count, timeout, proto,
     return res
 
 
-def _probe_path_profile(target: str, port) -> dict | None:
+def _probe_path_profile(target: str, port,
+                        budget_s: float = PROBE_PATH_BUDGET_S) -> dict | None:
     """体检成功后补跑一次 MTR，返回 ``path_profile``（失败只降级为 ``None``）。
+
+    同步 HTTP 请求必须有自己的时间预算（S6）：到 ``budget_s`` 后通过
+    ``should_stop`` 让 ``pathprobe.run`` 停止发新探测（tracert 会在 100ms 内 kill），
+    保留已完成的跳并让结果带 ``completed=False``；**不抛异常、不拖死请求**。
 
     Args:
         target: 目标（域名或 IP；域名由 ``pathprobe.run`` 自己解析）。
         port: 体检用的端口；``None`` 时路径探测按 443/80 判断可达性。
+        budget_s: 本次逐跳探测的时间预算（秒）；默认
+            :data:`PROBE_PATH_BUDGET_S`，小于 1 秒按 1 秒处理。
 
     Returns:
         dict | None: 有逐跳数据时是 ``PathProbeResult.to_dict()``（另加
@@ -352,7 +376,18 @@ def _probe_path_profile(target: str, port) -> dict | None:
             探测不可用 / 零跳时返回 ``None``（界面上不显示该区块）。
     """
     try:
-        result = pathprobe.run(target, port=port)
+        budget = max(1.0, float(budget_s))
+    except (TypeError, ValueError):
+        budget = PROBE_PATH_BUDGET_S
+    deadline = time.monotonic() + budget
+
+    def _budget_exhausted() -> bool:
+        """到点即停：pathprobe 每批发包前 / tracert 每 100ms 检查一次。"""
+        return time.monotonic() >= deadline
+
+    try:
+        result = pathprobe.run(target, port=port, logger=log,
+                               should_stop=_budget_exhausted)
     except Exception as exc:                       # noqa: BLE001  路径探测失败只降级
         log(f"[提示] 逐跳路径探测不可用（不影响体检结论）："
             f"{type(exc).__name__}: {exc}")
@@ -362,6 +397,9 @@ def _probe_path_profile(target: str, port) -> dict | None:
         return None
     if result.error:
         log(f"[提示] 逐跳路径探测部分降级（结果仍可用）：{result.error}")
+    if not result.completed:
+        log(f"[提示] 逐跳路径探测未跑完（时间预算 {budget:g}s 或取消），"
+            f"保留已完成的 {len(result.hops)} 跳（结果标记未完成）")
     profile = result.to_dict()
     profile["excluded_icmp"] = 0
     return profile
@@ -588,7 +626,7 @@ def _conclusion_verdict(result: dict) -> dict:
 
 
 def conclusion_report_id(result: dict) -> str:
-    """生成给人看的「报告标识」（复制给二线 / 导出时用于追溯）。
+    """生成给人看的「报告标识」（复制给协作方 / 导出时用于追溯）。
 
     优先用真实落盘文件名（``.md`` / ``.json``），退化为抓包文件名 + 生成时间；
     都没有时返回「本次诊断（未落盘报告）」。只在状态响应/导出里出现，不写进报告。
@@ -634,7 +672,7 @@ def build_status_conclusion(result: dict) -> dict:
 def _attach_conclusion(result: dict | None, block: dict | None = None) -> dict | None:
     """给结果补结论对象与「复制/导出」预渲染文本（只进状态响应，不写报告）。
 
-    为什么把渲染好的文本也下发：UI 的「复制给二线」「导出 .md」必须与
+    为什么把渲染好的文本也下发：UI 的「复制给协作方」「导出 .md」必须与
     :func:`core.conclusion.render_conclusion_text` / ``render_conclusion_markdown``
     逐字一致。让服务端渲染一次，前端只负责放进剪贴板/Blob，避免第三份手写格式化。
     ``conclusion_export`` 则是「CLI ``--json`` 的 conclusion 对象 + 元信息」的
@@ -683,10 +721,217 @@ def _attach_conclusion(result: dict | None, block: dict | None = None) -> dict |
 
 
 
+def _now_iso(epoch: float | None = None) -> str:
+    """把时间转成本机时区的 ISO 8601 字符串（带时区偏移）。
+
+    Args:
+        epoch: Unix 秒；``None`` 表示当前时间。
+
+    Returns:
+        str: 形如 ``2026-11-09T01:23:45+08:00`` 的秒级时间戳。前端按本地时区
+            渲染成「今天 14:32」这类人类可读文本，服务端不写死时区。
+    """
+    stamp = time.time() if epoch is None else float(epoch)
+    return dt.datetime.fromtimestamp(stamp).astimezone().isoformat(timespec="seconds")
+
+
+def _last_run_target(mode: str, target: str, pcap: str | None) -> str:
+    """上次结果摘要里的「目标」：保留用户当时填的值（离线模式退化为 pcap 文件名）。
+
+    Args:
+        mode: 用户选择的模式（``scan`` / ``live`` / ``offline``）。
+        target: 用户填写并提交的目标；全网体检允许为空。
+        pcap: 离线模式选中的抓包文件（只取文件名，不写绝对路径）。
+
+    Returns:
+        str: 目标文本；全网体检返回空串，由界面按 copy 表回退成「全网」。
+    """
+    text = (target or "").strip()
+    if not text and mode == "offline" and pcap:
+        text = Path(str(pcap)).name
+    return text
+
+
+def _remember_last_run(mode: str, target: str, started_at: float,
+                       result: dict | None) -> None:
+    """记住最近一次分析（内存单槽；新运行覆盖，进程退出即失）。
+
+    只保存**摘要 + 可选完整结果**：摘要供 ``/api/last-run`` 渲染提示条，完整结果供
+    ``/api/last-run/result`` 恢复结果区。完整结果超过 :data:`LAST_RUN_MAX_BYTES` 时
+    丢弃完整结果、只留摘要（``full_result=False``），内存占用有上限。
+
+    上限按**序列化后的 UTF-8 字节数**（``json.dumps(..., ensure_ascii=False).encode``）
+    计算，不按字符数：一个中文字符通常占 3 字节，按字符数会让实际内存到约 3 倍上限。
+
+    Args:
+        mode: 用户选择的模式（``scan`` / ``live`` / ``offline``）。
+        target: 摘要里的目标文本（见 :func:`_last_run_target`）。
+        started_at: 任务开始时间（Unix 秒，``start_job`` 记录的 ``JOB["started_at"]``）。
+        result: 本次分析结果；失败时可以是 ``{"ok": False, ...}``。
+
+    Returns:
+        None: 只更新模块级 :data:`LAST_RUN`，不写文件、不抛业务异常。
+
+    Note:
+        完整结果里的 ``meta.pcap_file`` 可能是本机绝对路径，``rows`` 也可能含目标
+        IP / 域名 / URL。这些**只留在本进程内存**（单槽，进程退出即失），不落盘、
+        不联网、不导出；``/api/last-run/result`` 只在 127.0.0.1 上本机可读。
+        这里不做脱敏，因为前端「查看上次结果」要按原样渲染既有字段。
+    """
+    now = time.time()
+    payload = result if isinstance(result, dict) else {}
+    ok = bool(payload.get("ok"))
+    verdict_data = payload.get("verdict")
+    level = ""
+    if ok and isinstance(verdict_data, dict):
+        level = str(verdict_data.get("level") or "")
+    summary_data = payload.get("summary")
+    summary_data = summary_data if isinstance(summary_data, dict) else {}
+    summary = {
+        "time": _now_iso(now),
+        "epoch": int(now),
+        "mode": str(mode or ""),
+        "target": (target or "").strip(),
+        "level": level,
+        "ok": ok,
+        "duration_ms": max(0, int((now - float(started_at or now)) * 1000)),
+        "critical": max(0, int(summary_data.get("critical_count") or 0)),
+        "warning": max(0, int(summary_data.get("warning_count") or 0)),
+        "full_result": False,
+        "source": "memory",
+    }
+    full = None
+    if ok and payload:
+        try:
+            size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        except (TypeError, ValueError):
+            size = LAST_RUN_MAX_BYTES + 1
+        if size <= LAST_RUN_MAX_BYTES:
+            full = payload
+        else:
+            summary["trimmed"] = True
+    summary["full_result"] = full is not None
+    with LOCK:
+        LAST_RUN.update({"summary": summary, "result": full, "cleared_at": 0.0})
+
+
+def _last_run_from_runs(limit: int = 50) -> dict | None:
+    """用 ``logs/runs/*.json`` 最近一条诊断记录兜底生成摘要（完整结果不可恢复）。
+
+    Args:
+        limit: 最多检查多少个最新的记录文件（``runs/`` 目录本身最多保留
+            ``logstore.KEEP_RUNS`` 条）。
+
+    Returns:
+        dict | None: 摘要（``source="runs"``、``full_result=False``）；没有可用的
+            诊断记录时返回 ``None``。单个文件读取/解析失败只跳过，不抛异常。
+    """
+    runs_dir = logstore.log_root() / "runs"
+    try:
+        files = [p for p in runs_dir.glob("*.json") if p.is_file()]
+    except OSError:
+        return None
+
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    files.sort(key=_mtime, reverse=True)
+    for path in files[: max(1, int(limit))]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        mode = str(data.get("mode") or "").strip().lower()
+        if mode not in LAST_RUN_FALLBACK_MODES:
+            continue
+        params = data.get("params")
+        params = params if isinstance(params, dict) else {}
+        target = str(params.get("target") or "").strip()
+        if not target and mode == "offline":
+            target = str(params.get("pcap") or "").strip()
+        epoch = _mtime(path)
+        return {
+            "time": _now_iso(epoch),
+            "epoch": int(epoch),
+            "mode": mode,
+            "target": target,
+            "level": str(data.get("level") or ""),
+            "ok": bool(data.get("ok")),
+            "duration_ms": max(0, int(data.get("duration_ms") or 0)),
+            "critical": max(0, int(data.get("critical") or 0)),
+            "warning": max(0, int(data.get("warning") or 0)),
+            "full_result": False,
+            "source": "runs",
+        }
+    return None
+
+
+def _last_run_view() -> dict | None:
+    """返回「上次结果」摘要：内存优先，其次用 runs 文件兜底，都没有则 ``None``。
+
+    Returns:
+        dict | None: 摘要，键 ``time`` / ``epoch`` / ``mode`` / ``target`` /
+            ``level`` / ``ok`` / ``duration_ms`` / ``critical`` / ``warning`` /
+            ``full_result`` / ``source``。用户在本进程点过「开始新任务」
+            （``cleared_at`` 非 0）后不再用历史记录兜底，避免刚清空又冒出来。
+    """
+    with LOCK:
+        summary = LAST_RUN.get("summary")
+        cleared_at = float(LAST_RUN.get("cleared_at") or 0.0)
+    if isinstance(summary, dict) and summary:
+        return dict(summary)
+    if cleared_at:
+        return None
+    return _last_run_from_runs()
+
+
+def _last_run_result() -> dict | None:
+    """返回内存里的完整结果（没有时 ``None``；调用方不得据此抛异常）。
+
+    Returns:
+        dict | None: 最近一次成功分析的完整结果；进程重启、结果被清空或超过
+            内存上限时返回 ``None``。
+    """
+    with LOCK:
+        stored = LAST_RUN.get("result")
+    return dict(stored) if isinstance(stored, dict) and stored else None
+
+
+def _last_run_ui_copy() -> dict:
+    """上次结果提示条的界面文案（唯一来源：``copy/zh-CN.json`` 的 ``last_run``）。
+
+    Returns:
+        dict: ``last_run`` section 的字符串映射；读取失败时返回 ``{}``
+            （前端用内置最小回退，仍然不会空白）。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "last_run")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def _settings_ui_copy() -> dict:
+    """设置页运行状态文案（唯一来源：``copy/zh-CN.json`` 的 ``settings``）。
+
+    Returns:
+        dict: ``settings`` section 的字符串映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "settings")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
 def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None,
             shadow: bool = False) -> None:
     # run 记录由 diagnose.run_scan() 统一写（UI 的 /api/scan 也走它），
     # 这里不再重复 record_run —— 否则同一次分析会出现两条记录。
+    started_at = float(JOB.get("started_at") or 0.0) or time.time()
     try:
         if mode == "offline":
             res = diagnose.run_scan(target=target, pcap=pcap, logger=log)
@@ -728,6 +973,10 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
                 JOB["error_code"] = diagnose._error_code(res)
                 JOB["result"] = None
             JOB["finished_at"] = time.time()
+        # G5：把本次分析记进内存，供刷新/重开页面时提示「上次结果」。放在状态更新之后，
+        # 保证前端一看到 done 就能查到对应摘要。
+        _remember_last_run(mode, _last_run_target(mode, target, pcap),
+                           started_at, res)
     except Exception as exc:  # noqa: BLE001
         diagnose._log_to_file(traceback.format_exc())
         with LOCK:
@@ -735,6 +984,8 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             JOB["error"] = f"{type(exc).__name__}: {exc}"
             JOB["error_code"] = "E_INTERNAL"
             JOB["finished_at"] = time.time()
+        _remember_last_run(mode, _last_run_target(mode, target, pcap),
+                           started_at, {"ok": False, "error": str(exc)})
 
 
 def _to_bool(value, default: bool = True) -> bool:
@@ -1094,6 +1345,40 @@ def link_actions(result: dict | None, gateway: str = "") -> list[dict]:
     return actions
 
 
+#: 客户端提前断开（关标签页 / 取消请求 / 浏览器 RST）时抛的异常类型。
+#: 这些不是服务故障：浏览器不再需要响应，打印整段 traceback 只会污染日志。
+CONNECTION_NOISE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+
+
+def _log_connection_noise(exc: BaseException, where: str = "请求处理") -> None:
+    """把「客户端提前断开」降级为**一行** debug 日志（不写 traceback、不显示给用户）。
+
+    Args:
+        exc: 捕获到的连接异常。
+        where: 发生位置（``请求处理`` / ``响应发送`` / ``服务端``），便于排障时区分。
+
+    Returns:
+        None: 日志写盘失败也不抛异常（连接噪音处理本身不许再制造噪音）。
+
+    Note:
+        日志里用中文类别描述，不写 ``ConnectionResetError`` 这类 Python 类名：
+        G4/B1 的磁盘日志验收明确要求 ``diag-*.log`` 不出现 ``Traceback`` /
+        ``ConnectionResetError``——类名会把一次正常的关页面渲染成服务故障。
+    """
+    reasons = {
+        ConnectionResetError: "连接被重置",
+        ConnectionAbortedError: "连接被中止",
+        BrokenPipeError: "管道已断开",
+    }
+    reason = reasons.get(type(exc), "连接异常")
+    try:
+        logstore.diag_log(
+            f"[debug] {where}：客户端提前断开（{reason}）；"
+            "不写 traceback，服务继续")
+    except Exception:                              # noqa: BLE001  日志失败不阻塞服务
+        pass
+
+
 class Handler(BaseHTTPRequestHandler):
     """本地 Web UI 与 API 的请求处理器。
 
@@ -1120,22 +1405,47 @@ class Handler(BaseHTTPRequestHandler):
     )
 
     # ---------- helpers ----------
-    def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8") -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        if self.close_connection:
-            # 早退 body 超过丢弃上限/分块传输时由 _discard_body 置位：
-            # 必须明确告诉客户端不再复用连接，否则 keep-alive 会读到残留字节。
-            self.send_header("Connection", "close")
-        self.send_header("Cache-Control", "no-store")
-        for k, v in self.SECURITY_HEADERS:
-            self.send_header(k, v)
-        self.end_headers()
+    def handle_one_request(self) -> None:
+        """包住基类：客户端提前断开只记一行 debug，绝不打印 traceback。
+
+        浏览器关标签页 / 取消请求时，服务端可能正在读请求行、读 body 或写响应，
+        对应 ``ConnectionResetError``（WinError 10054）/ ``ConnectionAbortedError`` /
+        ``BrokenPipeError``。这些是正常的客户端行为，不是服务故障；不拦就会由
+        ``socketserver`` 打印整段 traceback（G4 真机噪音）。
+        """
         try:
+            super().handle_one_request()
+        except CONNECTION_NOISE as exc:
+            # 连接已经不可复用：置位让 handle() 循环退出，不再读下一条请求。
+            self.close_connection = True
+            _log_connection_noise(exc)
+
+    def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8") -> None:
+        """写一个完整响应；客户端提前断开在这里降级，**绝不**把栈冒到调用方。
+
+        整个「状态行 + 头 + body」必须放在同一个 ``try`` 里：``end_headers()``
+        会把头部缓冲真正写进 socket，大响应（``GET /``）时客户端 RST 恰好落在这里
+        —— 只包 ``wfile.write(body)`` 会漏掉 ``end_headers``，异常冒到
+        ``do_GET`` 的宽泛 ``except`` 就会先写一整段 traceback（B1 真机复现）。
+        """
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:
+                # 早退 body 超过丢弃上限/分块传输时由 _discard_body 置位：
+                # 必须明确告诉客户端不再复用连接，否则 keep-alive 会读到残留字节。
+                self.send_header("Connection", "close")
+            self.send_header("Cache-Control", "no-store")
+            for k, v in self.SECURITY_HEADERS:
+                self.send_header(k, v)
+            self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        except CONNECTION_NOISE as exc:
+            # 客户端已经走了：响应没人收是正常现象。置位关闭连接，让 handle()
+            # 循环退出；只记一行 debug（B1：这里不许再写 traceback）。
+            self.close_connection = True
+            _log_connection_noise(exc, "响应发送")
 
     def _json(self, data, code: int = 200) -> None:
         self._send(code, json.dumps(data, ensure_ascii=False).encode("utf-8"))
@@ -1291,6 +1601,11 @@ class Handler(BaseHTTPRequestHandler):
             self._route_get()
         except BodyTooLarge as exc:
             self._json({"ok": False, "error": str(exc)}, 413)
+        except CONNECTION_NOISE as exc:
+            # 连接类异常必须排在宽泛 except 之前：宽泛分支会先写一整段 traceback
+            # （B1）。这里交给统一降级——一行 debug + 关闭连接，不响应。
+            self.close_connection = True
+            _log_connection_noise(exc)
         except Exception as exc:  # noqa: BLE001
             diagnose._log_to_file(traceback.format_exc())
             self._json({"ok": False, "error": f"服务内部错误：{type(exc).__name__}: {exc}"}, 500)
@@ -1307,6 +1622,10 @@ class Handler(BaseHTTPRequestHandler):
             self._route_post()
         except BodyTooLarge as exc:
             self._json({"ok": False, "error": str(exc)}, 413)
+        except CONNECTION_NOISE as exc:
+            # 同 do_GET：连接类异常先降级，禁止落到下面写 traceback 的分支。
+            self.close_connection = True
+            _log_connection_noise(exc)
         except Exception as exc:  # noqa: BLE001
             diagnose._log_to_file(traceback.format_exc())
             self._json({"ok": False, "error": f"服务内部错误：{type(exc).__name__}: {exc}"}, 500)
@@ -1328,8 +1647,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/app":
             cfg = diagnose.load_config()
             # 首屏会先要 /api/app：这里复用 selfcheck 的短 TTL 结果，别把
-            # 五项检查（tshark 版本 / 端口 / scapy 导入）再跑一遍。
+            # 六项检查（tshark 版本 / 端口 / scapy 导入）再跑一遍。
             snap = selfcheck.collect_cached()
+            # 文案随应用信息一起下发（前端不另存中文）：startup 是首屏检查，
+            # last_run / settings 是 G5 的提示条与设置页文案（加法字段）。
+            ui_copy = dict(snap.get("ui_copy") or {})
+            ui_copy["last_run"] = _last_run_ui_copy()
+            ui_copy["settings"] = _settings_ui_copy()
             return self._json({"ok": True, "app": APP_NAME, "version": APP_VERSION,
                                "pid": os.getpid(), "port": SERVER.get("port", 0),
                                "url": SERVER.get("url", ""),
@@ -1339,7 +1663,7 @@ class Handler(BaseHTTPRequestHandler):
                                # 加法字段：首屏自检与权限卡文案随应用信息一起下发，
                                # 前端不另存一份中文（文案唯一来源仍是 copy/zh-CN.json）。
                                "first_run": snap["first_run"],
-                               "ui_copy": snap["ui_copy"],
+                               "ui_copy": ui_copy,
                                # 加法字段：首屏不用等 /api/selfcheck 就能先按能力置灰；
                                # checks 同批下发，UI 首屏可直接画面板、不再跑第二次全套检查。
                                "checks": snap["checks"],
@@ -1374,6 +1698,26 @@ class Handler(BaseHTTPRequestHandler):
             # 旧前端不读 ui_copy.conclusion，不受影响。
             data["ui_copy"] = {"conclusion": _conclusion_ui_copy()}
             return self._json(data)
+        if path == "/api/last-run":
+            # 加法接口（G5）：页面加载 / bfcache 还原 / 分析完成后都来问一次。
+            # 没有记录时 last=null（前端必须不渲染提示条，不能误报）。
+            return self._json({"ok": True, "last": _last_run_view(),
+                               "ui_copy": {"last_run": _last_run_ui_copy()}})
+        if path == "/api/last-run/result":
+            # 完整结果只在内存里；进程重启 / 用户点过「开始新任务」后返回 404 JSON，
+            # 界面据此禁用「查看」并说明只能看摘要（不抛异常、不吐栈）。
+            stored = _last_run_result()
+            if stored is None:
+                return self._json(
+                    {"ok": False,
+                     "error": "内存里没有上次的完整结果（服务可能已重启，或只有历史摘要）"},
+                    404)
+            enriched = _attach_probe_ui_copy(stored)
+            block = build_status_conclusion(enriched)
+            enriched = _attach_conclusion(enriched, block)
+            return self._json({"ok": True, "result": enriched,
+                               "summary": _last_run_view(),
+                               "link_actions": link_actions(enriched, _gateway_now())})
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]
             return self._json({"interfaces": ifaces, "admin": tshark.is_admin(),
@@ -1434,9 +1778,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": False, "error": "禁止外部页面访问本机服务"}, 403)
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/quit":
+            # S4：这个端点会真的停掉本机服务，和所有 POST 一样必须先过 _route_post
+            # 顶部的 _guard()（Host + Origin 同源），拒绝外部网页 CSRF / DNS rebinding。
+            # 不再加一次性 token：本机同用户进程本来就能结束进程，token 挡不住它们，
+            # 反而会破坏「界面右上角退出 / 空闲自动退出」两条既有链路。
             self._discard_body()
             request_quit("收到界面退出指令，正在停止本地服务…")
             return self._json({"ok": True, "message": "服务已停止，可以关闭本页面了"})
+        if parsed.path == "/api/last-run/clear":
+            # 只清内存（以及本进程的 runs 兜底开关），不删 logs/runs 历史记录：
+            # 清空后再查 /api/last-run 必须是 null（刷新也不该再冒出来）。
+            # 同时把已完成/失败的 JOB 展示槽归零：否则刷新后 /api/status 会把旧结果
+            # 重新渲染回来，用户会以为「开始新任务」没生效。运行中的任务不动。
+            self._discard_body()
+            with LOCK:
+                LAST_RUN.update({"summary": None, "result": None,
+                                 "cleared_at": time.time()})
+                if JOB.get("state") in ("done", "error"):
+                    JOB.update({"state": "idle", "mode": "", "target": "",
+                                "duration": 0, "started_at": 0.0,
+                                "finished_at": 0.0, "logs": [], "result": None,
+                                "error": "", "error_code": ""})
+            log("已清空「上次结果」的内存记录（runs/ 历史记录保留）。")
+            return self._json({"ok": True})
         if parsed.path == "/api/elevate":
             self._discard_body()
             return self._json(request_elevation())
@@ -1563,6 +1927,33 @@ class DiagServer(ThreadingHTTPServer):
 
     daemon_threads = True
     allow_reuse_address = False
+
+    def handle_error(self, request, client_address) -> None:
+        """兜底：连接类异常只写一行 debug；其他异常保留「类型 + 原因」一行可诊断信息。
+
+        ``Handler.handle_one_request`` 已经拦住绝大多数连接重置；这里覆盖
+        ``socketserver`` 的默认实现，避免漏网的 ``BrokenPipeError`` 又打印整段
+        traceback。**不吞所有异常**：非连接异常仍写一行 error（类型 + 原因），
+        只是不再把栈直接刷到 stderr。
+
+        Args:
+            request: 触发异常的套接字（``socketserver`` 传入，这里不使用）。
+            client_address: 客户端地址（这里不使用；日志不含敏感信息）。
+
+        Returns:
+            None: 只写日志，不向客户端发送任何内容（连接可能已断开）。
+        """
+        exc = sys.exc_info()[1]
+        if exc is not None and isinstance(exc, CONNECTION_NOISE):
+            _log_connection_noise(exc, "服务端")
+            return
+        try:
+            name = type(exc).__name__ if exc is not None else "UnknownError"
+            reason = str(exc or "")[:300]
+            logstore.diag_log(f"[错误] 请求处理异常：{name}: {reason}"
+                              if reason else f"[错误] 请求处理异常：{name}")
+        except Exception:                          # noqa: BLE001  日志失败不阻塞服务
+            pass
 
 
 def create_server(port: int = 8787, idle_exit_min: int = 0,

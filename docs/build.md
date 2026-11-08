@@ -17,7 +17,7 @@
 |---|---|---|---|---|---|---|
 | **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **1,031,112 B**（0.98 MiB） | **2,771,469 B**（2.64 MiB） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-<VERSION>-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
-| **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
+| **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅限组织内部使用**，禁止公开 |
 
 > `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.1`）。
 > 表中 **lite 行是 v0.3.1 实测**（2026-11-08 发布件：174 文件 / 1,031,112 B / 解压后 2,771,469 B）；
@@ -418,8 +418,8 @@ $section
 ## 11. 许可红线（读一遍再发版）
 
 - 公开 Release：**只发 lite**（代码），不随附 Wireshark / Npcap / Python。
-- 内部包：`--with-tools` 保留 Wireshark `COPYING.txt`；`--with-npcap` 只能内部同事之间用。
+- 内部包：`--with-tools` 保留 Wireshark `COPYING.txt`；`--with-npcap` 只能在组织内部使用。
 - **公开 repo 的 Release 永远不带 Npcap**；`gh release view` 里出现 `npcap` 就是发版事故。
-- 把 `--with-npcap` 包发给同事 = 组织内部分发，是否合规由你们与 IT/法务确认。
+- 把 `--with-npcap` 包发给相关方 = 组织内部分发，是否合规由你们与 IT/法务确认。
 
 完整说明见 [`licensing.md`](licensing.md)。

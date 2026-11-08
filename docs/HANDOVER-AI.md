@@ -28,9 +28,9 @@ git ls-files 'core/*.py'                        # 核心模块清单（注意用
 git grep -nF "/api/" -- core/server.py          # /api/ 相关行（宽口径，见下方说明）
 ```
 
-> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **61 行**
+> 注：最后一条 `git grep -nF "/api/"` 是**宽口径**统计 —— 当前 `core/server.py` 命中 **76 行**
 > （含 docstring / 注释 / 示例 URL），**不等于路由数量**；精确路由清单看 **§4 的表**
-> （**12 个 POST + 13 个 GET = 25 个 API**，另有静态页 `/`）。
+> （**13 个 POST + 15 个 GET = 28 个 API**，另有静态页 `/`）。
 
 > 仓库里有多份**历史文档**（`docs/START-HERE.md`、`docs/plan-review.md`、`docs/code-index.md`、
 > `docs/t00-findings.md`、`docs/handoff-MANIFEST.json`）描述的是 v0.1.0 或目标架构，
@@ -187,7 +187,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 被占则顺延最多 10 个端口。请求处理有三道边界：`Host` 只接受 `127.0.0.1`/`localhost`/`::1`；
 写请求检查 `Origin`（无 Origin 的本机程序放行）；JSON body 上限 8 MB、上传上限 2 GB。
 
-> **路由计数**：**12 个 POST + 13 个 GET = 25 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
+> **路由计数**：**13 个 POST + 15 个 GET = 28 个 API**（`/api/ping`、`/api/app` 是其中两个 GET）。
 > `do_GET` 另外还服务静态首页，完整清单见 4.2/4.3。
 
 ### 4.1 响应信封的现状（重要）
@@ -203,11 +203,12 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 `/api/v1/*` 只存在于 `contracts.py` 的 docstring 里（未实现）。
 新写接口时先决定是否启用信封；**不要假设现有响应带 `schema_version` 或 `trace_id`**。
 
-### 4.2 12 个 POST 路由
+### 4.2 13 个 POST 路由
 
 | 路由 | 请求体 / 参数 | 成功响应（关键键） |
 |---|---|---|
 | `POST /api/quit` | 无 | `{ok: true, message}`；0.3s 后关监听并清理 `logs/netdiag.pid` |
+| `POST /api/last-run/clear` | 无请求体 | `{ok: true}`；清空内存 `LAST_RUN` 与已完成任务的展示槽（`JOB` 回 `idle`），**不删** `logs/runs/` 历史；G5 加法接口 |
 | `POST /api/elevate` | 无请求体（路由会丢弃 body，不接受参数） | `{ok, restarted, message}`；已是管理员时 `{ok:true, restarted:false, already_admin:true}`；用户取消/策略禁止时 `{ok:false, restarted:false, error}` 且**不杀当前进程** |
 | `POST /api/selfcheck/ack` | 无请求体 | `{ok, writable, path?, error?}`；写 `config/ui-first-run.json`，写失败返回 `ok:false` 但 HTTP 仍 200，**不阻塞界面** |
 | `POST /api/ai` | AI 配置局部更新：`provider/base_url/api_key/model/temperature/timeout/verify_ssl` | `{ok: true, config}`（Key 已脱敏） |
@@ -215,25 +216,27 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `POST /api/ai/analyze` | `{result?, question?}`；省略 result 用最近一次 `JOB.result` | AI 结论 + `model` + `latency_ms` + 可选 `markdown`（写 `reports/<stem>.ai.md`） |
 | `POST /api/passive` | `{interface?, duration, target?, engine?}`（`auto/scapy/tshark`） | `{ok: true, engine}`；后台跑，轮询 `GET /api/passive` |
 | `POST /api/passive/stop` | 无 | `{ok: true}`（置停止标志，后台收尾） |
-| `POST /api/probe` | `{target, port?, count?, timeout?, proto?, path?}`（`path` 默认 true，加法字段） | `probe.run()` 结果（分段耗时/协议/结论；`path=true` 时附逐跳路径） |
+| `POST /api/probe` | `{target, port?, count?, timeout?, proto?, path?}`（`path` 默认 true，加法字段） | `probe.run()` 结果（分段耗时/协议/结论；`path=true` 时附逐跳路径，逐跳有 20s 时间预算 `PROBE_PATH_BUDGET_S`，到点保留已完成跳并标 `completed=false`） |
 | `POST /api/scan` | `{mode: live/scan/offline, target?, duration?, interface?, pcap?, shadow?}`（`shadow` 默认 true，加法字段）；offline 的 pcap 只接受 `captures/` 下文件名 | `{ok: true}`；后台任务，轮询 `/api/status` |
 | `POST /api/diagpack` | `{raw?: bool, include_reports?: bool}` | `{ok: true, path, size, entries}`（默认脱敏） |
 | `POST /api/upload` | 原始字节 + `?name=x.pcap`；只收 `.pcap/.pcapng/.cap` | `{ok: true, file, size}`（落到 `captures/`） |
 
-### 4.3 GET 路由（2 个核心 + 11 个只读 + 静态页）
+### 4.3 GET 路由（2 个核心 + 13 个只读 + 静态页）
 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|
 | `GET /api/ping` | 单实例/存活探测 | `ok/app/version/pid/url/started_at` |
-| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/checks/capabilities` |
+| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/checks/capabilities`；`ui_copy` 从 G5 起含 `last_run` / `settings`（加法字段） |
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
 | `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed`；完成时另加 `conclusion`（7 键结论对象）、`result.conclusion_text` / `conclusion_markdown` / `conclusion_export`、`ui_copy.conclusion`（E2 加法字段） |
+| `GET /api/last-run` | 上次运行摘要（G5；内存优先，进程重启后用 `logs/runs/*.json` 最近一条诊断记录兜底） | `{ok, last: 摘要或 null, ui_copy.last_run}`；摘要键 `time/epoch/mode/target/level/ok/duration_ms/critical/warning/full_result/source` |
+| `GET /api/last-run/result` | 上次运行的完整结果（G5；只在内存里） | `{ok, result（与 `/api/status` 同源，含结论字段）, summary, link_actions}`；内存没有时 **404** + `{ok:false,error}`（不抛异常）。完整结果含 `meta.pcap_file` 绝对路径与 rows 里的目标 IP/域名/URL，**不脱敏**：只存本进程内存（单槽、进程退出即失），不落盘、不联网，仅本机可读；8 MiB 上限按序列化后 UTF-8 字节数计 |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
 | `GET /api/captures` | 已有抓包 | `files[{name,size,mtime}]`（最多 50） |
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |
 | `GET /api/report?path=` | 读报告 | 文件原文；只取 `Path(name).name`，防目录穿越 |
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
-| `GET /api/selfcheck` | 首屏准备检查（五项只读环境检查，含首次运行标记与能力矩阵；与 `/api/app` 共用 1.5s 短 TTL 缓存） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
+| `GET /api/selfcheck` | 首屏准备检查（六项只读环境检查：python/tshark/npcap/scapy/port/admin，含首次运行标记与能力矩阵；与 `/api/app` 共用 1.5s 短 TTL 缓存） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
 | `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
 | `GET /api/probe?target=&port=&count=&proto=&path=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果；`path=0` 关闭逐跳（默认开） |
@@ -241,7 +244,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 
 注意 `/api/probe` 同时有 GET 与 POST；两者都受并发闸门 `MAX_CONCURRENT_PROBE = 3` 限制。
 
-### 4.3.1 能力矩阵 `capabilities` 语义（F1/F2）
+### 4.3.1 能力矩阵 `capabilities` 语义（F1/F2 + G2）
 
 `/api/selfcheck` 与 `/api/app` 都以**加法字段**下发同一个 `capabilities` 对象（唯一出处
 `core/selfcheck.py::capabilities()`；UI 只消费、不自己推断缺件。两个 GET 共用
@@ -250,6 +253,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 ```json
 {"probe": true, "offline": false, "live": false, "passive": false,
  "reports": true, "settings": true,
+ "path_probe": true, "mtr_engine": "tracert",
  "missing": {"offline": "tshark", "live": "tshark|npcap", "passive": "tshark|scapy|npcap"},
  "scapy": false}
 ```
@@ -260,13 +264,17 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `offline` | 分析抓包文件 | = tshark 可用；不需要 Npcap |
 | `live` | 实时抓包（scan/live） | = tshark **且** Npcap |
 | `passive` | 通信观察 | = Npcap **且**（tshark **或** 内置 scapy）；缺驱动时引擎可用也打不开网卡 |
+| `path_probe` | 逐跳 / 路径剖面 | = scapy **或** 系统 `tracert` 任一可用；**缺 scapy 不置灰**（降级 tracert），两者都无才 false |
+| `mtr_engine` | 逐跳实际引擎 | `"scapy"` / `"tracert"` / `null`；UI 据此提示「使用 scapy」或「已降级系统 tracert」 |
 | `reports` / `settings` | 报告与导出 / 设置 | **恒 true** |
 | `missing[mode]` | 该模式不可用的原因机器码 | `tshark` / `npcap` / `tshark|npcap` / `tshark|scapy` / `tshark|scapy|npcap`；只列不可用模式 |
-| `scapy` | 被动监听是否有 scapy 引擎 | 复用 `passive.engine_status()` |
+| `scapy` | 是否有 scapy 引擎（被动监听与逐跳共用） | 复用 `passive.engine_status()`；`check_scapy()` 与它同源 |
 
 **`admin` 不是能力硬门槛**：非管理员仍走 C2 的按需提权权限卡，不因 admin 置灰。
 每项 `checks[]` 还带 `impact`（缺了会怎样）与 `doc_url`（相对文档路径）；
 `tshark` 的 `fix_url` 指向 Wireshark 下载页，`npcap` 指向 Npcap 下载页。
+**`scapy` 是可选引擎**：`fix_kind="none"`、没有下载链接，`impact_scapy` 只写
+「逐跳与路径剖面降级为系统 tracert（样本少、精度低）」；lite 包合规不带它。
 **旧载荷兼容**：`/api/selfcheck` 没有 `capabilities` 时，UI 把 `CAPS` 置 null，退回
 「仅管理员锁」的 C2 行为，不崩、不误灰；`checks` 缺 `capabilities` 不能拿来自己推断。
 **失败 fail-closed**：`/api/selfcheck` 请求失败时 UI 保留上一次成功的 `CAPS` / `CHECKS`，
@@ -522,7 +530,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/extract/aggregate.py` | 逐行聚合 → `Features`（纯函数，不 import analyzer） |
 | `core/logstore.py` | 唯一日志出口：日文件、裁剪、`env.json`、`runs/`、`crashes/`、异常钩子 |
 | `core/passive.py` | 通信观察（被动监听）：Scapy 优先/tshark 兜底，按会话聚合 + 端口/首包识别协议（**只听不发**） |
-| `core/pathprobe.py` | 影子探测 + 路径剖面：目标发现（网关/DNS/目标）、探针收发（scapy）、账本、排除 BPF/显示过滤、按角色聚合基线；`run()` MTR（批量 sr、劣化判定、ICMP→TCP 降级、`PathProfiler` 线程）、time-exceeded 整类排除与计数 |
+| `core/pathprobe.py` | 影子探测 + 路径剖面：目标发现（网关/DNS/目标）、探针收发（scapy）、账本、排除 BPF/显示过滤、按角色聚合基线（sent/recv/timeout 模块自记）；`run()` MTR（批量 sr、劣化判定、ICMP→TCP 降级、`PathProfiler` 线程）+ **scapy 不可用时的系统 tracert 降级**（`-d -h 16 -w`，每跳 3 次结构解析）、time-exceeded 整类排除与计数 |
 | `core/platform/__init__.py` | 平台适配层包标记（只做 OS 交互，不含业务判断） |
 | `core/platform/paths.py` | 目录约定与根目录探测（`Paths`） |
 | `core/platform/winapi.py` | Windows 能力：管理员、Npcap、网卡、默认网关、DNS |
@@ -531,7 +539,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/rules/__init__.py` | 规则包标记（渐进迁移中） |
 | `core/rules/legacy_map.py` | 旧 `rows[]` → `Finding` 的迁移桥（临时件；当前唯一规则相关实现） |
 | `core/sanitize.py` | 诊断包脱敏：IP/域名/用户名/MAC/路径 → 不可还原伪名（幂等） |
-| `core/selfcheck.py` | 首屏准备检查：五项只读环境检查（Python/tshark/Npcap/端口/管理员）+ `capabilities()` 能力矩阵（UI 置灰的唯一依据）+ `config/ui-first-run.json` 标记读写；不触发 UAC、不抓包 |
+| `core/selfcheck.py` | 首屏准备检查：六项只读环境检查（Python/tshark/Npcap/**scapy**/端口/管理员）+ `capabilities()` 能力矩阵（UI 置灰的唯一依据；含 `path_probe` / `mtr_engine`）+ `config/ui-first-run.json` 标记读写；不触发 UAC、不抓包 |
 | `core/server.py` | 本地 Web UI + HTTP API：路由、Host/Origin 校验、任务槽、单实例、退出 |
 | `core/tshark.py` | tshark/dumpcap 定位与执行封装（`TSHARK_PATH`、便携路径、网卡探测） |
 | `core/verdict.py` | 判定：`rows/meta/metrics/summary` → level/四层状态/问题明细/证据充分性 |
@@ -549,7 +557,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（4,000+ 行；无构建链、无前端框架；首屏自检/能力置灰/说明卡/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 35 个 `test_*.py`（762 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 36 个 `test_*.py`（814 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -571,10 +579,10 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ❌ 历史（v0.3.0） |
 | `docs/release-v0.2.0.md` | v0.2.0 发布资产与法务修正回合证据 | ❌ 历史（v0.2.0） |
 | `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
-| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检五项 / 能力置灰与说明卡 / 表单保留 / 常见启动失败 | ✅ 当前（C2 + F2） |
+| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检六项 / 能力置灰与说明卡 / 表单保留 / 常见启动失败 | ✅ 当前（C2 + F2 + G2） |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
-| `docs/path-probe.md` | 路径剖面（MTR）：逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2） |
+| `docs/path-probe.md` | 路径剖面（MTR）：scapy / 系统 tracert 两条实现路径（命令、样本、精度、失败形态、AGENTS §3-11 声明例外）、逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2 + G2） |
 | `docs/evidence-checklist.md` | 通用取证请求单：7 个证据来源方、结论→维度映射、报告/界面/API 用法、隐私与回填边界 | ✅ 当前（D+ 增量 3） |
 | `docs/conclusion-boundary.md` | 结论边界：basis/coverage/not_covered 语义、置信三档与阈值、key_limit、六出口一致、旧数据降级、0.3.x 边界 | ✅ 当前（E2） |
 | `docs/log-collection.md` | 诊断包三个入口、脱敏、raw 警告 | ✅ 当前 |

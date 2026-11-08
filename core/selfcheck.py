@@ -1,10 +1,14 @@
-"""首屏「准备检查」的五项只读环境检查 + 首次运行标记（C2）。
+"""首屏「准备检查」的六项只读环境检查 + 首次运行标记（C2 + G2）。
 
 这个模块只回答一个问题：**这台机器现在能不能直接用**。它被三块代码调用：
 
-* ``GET /api/selfcheck``（界面首屏 / 「重新检测」按钮）—— 返回五项检查结果；
+* ``GET /api/selfcheck``（界面首屏 / 「重新检测」按钮）—— 返回六项检查结果；
 * ``GET /api/app``（首屏先拿应用信息）—— 复用同一份检查结果里的能力矩阵；
 * ``POST /api/selfcheck/ack``（用户看过面板后）—— 写 ``config/ui-first-run.json``。
+
+六项按固定顺序：Python / tshark / Npcap / **scapy** / 端口 / 管理员权限。scapy
+这一项不是「必须装」：缺它时逐跳会自动降级为系统 tracert（样本少、精度低），
+所以文案只解释影响，不给安装链接（lite 包合规不带 scapy）。
 
 两个 GET 走 :func:`collect_cached` 的短 TTL 缓存，避免首屏背靠背跑两遍全套检查；
 ack 改写了 ``first_run`` 后会清缓存。
@@ -39,6 +43,7 @@ if str(ROOT) not in sys.path:
 
 import app  # noqa: E402
 import copytext  # noqa: E402
+import pathprobe  # noqa: E402
 import tshark  # noqa: E402
 import version  # noqa: E402
 
@@ -52,8 +57,8 @@ try:  # 平台能力缺失（如被裁剪的发行包）时退回 tshark 的兼�
 except Exception:  # noqa: BLE001  导入失败只让 npcap/管理员检查降级，不拖垮模块
     winapi = None  # type: ignore[assignment]
 
-#: 五项检查的固定顺序与固定 key（UI/测试都按这个清单断言，不许增删改名）。
-CHECK_KEYS = ("python", "tshark", "npcap", "port", "admin")
+#: 六项检查的固定顺序与固定 key（UI/测试都按这个清单断言，不许增删改名）。
+CHECK_KEYS = ("python", "tshark", "npcap", "scapy", "port", "admin")
 
 #: 首次运行标记：放在 ``config/`` 下（U 盘便携、可写；写不进去下次再显示）。
 MARKER_REL = Path("config") / "ui-first-run.json"
@@ -166,7 +171,7 @@ def ack_first_run(root: Path | None = None) -> dict:
 
 def _check(key: str, ok: bool, detail: str, fix_kind: str = "none",
            fix_url: str = "", fix_command: str = "") -> dict:
-    """组装一项检查的固定结构（五项都返回同样的键，UI 不用猜缺哪个）。
+    """组装一项检查的固定结构（六项都返回同样的键，UI 不用猜缺哪个）。
 
     Args:
         key: 固定机器码（见 :data:`CHECK_KEYS`）。
@@ -324,11 +329,11 @@ def check_admin() -> dict:
 
 
 def _scapy_available() -> bool:
-    """被动监听是否有 scapy 引擎可用（复用 ``passive.engine_status()``，不重复探测）。
+    """本机是否能导入 scapy（被动监听/逐跳的加速引擎，不是必需组件）。
 
     Returns:
         bool: ``True`` 表示 scapy 可导入；模块缺失 / 导入失败 / 探测异常都返回 ``False``
-            （lite 包没有 scapy 时，被动监听只能依赖 tshark）。
+            （lite 包没有 scapy 时：被动监听只能依赖 tshark，逐跳降级系统 tracert）。
     """
     try:
         if passive is None:
@@ -338,23 +343,54 @@ def _scapy_available() -> bool:
         return False
 
 
+def check_scapy() -> dict:
+    """检查 scapy 是否可导入（缺了只降级，不是「不可用」）。
+
+    scapy 是可选加速引擎：它让逐跳样本更准（批量 ``sr()``、TCP 回退）。lite 包
+    **不内置 scapy**，所以这一项失败时不给下载链接、不引导安装，只说明「逐跳会
+    降级为系统 tracert（样本少、精度低）」。
+
+    Returns:
+        dict: 可导入时 ``detail`` 说明逐跳使用 scapy；不可导入时 ``ok=False``、
+            ``fix_kind="none"``，``impact`` 来自 copy 的 ``impact_scapy``。
+    """
+    ok = _scapy_available()
+    return _check("scapy", ok, _t("scapy_ok" if ok else "scapy_missing"))
+
+
+def _tracert_available() -> bool:
+    """系统是否有 ``tracert``（逐跳降级引擎，复用 :func:`pathprobe.tracert_available`）。
+
+    Returns:
+        bool: PATH 上能找到 tracert 为 True；探测异常一律 False。
+    """
+    try:
+        return bool(pathprobe.tracert_available())
+    except Exception:  # noqa: BLE001  探测失败按「没有 tracert」处理，UI 只置灰逐跳
+        return False
+
+
 def capabilities(checks: list[dict] | None = None) -> dict:
-    """把五项环境检查折算成「哪些功能现在可用」的能力矩阵（界面置灰的唯一依据）。
+    """把六项环境检查折算成「哪些功能现在可用」的能力矩阵（界面置灰的唯一依据）。
 
     只读探测：不会写文件、不请求 UAC、不启动抓包子进程；但 ``checks`` 为空时会在
-    本机现场跑五项检查并探测 scapy 引擎，因此结果依赖本机环境，不是纯函数。
+    本机现场跑六项检查并探测 scapy/tracert 引擎，因此结果依赖本机环境，不是纯函数。
     ``admin`` 不是能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，
     不能置灰封死。
 
     Args:
-        checks: 可选，五项检查结果（结构同 :func:`collect` 的 ``checks``）。测试注入
-            构造的 ✅/❌ 组合；``None`` 时跑真实的 :func:`check_python` 等五项。
+        checks: 可选，六项检查结果（结构同 :func:`collect` 的 ``checks``）。测试注入
+            构造的 ✅/❌ 组合；``None`` 时跑真实的 :func:`check_python` 等六项。
 
     Returns:
         dict: 键 ``probe`` / ``offline`` / ``live`` / ``passive`` / ``reports`` /
-            ``settings``（bool）、``missing``（不可用模式的机器码原因，键为模式名，
-            值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy`` /
-            ``tshark|scapy|npcap``）、``scapy``（被动监听是否有 scapy 可用）。
+            ``settings``（bool）、``path_probe``（逐跳是否有引擎可用：scapy **或**
+            系统 tracert）、``mtr_engine``（``scapy`` / ``tracert`` / ``None``）、
+            ``missing``（不可用模式的机器码原因，键为模式名，值为 ``tshark`` /
+            ``npcap`` / ``tshark|npcap`` / ``tshark|scapy`` /
+            ``tshark|scapy|npcap``）、``scapy``（是否有 scapy 可用）。
+            **缺 scapy 不会让 path_probe 变 False**：只要系统 tracert 在，逐跳
+            就可用（降级）。
 
     Example:
         >>> capabilities([{"key": "tshark", "ok": False},
@@ -362,7 +398,7 @@ def capabilities(checks: list[dict] | None = None) -> dict:
         True
     """
     if checks is None:
-        checks = [check_python(), check_tshark(), check_npcap(),
+        checks = [check_python(), check_tshark(), check_npcap(), check_scapy(),
                   check_port(), check_admin()]
     by_key: dict[str, bool] = {}
     for item in checks:
@@ -372,11 +408,21 @@ def capabilities(checks: list[dict] | None = None) -> dict:
     tshark_ok = by_key.get("tshark", False)
     npcap_ok = by_key.get("npcap", False)
     scapy_ok = _scapy_available()
+    tracert_ok = _tracert_available()
     live_ok = tshark_ok and npcap_ok
     # 通信观察要真正打开网卡收包：两种引擎都必须落在 Npcap 驱动上。
     # 缺驱动时 tshark / scapy 再能导入也抓不到包（运行期见 passive.py 的
     # 「没有可用网卡：请安装 Npcap」），所以 Npcap 是 passive 的前置条件。
     passive_ok = npcap_ok and (tshark_ok or scapy_ok)
+    # 逐跳只需要「能发出 TTL 探测」：scapy 更准，系统 tracert 也能给逐跳表格。
+    # 两个都没有才置灰（UI 只在 path_probe === false 时禁用「逐跳路径」开关）。
+    if scapy_ok:
+        mtr_engine: str | None = "scapy"
+    elif tracert_ok:
+        mtr_engine = "tracert"
+    else:
+        mtr_engine = None
+    path_probe_ok = mtr_engine is not None
 
     missing: dict[str, str] = {}
     if not tshark_ok:
@@ -403,13 +449,16 @@ def capabilities(checks: list[dict] | None = None) -> dict:
         "passive": passive_ok,  # 通信观察：Npcap 驱动 + (tshark 或内置 scapy)
         "reports": True,
         "settings": True,
+        # 逐跳：scapy 或系统 tracert 任一可用即可（缺 scapy 只降级，不置灰）。
+        "path_probe": path_probe_ok,
+        "mtr_engine": mtr_engine,
         "missing": missing,
         "scapy": scapy_ok,
     }
 
 
 def collect(root: Path | None = None) -> dict:
-    """跑完五项检查并组装 ``GET /api/selfcheck`` 的响应。
+    """跑完六项检查并组装 ``GET /api/selfcheck`` 的响应。
 
     纯读：不写标记文件、不请求 UAC、不启动抓包子进程。``first_run`` 只读
     ``<root>/config/ui-first-run.json`` 是否存在。单项检查抛异常时只把该项标成
@@ -419,8 +468,8 @@ def collect(root: Path | None = None) -> dict:
         root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
 
     Returns:
-        dict: 键 ``ok``（五项是否全过）/ ``version``（``VERSION`` 文件）/
-            ``first_run``（标记不存在）/ ``checks``（固定 5 项，顺序为
+        dict: 键 ``ok``（六项是否全过）/ ``version``（``VERSION`` 文件）/
+            ``first_run``（标记不存在）/ ``checks``（固定 6 项，顺序为
             :data:`CHECK_KEYS`）/ ``capabilities``（能力矩阵）/
             ``ui_copy``（``{"startup": {...}}`` 文案）。
     """
@@ -428,6 +477,7 @@ def collect(root: Path | None = None) -> dict:
         ("python", check_python),
         ("tshark", check_tshark),
         ("npcap", check_npcap),
+        ("scapy", check_scapy),
         ("port", check_port),
         ("admin", check_admin),
     )
@@ -474,7 +524,7 @@ def collect_cached(root: Path | None = None, force: bool = False) -> dict:
 
     Args:
         root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
-        force: ``True`` 时跳过缓存重新跑五项检查（测试 / ack 后的强制刷新）。
+        force: ``True`` 时跳过缓存重新跑六项检查（测试 / ack 后的强制刷新）。
 
     Returns:
         dict: 与 :func:`collect` 相同结构。返回深拷贝，调用方改字段不会污染缓存。
@@ -504,5 +554,5 @@ __all__ = [
     "CHECK_KEYS", "MARKER_REL", "CACHE_TTL_SECONDS", "collect", "collect_cached",
     "invalidate_cache", "capabilities", "marker_path",
     "is_first_run", "ack_first_run", "ui_copy", "check_python", "check_tshark",
-    "check_npcap", "check_port", "check_admin",
+    "check_npcap", "check_scapy", "check_port", "check_admin",
 ]

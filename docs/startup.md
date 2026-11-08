@@ -1,7 +1,7 @@
 # 启动与提权（NetDiag.exe / start.bat / NetDiag.vbs）
 
 > 面向使用者与维护者。目标是把「拿到包 → 双击 → 能用」做成一条不折腾的路径：
-> **启动不提权**，需要管理员的功能再按需请求；首次运行先做五项只读检查。
+> **启动不提权**，需要管理员的功能再按需请求；首次运行先做六项只读检查。
 >
 > C1（启动器 + 启动不提权）与 C2（按需提权 UI / 表单保留 / 首屏自检）均已实现，
 > 本文描述的是当前行为。
@@ -177,31 +177,34 @@ NetDiag.exe --dry-run --report "<临时目录>\launcher.json"
 关键缺项（`python` / `tshark` / `npcap` 任一 `ok:false`）也会显示缺件面板。检查是
 **只读**的：不写文件、不请求提权、不启动抓包。
 
-用户点「受限进入」或五项全过自动进入后，前端 `POST /api/selfcheck/ack` 写标记；
+用户点「受限进入」或六项全过自动进入后，前端 `POST /api/selfcheck/ack` 写标记；
 之后启动不再显示。标记写失败（U 盘只读 / 目录被锁）**不阻塞**：本次照常进入主界面，
 只提示一句，下次启动会再检查一次。想再看一次面板，删除 `config\ui-first-run.json`
 后刷新即可（人工验收步骤之一）。
 
-### 5.2 五项检查
+### 5.2 六项检查
 
 | key | 检查内容 | 通过条件 | 失败时的修复入口 |
 |---|---|---|---|
 | `python` | Python 版本 / 位数 / 便携或系统 | ≥ 3.11 | Python 官网下载页 |
 | `tshark` | 是否找到、版本号 | 能找到 tshark | Wireshark 下载页 + `python core\diagnose.py --interfaces` |
 | `npcap` | Npcap 驱动 | 已安装 | Npcap 官网下载页 |
+| `scapy` | 逐跳 / 被动监听的加速引擎 | 能 `import scapy.all` | **不引导安装**：缺了逐跳自动降级系统 `tracert`（样本少、精度低），只解释影响 |
 | `port` | 8787~8796 有可用端口，或已有本程序实例 | 任一成立 | `netstat -ano \| findstr :8787` |
 | `admin` | 当前是否管理员 | 是管理员 | 直接弹「以管理员身份重启」权限卡 |
 
 每项都带 `key` / `name` / `ok` / `detail` / `fix_kind` / `fix_url` / `fix_command`；
 失败项的 `detail` 是可执行的一句话（缺什么、为什么、下一步），不是干巴巴的 ❌。
+**`scapy` 不是必需组件**：lite 包合规不带它，失败时 `fix_kind="none"`、没有下载
+链接；它只影响逐跳样本精度（有 scapy → scapy MTR；没有 → 系统 tracert）。
 
 ### 5.3 面板行为
 
-- ✅/❌ 五项 + 失败项修复链接/命令；
+- ✅/❌ 六项 + 失败项修复链接/命令；
 - **[重新检测]**：重新 `GET /api/selfcheck`，不刷新页面；
 - **[受限进入]**：检查没全过也进主界面；离线分析、连通与速度测试不被锁死，
   抓包类仍按非管理员置灰；
-- 五项全过：自动显示「正在进入主界面」并 ack，不需要用户多点一次；
+- 六项全过：自动显示「正在进入主界面」并 ack，不需要用户多点一次；
 - 非首次运行（标记存在）且全绿：**不显示**面板；非首次但有关键缺项：显示缺件面板；
 - 后端没有 `first_run` 字段（旧载荷）：不把老载荷当成首次运行；也没有
   `capabilities` 时退回仅管理员锁的 C2 行为（详见 5.5）。
@@ -209,7 +212,7 @@ NetDiag.exe --dry-run --report "<临时目录>\launcher.json"
 ### 5.4 `自检.bat` 的位置
 
 `自检.bat` 继续保留，作为**备用/离线**检查脚本：界面起不来、或维护者想逐项看
-Python / tshark / Npcap / 管理员权限时用它。它不再是唯一入口，也不代替首屏检查。
+Python / tshark / Npcap / scapy / 管理员权限时用它。它不再是唯一入口，也不代替首屏检查。
 
 ---
 
@@ -230,6 +233,8 @@ Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入
 | `offline`（分析抓包文件） | 找到 tshark | 置灰，原因 `tshark` |
 | `live`（实时抓包） | tshark 且 Npcap | 置灰，原因 `tshark` / `npcap` / `tshark|npcap` |
 | `passive`（通信观察） | Npcap 且（tshark 或内置 scapy） | 置灰，原因 `npcap` / `tshark|scapy` / `tshark|scapy|npcap` |
+| `path_probe`（逐跳路径） | scapy 或系统 tracert 任一可用 | **不置灰**（缺 scapy 只降级 tracert）；两个都没有才禁用「逐跳路径」开关 |
+| `mtr_engine`（逐跳引擎） | `scapy` / `tracert` / `null` | UI 据此显示「使用 scapy」或「已降级系统 tracert」提示 |
 | `reports` / `settings` | 恒为 true | 永远可用 |
 
 通信观察要真正打开网卡收包，因此 **Npcap 是硬前提**；只装 tshark/scapy 而没有
@@ -252,11 +257,20 @@ TTL 缓存，不会把全套检查跑两遍；ack 写标记后会清缓存）。
   也可单独安装 Npcap；
 - 分析已有抓包文件**不需要** Npcap；
 - 装完点「重新检测」，不需要重启。
+
+#### scapy（可选，不引导安装）
+
+- 有 scapy：逐跳走 scapy MTR（批量 `sr()`、ICMP 被过滤时可改 TCP SYN、样本更准）；
+- 没有 scapy：逐跳自动降级为系统 `tracert`（`-d -h 16 -w <ms>`，每跳固定 3 次
+  探测），报告标注「基于系统 tracert，样本数 3」；**逐跳入口不置灰**，只在开关下方
+  提示「已降级」；
+- 只有 scapy 与 `tracert` **都不可用**时，才禁用「逐跳路径」开关并说明原因；
+- lite 包**不内置 scapy**，也不会自动下载；失败项不提供安装链接（合规策略）。
 #### 界面上怎么表现（首屏面板 / 置灰 / 说明卡 / 重新检测）
 
 **首屏「准备检查」面板**在一个条件满足时出现：`first_run: true`（首次运行），
 或者 `checks` 里 `python` / `tshark` / `npcap` 任一关键项为 `ok: false`。
-五项全过且不是首次运行：不弹面板（保持 C2 行为）。失败项除了 ✅/❌ 还会显示：
+六项全过且不是首次运行：不弹面板（保持 C2 行为）。失败项除了 ✅/❌ 还会显示：
 
 - 一句「缺了会怎样」（`impact_*`）；
 - 可操作的修复指引（`fix_*`，例如安装 Wireshark、设置 `TSHARK_PATH`、安装 Npcap）；
@@ -270,6 +284,7 @@ TTL 缓存，不会把全套检查跑两遍；ack 写标记后会清缓存）。
 | 全网体检 / 单目标诊断 | `capabilities.live === false` | 缺 tshark →「· 需 Wireshark」；缺 Npcap →「· 需 Npcap」；都缺 →「· 需 Wireshark 与 Npcap」 |
 | 通信观察 | `capabilities.passive === false` | 缺 Npcap →「· 需 Npcap」；缺 tshark/scapy →「· 需 Wireshark」；都缺 →「· 需 Wireshark 与 Npcap」 |
 | 分析抓包文件 | `capabilities.offline === false` | 「· 需 Wireshark」 |
+| 「逐跳路径」开关 | `capabilities.path_probe === false`（scapy 与 tracert 都无） | 开关置灰 +「没有可用的逐跳引擎」说明；缺 scapy 时**不灰**，只提示「降级系统 tracert」 |
 | 连通与速度测试 / 报告与导出 / 设置 | **永不因缺组件置灰** | — |
 | 非管理员时的抓包类入口 | 仍按 C2 的管理员锁 →「· 需管理员」 | 点击弹权限卡（可提权） |
 

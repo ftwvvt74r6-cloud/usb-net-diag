@@ -550,7 +550,7 @@ def _path_profiler_for(target: str, duration: int, logger) -> "pathprobe.PathPro
         budget = max(8.0, float(duration or 0) + 5.0)
         profiler = pathprobe.PathProfiler(
             target, port=None, max_hops=pathprobe.PATH_DEFAULT_MAX_HOPS,
-            samples=3, timeout_s=0.8, budget_s=budget)
+            samples=3, timeout_s=0.8, budget_s=budget, logger=logger)
         logger(f"[提示] 路径探测（MTR）已启用：最多 {profiler.max_hops} 跳 × "
                f"{profiler.samples} 样本，时间预算 {profiler.budget_s:g}s"
                f"（抓包时长 + 5s）")
@@ -1254,9 +1254,18 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         baseline = dict(baseline)
         baseline["excluded_packets"] = excluded
         result["meta"]["probe_baseline"] = baseline
-        logger(f"探针基线：发出 {baseline.get('sent', 0)} 个、收到 "
-               f"{baseline.get('recv', 0)} 个；已从业务统计排除 {excluded} 个标记探针包"
-               f"（ICMP 超时包另计）")
+        sent = int(baseline.get("sent") or 0)
+        recv = int(baseline.get("recv") or 0)
+        try:
+            timeout = int(baseline.get("timeout"))
+        except (TypeError, ValueError):
+            timeout = max(0, sent - recv)
+        # G3：收发与超时全部由探针模块自记（ProbeRecord.responded），不再从抓包
+        # 反推「收到几个」—— 抓包过滤器本来就把探针排除了，反推永远 0。
+        logger(f"探针：发出 {sent} / 收到 {recv} / 超时 {timeout}（模块自记）")
+        if excluded > 0:
+            # 只有确实有探针包混进业务统计时才提示；N=0 时不打印无信息量的句子。
+            logger(f"已从业务统计排除 {excluded} 个标记探针包（ICMP 超时包另计）")
 
     # 路径剖面同样只「有数据才注入」：离线路径没有 cap["path"]，一个键都不加。
     profile = path.get("profile")
@@ -1279,10 +1288,14 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
                              f"第 {'、'.join(str(ttl) for ttl in profile.get('middle_loss_ttls') or [])} 跳）")
         else:
             degraded_text = "未发现持续劣化"
+        # 与 G3 的「N=0 不打印」同口径：0 个 ICMP 超时包没有信息量，
+        # 只在确实有包被剔除时才追加这一句（数值本身不变）。
+        excluded_text = (
+            f"；已从业务统计剔除 {excluded_icmp} 个 ICMP 超时包"
+            f"（含非探针流量，{excluded_icmp} 为上限）——这些包未计入业务统计"
+            if excluded_icmp > 0 else "")
         logger(f"路径剖面：{len(profile.get('hops') or [])} 跳（方式 {profile.get('method')}），"
-               f"{degraded_text}；"
-               f"已从业务统计剔除 {excluded_icmp} 个 ICMP 超时包"
-               f"（含非探针流量，{excluded_icmp} 为上限）——这些包未计入业务统计")
+               f"{degraded_text}{excluded_text}")
 
     if result["meta"]["packets"] == 0:
         result["rows"].insert(0, {
