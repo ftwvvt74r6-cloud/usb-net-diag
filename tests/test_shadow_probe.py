@@ -331,11 +331,11 @@ class ProbeLifecycleTest(unittest.TestCase):
 
     def test_shadow_false_does_not_construct_prober(self):
         result = diagnose.capture_live(
-            target="8.8.8.8", duration=3, logger=lambda _m: None, shadow=False)
+            target="93.184.216.34", duration=3, logger=lambda _m: None, shadow=False)
         # 环境没有 tshark/Npcap 时会在更早的入口返回；这里只守「没造探针」。
         self.assertNotIn("probe", result)
         with mock.patch.object(diagnose, "_shadow_prober_for") as factory:
-            diagnose.capture_live(target="8.8.8.8", duration=3,
+            diagnose.capture_live(target="93.184.216.34", duration=3,
                                   logger=lambda _m: None, shadow=False)
         self.assertEqual(factory.call_count, 0,
                          "shadow=False 时不许构造影子探针")
@@ -387,12 +387,12 @@ class CaptureLiveShadowWiringTest(unittest.TestCase):
                                   return_value={"gateway": GW}), \
                 mock.patch.object(diagnose.pathprobe, "send_probe",
                                   return_value=(True, 1.0, GW, "")):
-            result = diagnose.capture_live(target="8.8.8.8", duration=3,
+            result = diagnose.capture_live(target="93.184.216.34", duration=3,
                                            interface="5", shadow=True,
                                            logger=logs.append)
 
         self.assertTrue(result.get("ok"), result)
-        expected = (f"(host 8.8.8.8) and "
+        expected = (f"(host 93.184.216.34) and "
                     f"({pathprobe.exclusion_bpf([pathprobe.ProbeKind.ICMP])})")
         self.assertEqual(filters, [expected],
                          "用户 BPF 必须与探针排除式 AND 合并（只加排除式或只加用户式都不对）")
@@ -431,12 +431,12 @@ class CaptureLiveShadowWiringTest(unittest.TestCase):
                 mock.patch.object(tshark, "run", side_effect=fake_run), \
                 mock.patch.object(diagnose.pathprobe, "discover_targets",
                                   return_value={}):
-            result = diagnose.capture_live(target="8.8.8.8", duration=3,
+            result = diagnose.capture_live(target="93.184.216.34", duration=3,
                                            interface="5", shadow=True,
                                            logger=lambda _m: None)
 
         self.assertTrue(result.get("ok"), result)
-        self.assertEqual(filters, ["host 8.8.8.8"], "没有探针目标时不许改用户过滤器")
+        self.assertEqual(filters, ["host 93.184.216.34"], "没有探针目标时不许改用户过滤器")
         self.assertNotIn("probe", result)
 
 
