@@ -3381,8 +3381,13 @@ function renderPathProfile(pp, copy) {
     lines.push(copyFill(copy.reached_line, { ttl: reached ? reached.ttl : "-" }));
   }
   if (pp.completed === false) lines.push(copy.not_completed_line);
-  lines.push(copyFill(copy.excluded_icmp,
-    { count: pp.excluded_icmp === null || pp.excluded_icmp === undefined ? 0 : pp.excluded_icmp }));
+  /* S5：没有样本就明说 —— excluded_icmp=0（体检不抓包时恒为 0）不渲染
+     「剔除 0 个」，与 G3 的 N=0 静默口径一致。 */
+  const excludedIcmp = pp.excluded_icmp === null || pp.excluded_icmp === undefined
+    ? 0 : (Number(pp.excluded_icmp) || 0);
+  if (excludedIcmp > 0) {
+    lines.push(copyFill(copy.excluded_icmp, { count: excludedIcmp }));
+  }
   if (pp.tun_suspected) lines.push(copy.tun_hint);
   return '<div class="sectitle">' + esc(copy.ui_title || "") + '</div>'
     + '<div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table>'

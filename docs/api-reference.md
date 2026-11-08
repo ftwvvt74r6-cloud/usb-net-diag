@@ -1767,7 +1767,7 @@ Returns:
 | `capture_live` | function | 604 | ✅ |
 | `degraded_empty_capture_result` | function | 879 | ✅ |
 | `run_scan` | function | 1056 | ✅ |
-| `main` | function | 1381 | ✅ |
+| `main` | function | 1385 | ✅ |
 
 ### `load_config`
 
@@ -4633,10 +4633,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 374 | ✅ |
-| `save` | function | 650 | ✅ |
-| `render_degraded` | function | 754 | ✅ |
-| `save_degraded` | function | 832 | ✅ |
+| `render_markdown` | function | 378 | ✅ |
+| `save` | function | 654 | ✅ |
+| `render_degraded` | function | 758 | ✅ |
+| `save_degraded` | function | 836 | ✅ |
 
 ### `render_markdown`
 
@@ -5300,31 +5300,31 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 144 | ✅ |
-| `request_quit` | function | 149 | ✅ |
-| `cleanup_pid` | function | 197 | ✅ |
-| `BodyTooLarge` | class | 207 | ✅ |
-| `doctor_cached` | function | 286 | ✅ |
-| `log` | function | 382 | ✅ |
-| `evidence_payload` | function | 478 | ✅ |
-| `conclusion_report_id` | function | 602 | ✅ |
-| `build_status_conclusion` | function | 633 | ✅ |
-| `start_job` | function | 980 | ✅ |
-| `report_index` | function | 1041 | ✅ |
-| `request_elevation` | function | 1075 | ✅ |
-| `engine_info` | function | 1114 | ✅ |
-| `passive_start` | function | 1157 | ✅ |
-| `passive_status` | function | 1192 | ✅ |
-| `link_actions` | function | 1266 | ✅ |
-| `Handler` | class | 1336 | ✅ |
-| `Handler.handle_one_request` | method | 1362 | ✅ |
-| `Handler.log_message` | method | 1398 | ✅ |
-| `Handler.do_GET` | method | 1536 | ✅ |
-| `Handler.do_POST` | method | 1553 | ✅ |
-| `DiagServer` | class | 1852 | ✅ |
-| `DiagServer.handle_error` | method | 1863 | ✅ |
-| `create_server` | function | 1891 | ✅ |
-| `main` | function | 1938 | ✅ |
+| `touch` | function | 149 | ✅ |
+| `request_quit` | function | 154 | ✅ |
+| `cleanup_pid` | function | 202 | ✅ |
+| `BodyTooLarge` | class | 212 | ✅ |
+| `doctor_cached` | function | 291 | ✅ |
+| `log` | function | 408 | ✅ |
+| `evidence_payload` | function | 504 | ✅ |
+| `conclusion_report_id` | function | 628 | ✅ |
+| `build_status_conclusion` | function | 659 | ✅ |
+| `start_job` | function | 1015 | ✅ |
+| `report_index` | function | 1076 | ✅ |
+| `request_elevation` | function | 1110 | ✅ |
+| `engine_info` | function | 1149 | ✅ |
+| `passive_start` | function | 1192 | ✅ |
+| `passive_status` | function | 1227 | ✅ |
+| `link_actions` | function | 1301 | ✅ |
+| `Handler` | class | 1382 | ✅ |
+| `Handler.handle_one_request` | method | 1408 | ✅ |
+| `Handler.log_message` | method | 1453 | ✅ |
+| `Handler.do_GET` | method | 1591 | ✅ |
+| `Handler.do_POST` | method | 1613 | ✅ |
+| `DiagServer` | class | 1920 | ✅ |
+| `DiagServer.handle_error` | method | 1931 | ✅ |
+| `create_server` | function | 1959 | ✅ |
+| `main` | function | 2006 | ✅ |
 
 ### `touch`
 

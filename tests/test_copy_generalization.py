@@ -1,11 +1,12 @@
 """G1 守门：用户可见文案不再出现「一线 / 二线 / 同事」，防止改回去。
 
-扫描范围（``G-SPEC`` G1 / V1）：
+扫描范围（``G-SPEC`` G1 / V1；S1 复审后扩大到**全部用户可见**）：
 
-* ``core/copy/zh-CN.json``（用户可见文案 + AI 提示词）
-* ``ui/index.html``（三个模式示例、结论复制按钮、设置 / 退出文案）
-* ``README.md``、``AGENTS.md``
-* ``docs/**/*.md``（含由 docstring 生成的 ``docs/api-reference.md``）
+* ``core/copy/*.json``：遍历**所有字符串值**（不只 ``zh-CN.json``，也不只原文 grep；
+  ``evidence_checklist.json`` 等文案表同样属于用户可见）；
+* ``ui/index.html``（三个模式示例、结论复制按钮、设置 / 退出文案）；
+* ``README.md``、``AGENTS.md``；
+* ``docs/**/*.md``（含由 docstring 生成的 ``docs/api-reference.md``）；
 * ``CHANGELOG.md``：历史条目**允许保留原文**，但同一行必须带
   「历史称谓；v0.3.2 起…」注记（否则算回退）。
 
@@ -22,7 +23,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-COPY_PATH = ROOT / "core" / "copy" / "zh-CN.json"
+COPY_DIR = ROOT / "core" / "copy"
+COPY_PATH = COPY_DIR / "zh-CN.json"
 UI_PATH = ROOT / "ui" / "index.html"
 COPY = json.loads(COPY_PATH.read_text(encoding="utf-8"))
 HTML = UI_PATH.read_text(encoding="utf-8")
@@ -45,8 +47,31 @@ REQUIRED_FILES = (
     "docs/build.md",
 )
 
+#: 允许保留旧称谓（且必须带历史注记）的唯一文件；与分类表一致。
+ALLOWED_LEGACY_FILES = ("CHANGELOG.md",)
+
 CONFIG_RE = re.compile(
     r'<script type="application/json" id="ui-config">(.*?)</script>', re.S)
+
+
+def _copy_json_files() -> list[Path]:
+    """``core/copy/*.json`` 全量（新增文案表自动纳入守门，不用改清单）。"""
+    return sorted(COPY_DIR.glob("*.json"))
+
+
+def _iter_strings(node, prefix: str = "") -> list[tuple[str, str]]:
+    """深度遍历 JSON，返回 ``[(点分路径, 字符串值)]``（只关心字符串值）。"""
+    out: list[tuple[str, str]] = []
+    if isinstance(node, str):
+        out.append((prefix or "<root>", node))
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            child = f"{prefix}.{key}" if prefix else str(key)
+            out.extend(_iter_strings(value, child))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            out.extend(_iter_strings(value, f"{prefix}[{index}]"))
+    return out
 
 
 def _user_visible_files() -> list[Path]:
@@ -77,12 +102,23 @@ class UserVisibleNoLegacyRolesTest(unittest.TestCase):
             with self.subTest(file=rel):
                 self.assertIn(rel, names, "扫描范围不能悄悄漏掉用户可见文件")
 
+    def test_copy_scope_covers_every_json_table(self):
+        """S1：扫整个 ``core/copy/*.json``，不只 ``zh-CN.json``。"""
+        names = {p.relative_to(ROOT).as_posix() for p in _copy_json_files()}
+        self.assertIn("core/copy/zh-CN.json", names)
+        self.assertIn("core/copy/evidence_checklist.json", names,
+                      "新增文案表必须自动纳入守门范围")
+
     def test_copy_table_has_no_legacy_roles(self):
-        text = COPY_PATH.read_text(encoding="utf-8")
-        for term in LEGACY_TERMS:
-            with self.subTest(term=term):
-                self.assertNotIn(term, text,
-                                 f"copy/zh-CN.json 仍含旧称谓 {term!r}（用户可见）")
+        """遍历所有 copy JSON 的**字符串值**（键名不算用户可见文案）。"""
+        for path in _copy_json_files():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for dotted, value in _iter_strings(data):
+                for term in LEGACY_TERMS:
+                    with self.subTest(file=path.name, key=dotted, term=term):
+                        self.assertNotIn(
+                            term, value,
+                            f"{path.name}:{dotted} 仍含旧称谓 {term!r}（用户可见）")
 
     def test_ui_has_no_legacy_roles(self):
         for term in LEGACY_TERMS:
@@ -170,6 +206,18 @@ class GeneralizedCopyTest(unittest.TestCase):
                         for name in names),
                     f"{internal} 是内部文件，不属于用户可见扫描范围")
         self.assertFalse(any(name == "LICENSE" for name in names))
+
+    def test_allowlist_matches_classification_table(self):
+        """允许保留旧称谓的文件只有 CHANGELOG（且必须带历史注记），别处一律 0。"""
+        self.assertEqual(ALLOWED_LEGACY_FILES, ("CHANGELOG.md",))
+        names = {p.relative_to(ROOT).as_posix() for p in _user_visible_files()}
+        self.assertNotIn("CHANGELOG.md", names,
+                         "CHANGELOG 走历史注记专用规则，不混进普通扫描")
+        docs = {p.relative_to(ROOT).as_posix()
+                for p in (ROOT / "docs").rglob("*.md")}
+        self.assertTrue(docs <= names, "docs/** 必须全部在用户可见扫描范围")
+        copy_names = {p.relative_to(ROOT).as_posix() for p in _copy_json_files()}
+        self.assertTrue(copy_names, "core/copy 下必须有文案表")
 
 
 if __name__ == "__main__":

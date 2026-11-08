@@ -181,6 +181,32 @@ class LastRunHttpTest(unittest.TestCase):
         self.assertTrue(body["last"].get("trimmed"), "超限时必须显式标记 trimmed")
         self.assertEqual(self._get("/api/last-run/result")[0], 404)
 
+    def test_limit_counts_utf8_bytes_not_characters(self):
+        """S3：8MB 上限按 UTF-8 字节算；中文按字符数算会放大到约 3 倍。"""
+        result = _result()
+        encoded = json.dumps(result, ensure_ascii=False)
+        char_count = len(encoded)
+        byte_count = len(encoded.encode("utf-8"))
+        self.assertLess(char_count, byte_count, "样本必须含中文（否则字符数 == 字节数）")
+
+        # 上限卡在「字符数够、字节数不够」之间：旧实现会收下，新实现必须丢弃。
+        with mock.patch.object(server, "LAST_RUN_MAX_BYTES", byte_count - 1):
+            server._remember_last_run("live", "example.com", time.time(), result)
+        last = server._last_run_view()
+        self.assertFalse(last["full_result"],
+                         f"UTF-8 {byte_count}B > 上限 {byte_count - 1}B 时必须只留摘要")
+        self.assertTrue(last.get("trimmed"))
+        self.assertIsNone(server._last_run_result())
+
+    def test_limit_accepts_result_exactly_at_byte_limit(self):
+        result = _result()
+        byte_count = len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        with mock.patch.object(server, "LAST_RUN_MAX_BYTES", byte_count):
+            server._remember_last_run("live", "example.com", time.time(), result)
+        last = server._last_run_view()
+        self.assertTrue(last["full_result"], "等于上限（不是超过）时必须保留完整结果")
+        self.assertIsNotNone(server._last_run_result())
+
     # ---------- GET /api/last-run/result ----------
     def test_result_returns_full_result_and_conclusion(self):
         server._remember_last_run("live", "example.com", time.time() - 1, _result())

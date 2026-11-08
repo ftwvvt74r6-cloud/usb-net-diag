@@ -216,7 +216,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `POST /api/ai/analyze` | `{result?, question?}`；省略 result 用最近一次 `JOB.result` | AI 结论 + `model` + `latency_ms` + 可选 `markdown`（写 `reports/<stem>.ai.md`） |
 | `POST /api/passive` | `{interface?, duration, target?, engine?}`（`auto/scapy/tshark`） | `{ok: true, engine}`；后台跑，轮询 `GET /api/passive` |
 | `POST /api/passive/stop` | 无 | `{ok: true}`（置停止标志，后台收尾） |
-| `POST /api/probe` | `{target, port?, count?, timeout?, proto?, path?}`（`path` 默认 true，加法字段） | `probe.run()` 结果（分段耗时/协议/结论；`path=true` 时附逐跳路径） |
+| `POST /api/probe` | `{target, port?, count?, timeout?, proto?, path?}`（`path` 默认 true，加法字段） | `probe.run()` 结果（分段耗时/协议/结论；`path=true` 时附逐跳路径，逐跳有 20s 时间预算 `PROBE_PATH_BUDGET_S`，到点保留已完成跳并标 `completed=false`） |
 | `POST /api/scan` | `{mode: live/scan/offline, target?, duration?, interface?, pcap?, shadow?}`（`shadow` 默认 true，加法字段）；offline 的 pcap 只接受 `captures/` 下文件名 | `{ok: true}`；后台任务，轮询 `/api/status` |
 | `POST /api/diagpack` | `{raw?: bool, include_reports?: bool}` | `{ok: true, path, size, entries}`（默认脱敏） |
 | `POST /api/upload` | 原始字节 + `?name=x.pcap`；只收 `.pcap/.pcapng/.cap` | `{ok: true, file, size}`（落到 `captures/`） |
@@ -230,7 +230,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
 | `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed`；完成时另加 `conclusion`（7 键结论对象）、`result.conclusion_text` / `conclusion_markdown` / `conclusion_export`、`ui_copy.conclusion`（E2 加法字段） |
 | `GET /api/last-run` | 上次运行摘要（G5；内存优先，进程重启后用 `logs/runs/*.json` 最近一条诊断记录兜底） | `{ok, last: 摘要或 null, ui_copy.last_run}`；摘要键 `time/epoch/mode/target/level/ok/duration_ms/critical/warning/full_result/source` |
-| `GET /api/last-run/result` | 上次运行的完整结果（G5；只在内存里） | `{ok, result（与 `/api/status` 同源，含结论字段）, summary, link_actions}`；内存没有时 **404** + `{ok:false,error}`（不抛异常） |
+| `GET /api/last-run/result` | 上次运行的完整结果（G5；只在内存里） | `{ok, result（与 `/api/status` 同源，含结论字段）, summary, link_actions}`；内存没有时 **404** + `{ok:false,error}`（不抛异常）。完整结果含 `meta.pcap_file` 绝对路径与 rows 里的目标 IP/域名/URL，**不脱敏**：只存本进程内存（单槽、进程退出即失），不落盘、不联网，仅本机可读；8 MiB 上限按序列化后 UTF-8 字节数计 |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
 | `GET /api/captures` | 已有抓包 | `files[{name,size,mtime}]`（最多 50） |
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |

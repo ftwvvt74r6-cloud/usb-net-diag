@@ -1094,7 +1094,7 @@ class RunScanInjectionTest(unittest.TestCase):
         }
 
     def _run(self, cap: dict, profile_patch=None, analyze_side_effect=None,
-             logger=None, **kwargs):
+             logger=None, counted_icmp: int = 7, **kwargs):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(diagnose, "capture_live", return_value=cap), \
                     mock.patch.object(diagnose.analyzer, "analyze",
@@ -1108,7 +1108,7 @@ class RunScanInjectionTest(unittest.TestCase):
                                       return_value=Path("tshark.exe")), \
                     mock.patch.object(diagnose.pathprobe,
                                       "count_time_exceeded_packets",
-                                      return_value=7) as counted:
+                                      return_value=counted_icmp) as counted:
                 result = diagnose.run_scan(
                     logger=logger or (lambda _m: None), **kwargs)
         return result, analyze, counted
@@ -1137,6 +1137,25 @@ class RunScanInjectionTest(unittest.TestCase):
         display_filter = analyze.call_args.kwargs.get("display_filter") or ""
         self.assertIn("icmp.type == 11", display_filter)
         self.assertIn("tcp.srcport", display_filter)
+
+    def test_zero_excluded_icmp_log_omits_exclusion_sentence(self):
+        """S5：日志与报告同口径 —— 0 个 ICMP 超时包时不写「剔除 0」。"""
+        logs: list[str] = []
+        self._run(self._cap(_profile()), target=TARGET, shadow=True, duration=5,
+                  logger=logs.append, counted_icmp=0)
+        text = "\n".join(logs)
+        self.assertIn("路径剖面", text)
+        self.assertNotIn("ICMP 超时包", text,
+                         f"0 值不应打印排除句：\n{text}")
+        self.assertNotIn("剔除", text)
+
+    def test_positive_excluded_icmp_log_keeps_exclusion_sentence(self):
+        """N>0 时排除句保留，且数字来自 count_time_exceeded_packets。"""
+        logs: list[str] = []
+        self._run(self._cap(_profile()), target=TARGET, shadow=True, duration=5,
+                  logger=logs.append, counted_icmp=7)
+        text = "\n".join(logs)
+        self.assertIn("剔除 7 个 ICMP 超时包", text)
 
     def test_display_filter_failure_always_retries_without_filter(self):
         """R7：显示过滤失败（错误串不含 filter）也必须无条件回退一次。"""
@@ -1232,6 +1251,22 @@ class PathReportTest(unittest.TestCase):
         self.assertIn("这些包未计入业务统计", md)
         self.assertIn("6 为上限", md)
         self.assertIn("含非探针流量", md)
+
+    def test_zero_excluded_icmp_omits_count_line(self):
+        """S5：没有样本就明说 —— ``excluded_icmp=0`` 时不打印「剔除 0 个」。"""
+        md = report.render_markdown(_result(_profile(excluded_icmp=0)))
+        block = md.split("路径剖面", 1)[1].split("\n## ", 1)[0]
+        self.assertNotIn("剔除 0", block)
+        self.assertNotIn("业务统计", block,
+                         "0 值没有信息量，不能和 G3 的 N=0 静默口径相矛盾")
+        self.assertIn("路径剖面", md, "有逐跳数据时区块本身仍必须存在")
+
+    def test_missing_excluded_icmp_old_payload_omits_count_line(self):
+        """旧载荷没有 ``excluded_icmp`` 键时按 0 处理，同样不打印。"""
+        profile = _profile()
+        profile.pop("excluded_icmp")
+        block = report.render_markdown(_result(profile)).split("路径剖面", 1)[1]
+        self.assertNotIn("剔除", block.split("\n## ", 1)[0])
 
     def test_tcp_method_and_icmp_filtered_wording(self):
         md = report.render_markdown(_result(_profile(
@@ -1374,6 +1409,45 @@ class ProbeApiPathTest(unittest.TestCase):
         self.assertIn('_to_bool((q.get("path") or [None])[0], True)', source)
         self.assertIn('params = {"target"', source)
 
+    def test_path_probe_has_time_budget_and_cancellation_hook(self):
+        """S6：同步 ``/api/probe?path=true`` 必须带时间预算（不干等约 60s）。"""
+        captured: dict = {}
+
+        def fake_run(target, port=None, **kwargs):
+            captured.update(kwargs)
+            return self._path_result()
+
+        with mock.patch.object(server.pathprobe, "run", side_effect=fake_run), \
+                mock.patch.object(server, "log"):
+            profile = server._probe_path_profile("example.com", 443, budget_s=1)
+        self.assertIsNotNone(profile)
+        should_stop = captured.get("should_stop")
+        self.assertTrue(callable(should_stop), "必须把取消判定传给 pathprobe.run")
+        self.assertFalse(should_stop())
+        time.sleep(1.02)  # 预算最小 1s（防误传 0 立即取消）
+        self.assertTrue(should_stop(), "预算到点后必须让 pathprobe 收尾")
+
+    def test_budget_stop_keeps_partial_profile_and_marks_not_completed(self):
+        """到预算被取消时：保留已完成的跳、completed=false、日志明说未跑完。"""
+        partial = pathprobe.PathProbeResult(
+            target="example.com", target_ip=TARGET,
+            hops=(pathprobe.HopStat(ttl=1, ip=GW, sent=3, lost=0,
+                                    rtt_min_ms=1.0, rtt_avg_ms=1.0,
+                                    rtt_max_ms=1.0, jitter_ms=0.0, rtt_n=3),),
+            verdict_key=pathprobe.PATH_OK, method="tracert", reached_target=False,
+            completed=False, error="tracert 被取消，已保留部分跳",
+            max_hops=16, samples=3, timeout_s=1.0, probes_sent=3)
+        logs: list[str] = []
+        with mock.patch.object(server.pathprobe, "run", return_value=partial), \
+                mock.patch.object(server, "log", side_effect=logs.append):
+            profile = server._probe_path_profile("example.com", 443, budget_s=1)
+        self.assertIsNotNone(profile)
+        self.assertFalse(profile["completed"])
+        self.assertEqual(len(profile["hops"]), 1)
+        text = "\n".join(logs)
+        self.assertIn("部分降级", text)
+        self.assertIn("未跑完", text)
+
 
 class PathUiTest(unittest.TestCase):
     """UI：逐跳 checkbox 默认勾选、payload 带 path、结果页渲染路径剖面。"""
@@ -1444,6 +1518,15 @@ class PathUiTest(unittest.TestCase):
                 {"meta": {"path_profile": _profile()}})
         self.assertEqual(enriched["ui_copy"]["path"], {"ui_title": "y"})
         self.assertNotIn("probe", enriched["ui_copy"])
+
+    def test_path_block_hides_zero_excluded_icmp(self):
+        """S5：UI 与报告/日志同口径，0 个 ICMP 超时包不渲染「剔除 0」。"""
+        start = HTML.index("function renderPathProfile(pp, copy)")
+        body = HTML[start:HTML.index("\nfunction ", start)]
+        self.assertIn("excludedIcmp > 0", body,
+                      "0 值必须跳过 excluded_icmp 文案（没有样本就明说）")
+        self.assertNotIn("? 0 : pp.excluded_icmp", body,
+                         "旧的无条件渲染写法必须消失")
 
 
 # ---------------------------------------------------------------- 隔离（硬性）

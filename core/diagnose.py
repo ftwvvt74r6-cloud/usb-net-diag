@@ -1288,10 +1288,14 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
                              f"第 {'、'.join(str(ttl) for ttl in profile.get('middle_loss_ttls') or [])} 跳）")
         else:
             degraded_text = "未发现持续劣化"
+        # 与 G3 的「N=0 不打印」同口径：0 个 ICMP 超时包没有信息量，
+        # 只在确实有包被剔除时才追加这一句（数值本身不变）。
+        excluded_text = (
+            f"；已从业务统计剔除 {excluded_icmp} 个 ICMP 超时包"
+            f"（含非探针流量，{excluded_icmp} 为上限）——这些包未计入业务统计"
+            if excluded_icmp > 0 else "")
         logger(f"路径剖面：{len(profile.get('hops') or [])} 跳（方式 {profile.get('method')}），"
-               f"{degraded_text}；"
-               f"已从业务统计剔除 {excluded_icmp} 个 ICMP 超时包"
-               f"（含非探针流量，{excluded_icmp} 为上限）——这些包未计入业务统计")
+               f"{degraded_text}{excluded_text}")
 
     if result["meta"]["packets"] == 0:
         result["rows"].insert(0, {

@@ -51,6 +51,10 @@ from pathlib import Path
 MAX_JSON_BODY = 8 << 20
 MAX_UPLOAD = 2 << 30
 MAX_CONCURRENT_PROBE = 3  # 体检会发真实报文，限制并发避免把目标打挂
+#: ``/api/probe?path=true`` 的逐跳时间预算（秒）。
+#: 体检是同步 HTTP 请求，不能等满 tracert 的 60s 硬上限（S6）：到点后停止发新探测，
+#: 保留已拿到的跳并标 ``completed=False``，报告写「探测未完成…以上是已完成的跳」。
+PROBE_PATH_BUDGET_S = 20.0
 
 CORE = Path(__file__).resolve().parent
 ROOT = CORE.parent
@@ -109,7 +113,8 @@ PROBE_SEM = threading.Semaphore(MAX_CONCURRENT_PROBE)
 # ---- 上次结果（G5）：页面刷新/重开时明确告诉用户「这是上次的结果」 ----
 #: 内存只保留最近一次分析：新运行覆盖，进程退出即失（不落盘、不联网）。
 LAST_RUN = {"summary": None, "result": None, "cleared_at": 0.0}
-#: 完整结果的内存上限；超过时只留摘要（``full_result=False``），避免大结果长期占内存。
+#: 完整结果的内存上限（**序列化后的 UTF-8 字节数**，不是字符数）；超过时只留摘要
+#: （``full_result=False``），避免大结果长期占内存。
 LAST_RUN_MAX_BYTES = 8 << 20
 #: runs/*.json 兜底只认诊断类记录（probe / passive 没有 render() 可恢复的完整结果）。
 LAST_RUN_FALLBACK_MODES = ("live", "scan", "offline")
@@ -351,12 +356,19 @@ def _probe_guarded(target: str, port, count, timeout, proto,
     return res
 
 
-def _probe_path_profile(target: str, port) -> dict | None:
+def _probe_path_profile(target: str, port,
+                        budget_s: float = PROBE_PATH_BUDGET_S) -> dict | None:
     """体检成功后补跑一次 MTR，返回 ``path_profile``（失败只降级为 ``None``）。
+
+    同步 HTTP 请求必须有自己的时间预算（S6）：到 ``budget_s`` 后通过
+    ``should_stop`` 让 ``pathprobe.run`` 停止发新探测（tracert 会在 100ms 内 kill），
+    保留已完成的跳并让结果带 ``completed=False``；**不抛异常、不拖死请求**。
 
     Args:
         target: 目标（域名或 IP；域名由 ``pathprobe.run`` 自己解析）。
         port: 体检用的端口；``None`` 时路径探测按 443/80 判断可达性。
+        budget_s: 本次逐跳探测的时间预算（秒）；默认
+            :data:`PROBE_PATH_BUDGET_S`，小于 1 秒按 1 秒处理。
 
     Returns:
         dict | None: 有逐跳数据时是 ``PathProbeResult.to_dict()``（另加
@@ -364,7 +376,18 @@ def _probe_path_profile(target: str, port) -> dict | None:
             探测不可用 / 零跳时返回 ``None``（界面上不显示该区块）。
     """
     try:
-        result = pathprobe.run(target, port=port, logger=log)
+        budget = max(1.0, float(budget_s))
+    except (TypeError, ValueError):
+        budget = PROBE_PATH_BUDGET_S
+    deadline = time.monotonic() + budget
+
+    def _budget_exhausted() -> bool:
+        """到点即停：pathprobe 每批发包前 / tracert 每 100ms 检查一次。"""
+        return time.monotonic() >= deadline
+
+    try:
+        result = pathprobe.run(target, port=port, logger=log,
+                               should_stop=_budget_exhausted)
     except Exception as exc:                       # noqa: BLE001  路径探测失败只降级
         log(f"[提示] 逐跳路径探测不可用（不影响体检结论）："
             f"{type(exc).__name__}: {exc}")
@@ -374,6 +397,9 @@ def _probe_path_profile(target: str, port) -> dict | None:
         return None
     if result.error:
         log(f"[提示] 逐跳路径探测部分降级（结果仍可用）：{result.error}")
+    if not result.completed:
+        log(f"[提示] 逐跳路径探测未跑完（时间预算 {budget:g}s 或取消），"
+            f"保留已完成的 {len(result.hops)} 跳（结果标记未完成）")
     profile = result.to_dict()
     profile["excluded_icmp"] = 0
     return profile
@@ -734,6 +760,9 @@ def _remember_last_run(mode: str, target: str, started_at: float,
     ``/api/last-run/result`` 恢复结果区。完整结果超过 :data:`LAST_RUN_MAX_BYTES` 时
     丢弃完整结果、只留摘要（``full_result=False``），内存占用有上限。
 
+    上限按**序列化后的 UTF-8 字节数**（``json.dumps(..., ensure_ascii=False).encode``）
+    计算，不按字符数：一个中文字符通常占 3 字节，按字符数会让实际内存到约 3 倍上限。
+
     Args:
         mode: 用户选择的模式（``scan`` / ``live`` / ``offline``）。
         target: 摘要里的目标文本（见 :func:`_last_run_target`）。
@@ -742,6 +771,12 @@ def _remember_last_run(mode: str, target: str, started_at: float,
 
     Returns:
         None: 只更新模块级 :data:`LAST_RUN`，不写文件、不抛业务异常。
+
+    Note:
+        完整结果里的 ``meta.pcap_file`` 可能是本机绝对路径，``rows`` 也可能含目标
+        IP / 域名 / URL。这些**只留在本进程内存**（单槽，进程退出即失），不落盘、
+        不联网、不导出；``/api/last-run/result`` 只在 127.0.0.1 上本机可读。
+        这里不做脱敏，因为前端「查看上次结果」要按原样渲染既有字段。
     """
     now = time.time()
     payload = result if isinstance(result, dict) else {}
@@ -768,7 +803,7 @@ def _remember_last_run(mode: str, target: str, started_at: float,
     full = None
     if ok and payload:
         try:
-            size = len(json.dumps(payload, ensure_ascii=False))
+            size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
         except (TypeError, ValueError):
             size = LAST_RUN_MAX_BYTES + 1
         if size <= LAST_RUN_MAX_BYTES:
@@ -1320,14 +1355,25 @@ def _log_connection_noise(exc: BaseException, where: str = "请求处理") -> No
 
     Args:
         exc: 捕获到的连接异常。
-        where: 发生位置（``请求处理`` / ``服务端``），便于排障时区分。
+        where: 发生位置（``请求处理`` / ``响应发送`` / ``服务端``），便于排障时区分。
 
     Returns:
         None: 日志写盘失败也不抛异常（连接噪音处理本身不许再制造噪音）。
+
+    Note:
+        日志里用中文类别描述，不写 ``ConnectionResetError`` 这类 Python 类名：
+        G4/B1 的磁盘日志验收明确要求 ``diag-*.log`` 不出现 ``Traceback`` /
+        ``ConnectionResetError``——类名会把一次正常的关页面渲染成服务故障。
     """
+    reasons = {
+        ConnectionResetError: "连接被重置",
+        ConnectionAbortedError: "连接被中止",
+        BrokenPipeError: "管道已断开",
+    }
+    reason = reasons.get(type(exc), "连接异常")
     try:
         logstore.diag_log(
-            f"[debug] {where}：客户端提前断开（{type(exc).__name__}）；"
+            f"[debug] {where}：客户端提前断开（{reason}）；"
             "不写 traceback，服务继续")
     except Exception:                              # noqa: BLE001  日志失败不阻塞服务
         pass
@@ -1375,22 +1421,31 @@ class Handler(BaseHTTPRequestHandler):
             _log_connection_noise(exc)
 
     def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8") -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        if self.close_connection:
-            # 早退 body 超过丢弃上限/分块传输时由 _discard_body 置位：
-            # 必须明确告诉客户端不再复用连接，否则 keep-alive 会读到残留字节。
-            self.send_header("Connection", "close")
-        self.send_header("Cache-Control", "no-store")
-        for k, v in self.SECURITY_HEADERS:
-            self.send_header(k, v)
-        self.end_headers()
+        """写一个完整响应；客户端提前断开在这里降级，**绝不**把栈冒到调用方。
+
+        整个「状态行 + 头 + body」必须放在同一个 ``try`` 里：``end_headers()``
+        会把头部缓冲真正写进 socket，大响应（``GET /``）时客户端 RST 恰好落在这里
+        —— 只包 ``wfile.write(body)`` 会漏掉 ``end_headers``，异常冒到
+        ``do_GET`` 的宽泛 ``except`` 就会先写一整段 traceback（B1 真机复现）。
+        """
         try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:
+                # 早退 body 超过丢弃上限/分块传输时由 _discard_body 置位：
+                # 必须明确告诉客户端不再复用连接，否则 keep-alive 会读到残留字节。
+                self.send_header("Connection", "close")
+            self.send_header("Cache-Control", "no-store")
+            for k, v in self.SECURITY_HEADERS:
+                self.send_header(k, v)
+            self.end_headers()
             self.wfile.write(body)
-        except CONNECTION_NOISE:
-            # 客户端已经走了：响应没人收是正常现象，不往上抛（G4）。
-            pass
+        except CONNECTION_NOISE as exc:
+            # 客户端已经走了：响应没人收是正常现象。置位关闭连接，让 handle()
+            # 循环退出；只记一行 debug（B1：这里不许再写 traceback）。
+            self.close_connection = True
+            _log_connection_noise(exc, "响应发送")
 
     def _json(self, data, code: int = 200) -> None:
         self._send(code, json.dumps(data, ensure_ascii=False).encode("utf-8"))
@@ -1546,6 +1601,11 @@ class Handler(BaseHTTPRequestHandler):
             self._route_get()
         except BodyTooLarge as exc:
             self._json({"ok": False, "error": str(exc)}, 413)
+        except CONNECTION_NOISE as exc:
+            # 连接类异常必须排在宽泛 except 之前：宽泛分支会先写一整段 traceback
+            # （B1）。这里交给统一降级——一行 debug + 关闭连接，不响应。
+            self.close_connection = True
+            _log_connection_noise(exc)
         except Exception as exc:  # noqa: BLE001
             diagnose._log_to_file(traceback.format_exc())
             self._json({"ok": False, "error": f"服务内部错误：{type(exc).__name__}: {exc}"}, 500)
@@ -1562,6 +1622,10 @@ class Handler(BaseHTTPRequestHandler):
             self._route_post()
         except BodyTooLarge as exc:
             self._json({"ok": False, "error": str(exc)}, 413)
+        except CONNECTION_NOISE as exc:
+            # 同 do_GET：连接类异常先降级，禁止落到下面写 traceback 的分支。
+            self.close_connection = True
+            _log_connection_noise(exc)
         except Exception as exc:  # noqa: BLE001
             diagnose._log_to_file(traceback.format_exc())
             self._json({"ok": False, "error": f"服务内部错误：{type(exc).__name__}: {exc}"}, 500)
@@ -1714,6 +1778,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": False, "error": "禁止外部页面访问本机服务"}, 403)
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/quit":
+            # S4：这个端点会真的停掉本机服务，和所有 POST 一样必须先过 _route_post
+            # 顶部的 _guard()（Host + Origin 同源），拒绝外部网页 CSRF / DNS rebinding。
+            # 不再加一次性 token：本机同用户进程本来就能结束进程，token 挡不住它们，
+            # 反而会破坏「界面右上角退出 / 空闲自动退出」两条既有链路。
             self._discard_body()
             request_quit("收到界面退出指令，正在停止本地服务…")
             return self._json({"ok": True, "message": "服务已停止，可以关闭本页面了"})

@@ -215,7 +215,11 @@ def _render_path_profile(profile: dict) -> list[str]:
         lines.append(_pa("reached_line", ttl=reached_ttl))
     if not profile.get("completed", True):
         lines.append(_pa("not_completed_line"))
-    lines.append(_pa("excluded_icmp", count=profile.get("excluded_icmp", 0)))
+    # 与 G3 的「N=0 不打印」同口径：剔除 0 个包没有信息量，还会让人误以为
+    # 路径探测真的抓到了东西。只有 excluded_icmp > 0 才写这一行。
+    excluded_icmp = int(profile.get("excluded_icmp") or 0)
+    if excluded_icmp > 0:
+        lines.append(_pa("excluded_icmp", count=excluded_icmp))
     if profile.get("tun_suspected"):
         lines.append(_pa("tun_hint"))
     lines.append("")
