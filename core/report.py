@@ -53,6 +53,19 @@ def _d(key: str, **args) -> str:
     return _copy_text("degraded_report", key, **args)
 
 
+def _p(key: str, **args) -> str:
+    """取影子探测（探针基线）的静态文案（``copy.probe`` section）。
+
+    Args:
+        key: ``probe`` section 内的键。
+        **args: ``{name}`` 占位符实参。
+
+    Returns:
+        str: 可直接展示的文案；缺 key 时回退成 key 本身或空串。
+    """
+    return _copy_text("probe", key, default="", **args)
+
+
 def _state_text(status: str) -> str:
     """层状态机器码（ok/warn/bad/na/insufficient）→ 中文文案。"""
     return _copy_text("state", status, default=status)
@@ -80,6 +93,112 @@ def _ms(v) -> str:
 def _opt(v, has: bool) -> str:
     """没有样本时显示 -，避免把「没测到」误读成「0ms 很快」。"""
     return _ms(v) if has else "-"
+
+
+def _probe_role_text(role: str) -> str:
+    """把探针角色机器码（gateway/dns/target）翻成中文（``copy.probe.role_*``）。
+
+    Args:
+        role: 角色机器码。
+
+    Returns:
+        str: 可直接展示的角色名；文案缺失时回退成 key（与全项目文案约定一致）。
+    """
+    return _p("role_" + str(role or "target"))
+
+
+def _probe_rtt_text(item: dict) -> str:
+    """探针 RTT 单元格：有样本写「最小/平均/最大」，没有样本写「未探到」。
+
+    Args:
+        item: :func:`core.pathprobe.aggregate_records` 产出的单个角色聚合项。
+
+    Returns:
+        str: 可直接展示的 RTT 短语；``n == 0`` 时绝不写 0ms（没有样本 ≠ 很快）。
+    """
+    if int(item.get("n") or 0) <= 0:
+        return _p("no_sample")
+    template = _p("rtt_value")
+    if "{" not in template:
+        template = "{min}/{avg}/{max} ms"
+    try:
+        return template.format(min=item.get("rtt_min_ms"),
+                               avg=item.get("rtt_avg_ms"),
+                               max=item.get("rtt_max_ms"))
+    except (KeyError, IndexError, ValueError):
+        return template
+
+
+def _probe_contrast_text(contrast: dict) -> str:
+    """方向对照一句话（机器码 → copy.probe.contrast_* 文案）。
+
+    Args:
+        contrast: ``verdict.probe_contrast``；含 ``code`` / ``gateway_loss_pct`` /
+            ``target_loss_pct`` / ``confidence``。
+
+    Returns:
+        str: 可直接展示的中文（措辞含「疑似」由 copy 表保证）；未知 code 返回空串。
+    """
+    code = str(contrast.get("code") or "")
+    keys = {
+        "PROBE.CONTRAST.LOCAL_SIDE": "contrast_local_side",
+        "PROBE.CONTRAST.TARGET_SIDE": "contrast_target_side",
+        "PROBE.CONTRAST.BOTH_SIDES": "contrast_both_sides",
+        "PROBE.CONTRAST.INSUFFICIENT": "contrast_insufficient",
+    }
+    key = keys.get(code)
+    if not key:
+        return ""
+    return _p(key, gateway=contrast.get("gateway_loss_pct", "-"),
+              target=contrast.get("target_loss_pct", "-"),
+              confidence=contrast.get("confidence", "-"))
+
+
+def _render_probe_baseline(baseline: dict, vd: dict) -> list[str]:
+    """渲染「探针基线」区块（只在 ``meta.probe_baseline`` 存在时调用）。
+
+    区块头在报告「关键指标」之后：先看业务指标，再看「探针自己的对照基线」。
+    0 个 RTT 样本的角色写「未探到」，绝不写 0ms / 正常；排除包数无论 0 还是 N
+    都如实写出 —— 「已排除 0 包」正是 BPF 生效的证据。
+
+    Args:
+        baseline: ``meta["probe_baseline"]``。
+        vd: 判定结果（读可选的 ``probe_contrast``）。
+
+    Returns:
+        list[str]: 报告行（已含结尾空行）；空数据时返回空列表。
+    """
+    roles = baseline.get("roles") or []
+    if not roles:
+        return []
+    lines = [_p("section_title"), ""]
+    rows = []
+    for item in roles:
+        jitter = (f"{item.get('jitter_ms')}ms" if int(item.get("n") or 0) > 0
+                  else _p("no_sample"))
+        loss = item.get("loss_pct")
+        rows.append([
+            _probe_role_text(item.get("role", "")),
+            item.get("target", "-"),
+            item.get("sent", 0),
+            item.get("recv", 0),
+            "-" if loss is None else f"{loss:g}%",
+            _probe_rtt_text(item),
+            jitter,
+        ])
+    lines.append(_table(
+        [_p("th_role"), _p("th_target"), _p("th_sent"), _p("th_recv"),
+         _p("th_loss"), _p("th_rtt"), _p("th_jitter")],
+        rows))
+    lines.append("")
+    lines.append(_p("excluded", count=baseline.get("excluded_packets", 0)))
+    contrast = vd.get("probe_contrast") if isinstance(vd, dict) else None
+    if isinstance(contrast, dict):
+        text = _probe_contrast_text(contrast)
+        if text:
+            lines.append(text)
+    lines.append("")
+    return lines
 
 
 def render_markdown(result: dict, vd: dict | None = None) -> str:
@@ -171,6 +290,12 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
              _t("m_tput_ref"), _t("m_tput_desc")],
         ]))
     L.append("")
+
+    # ---------------- 影子探测基线（只有实时 + 开了探针才出现） ----------------
+    # 离线分析 / 关闭探针时 meta 里没有这个键 → 一行都不加，保证 20 产物逐字节不变。
+    baseline = meta.get("probe_baseline")
+    if isinstance(baseline, dict):
+        L += _render_probe_baseline(baseline, vd)
 
     # ---------------- 二、问题详解 ----------------
     L += [_t("section_points"), ""]
@@ -406,11 +531,14 @@ def render_degraded(result: dict) -> str:
                       f"{link.get('loss_pct')}%")
     reasons = [f"{i}. {r}" for i, r in enumerate(result.get("reasons") or [], 1)]
     steps = [f"{i}. {s}" for i, s in enumerate(result.get("next_steps") or [], 1)]
+    # F1：0 包降级路径的 capture.target 用「全网」表示没设目标（见 diagnose 降级卡），
+    # 非空 ≠ 单目标。旧实现只判真值，把全网体检误写成「单目标诊断」。
+    target_text = str(cap.get("target") or "").strip()
+    degraded_mode = ("单目标诊断" if target_text and target_text != "全网" else "全网体检")
     lines = [
         _d("title"),
         "",
-        _d("meta_line", mode="单目标诊断" if cap.get("target")
-           else "全网体检", at=result.get("at") or "-"),
+        _d("meta_line", mode=degraded_mode, at=result.get("at") or "-"),
         "",
         _d("section_conclusion"),
         "",

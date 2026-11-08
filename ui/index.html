@@ -121,6 +121,11 @@
   .field{margin-bottom:11px}
   label{display:block;font-size:11px;color:#64748b;margin:0 0 5px;font-weight:650;
     letter-spacing:.2px}
+  /* 开关型 label：不按上面的块级标签排版，保持一行复选框 + 文案 */
+  label.checkline{display:flex;align-items:center;gap:7px;margin:0;font-size:12.3px;
+    color:var(--text-2);font-weight:600;cursor:pointer;letter-spacing:0}
+  label.checkline input[type=checkbox]{width:15px;height:15px;margin:0;accent-color:var(--accent);
+    cursor:pointer;flex:none}
   input[type=text],input[type=number],input[type=password],select{
     width:100%;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;font:inherit;
     font-size:12.5px;color:inherit;background:#fcfdff;outline:none;transition:.14s}
@@ -637,6 +642,16 @@
         <div class="hint">抓包窗口越短越容易只看到零星流量；排查建议 30~60 秒。</div>
       </div>
 
+      <div class="field hidden" id="field-shadow">
+        <label class="checkline" for="shadow-toggle">
+          <input type="checkbox" id="shadow-toggle" checked />
+          抓包同时做探针基线（每 5 秒，少量探测包）
+        </label>
+        <div class="hint">探针只发 1 个 ICMP / TCP SYN / DNS 查询，已从业务统计里排除，
+          用来给「本次结论」一个 RTT / 丢包对照基线；关闭后不发探针、报告也没有该区块。
+          被动监听 / 分析抓包文件恒不发探针。</div>
+      </div>
+
       <div class="field" id="field-iface">
         <label>网卡</label>
         <select id="iface"><option value="">自动选择（推荐）</option></select>
@@ -973,6 +988,7 @@
       "display": "全网体检（全网扫描）",
       "nav_desc": "抓本机所有流量，看整体状况",
       "needs_admin": true,
+      "shadow": true,
       "fields": [
         "duration",
         "iface"
@@ -998,6 +1014,7 @@
       "display": "单目标诊断（定向抓包）",
       "nav_desc": "只看我和某个 IP/网站的通信，判断卡在哪一环",
       "needs_admin": true,
+      "shadow": true,
       "fields": [
         "target",
         "duration",
@@ -1193,6 +1210,8 @@ function setMode(mode) {
     const key = id.replace("field-", "");
     $("#" + id).classList.toggle("hidden", !(cfg.fields || []).includes(key));
   }
+  // 影子探测开关：只有实时抓包（全网体检 / 单目标诊断）显示；被动监听与离线恒隐藏。
+  $("#field-shadow").classList.toggle("hidden", !cfg.shadow);
   $("#duration-label").textContent = mode === "passive" ? "监听时长（秒）" : "抓包时长（秒）";
   $("#run").textContent = cfg.btn;
   $("#hint").textContent = cfg.hint || "";
@@ -1580,6 +1599,8 @@ async function startCapture() {
     payload.interface = $("#iface").value || null;
     // 全网扫描不传目标：后端也会再兜底忽略，避免历史上 target 被当过滤条件。
     if (MODE !== "scan") payload.target = $("#target").value.trim();
+    // 影子探测默认开；只有实时抓包模式（cfg.shadow）才带这个字段，旧后端不受影响。
+    if (cfg.shadow) payload.shadow = !!($("#shadow-toggle") || {}).checked;
   }
 
   RUN_MODE = MODE;
@@ -2194,6 +2215,61 @@ $("#link-go").onclick = () => {
   applyLinkAction(action);
 };
 
+/* ---------- 影子探测「探针基线」区块 ----------
+   文案不在本文件里写：后端把 core/copy/zh-CN.json 的 probe section 随结果下发
+   （res.ui_copy.probe），这里只做排版与数字拼接。缺文案时不渲染该区块。 */
+function renderProbeBaseline(pb, copy, contrast) {
+  if (!pb || !(pb.roles || []).length || !copy) return "";
+  const noSample = copy.no_sample || "";
+  const rows = (pb.roles || []).map((r) => {
+    const n = Number(r.n || 0);
+    const rtt = n > 0
+      ? String(copy.rtt_value || "").replace("{min}", r.rtt_min_ms)
+          .replace("{avg}", r.rtt_avg_ms).replace("{max}", r.rtt_max_ms)
+      : noSample;
+    const jitter = n > 0 ? (r.jitter_ms + "ms") : noSample;
+    const loss = (r.loss_pct === null || r.loss_pct === undefined)
+      ? "-" : (r.loss_pct + "%");
+    const role = copy["role_" + (r.role || "target")] || r.role || "-";
+    return '<tr><td>' + esc(role) + '</td><td class="mono">' + esc(r.target || "-") + '</td>'
+      + '<td class="mono">' + esc(r.sent || 0) + '</td><td class="mono">' + esc(r.recv || 0) + '</td>'
+      + '<td class="mono">' + esc(loss) + '</td><td class="mono">' + esc(rtt) + '</td>'
+      + '<td class="mono">' + esc(jitter) + '</td></tr>';
+  }).join("");
+  const excluded = String(copy.excluded || "")
+    .replace("{count}", pb.excluded_packets == null ? 0 : pb.excluded_packets);
+  let direction = "";
+  if (contrast) {
+    const key = {
+      "PROBE.CONTRAST.LOCAL_SIDE": "contrast_local_side",
+      "PROBE.CONTRAST.TARGET_SIDE": "contrast_target_side",
+      "PROBE.CONTRAST.INSUFFICIENT": "contrast_insufficient",
+    }[contrast.code];
+    const tpl = key ? copy[key] : "";
+    if (tpl) {
+      const text = String(tpl)
+        .replace("{gateway}", contrast.gateway_loss_pct == null ? "-" : contrast.gateway_loss_pct)
+        .replace("{target}", contrast.target_loss_pct == null ? "-" : contrast.target_loss_pct)
+        .replace("{confidence}", contrast.confidence == null ? "-" : contrast.confidence);
+      direction = '<div class="hint" style="font-size:12px;color:var(--text-2)">'
+        + esc(text) + '</div>';
+    }
+  }
+  return '<div class="sectitle">' + esc(copy.ui_title || "") + '</div>'
+    + '<div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table>'
+    + '<thead><tr><th>' + esc(copy.th_role || "") + '</th>'
+    + '<th>' + esc(copy.th_target || "") + '</th>'
+    + '<th>' + esc(copy.th_sent || "") + '</th>'
+    + '<th>' + esc(copy.th_recv || "") + '</th>'
+    + '<th>' + esc(copy.th_loss || "") + '</th>'
+    + '<th>' + esc(copy.th_rtt || "") + '</th>'
+    + '<th>' + esc(copy.th_jitter || "") + '</th></tr></thead><tbody>'
+    + rows + '</tbody></table></div>'
+    + '<div class="hint">' + esc(excluded)
+    + (copy.ui_hint ? " " + esc(copy.ui_hint) : "") + '</div>'
+    + direction;
+}
+
 function render(res, actions) {
   if (!res || !res.ok) return;
   hideQuestion();
@@ -2330,6 +2406,10 @@ function render(res, actions) {
       + '</div></details>'
     : "";
 
+  /* 影子探测基线：只有实时抓包 + 开了探针 + 真发出过探针时后端才下发。 */
+  const probeBlock = renderProbeBaseline(
+    m.probe_baseline, (res.ui_copy || {}).probe || null, vd.probe_contrast);
+
   const html = `
     <div class="vcard ${esc(lv)}" data-card="${isNormal ? "normal" : "fault"}">
       <div class="vkind">${esc(isNormal ? "结论 · 全部正常" : cardTitle)}</div>
@@ -2342,6 +2422,8 @@ function render(res, actions) {
 
     <div class="sectitle">采集概况</div>
     <div class="statgrid">${statGrid}</div>
+
+    ${probeBlock}
 
     <div class="sectitle">分层定位（自下而上，哪一层红了就先查哪一层）</div>
     <div class="layerbar">${layerbar}</div>

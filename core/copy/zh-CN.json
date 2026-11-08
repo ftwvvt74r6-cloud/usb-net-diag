@@ -515,6 +515,28 @@
     "user.security_header": "【安全观察（附带项，非主线）】",
     "user.question_prefix": "另外请重点回答这个问题："
   },
+  "probe": {
+    "section_title": "### 探针基线（抓包同时发出的少量探测包）",
+    "th_role": "角色",
+    "th_target": "目标",
+    "th_sent": "发出",
+    "th_recv": "收到",
+    "th_loss": "丢包",
+    "th_rtt": "RTT 最小/平均/最大",
+    "th_jitter": "抖动",
+    "excluded": "探针已从业务统计排除（{count} 包）。",
+    "no_sample": "未探到",
+    "rtt_value": "{min}/{avg}/{max} ms",
+    "role_gateway": "网关",
+    "role_dns": "DNS 服务器",
+    "role_target": "对端目标",
+    "contrast_local_side": "方向对照：疑似本地侧丢包（网关丢包 {gateway}% vs 对端 {target}%，置信度 {confidence}）。",
+    "contrast_target_side": "方向对照：疑似对端侧丢包（网关丢包 {gateway}% vs 对端 {target}%，置信度 {confidence}）。",
+    "contrast_insufficient": "方向对照：证据不足（网关丢包 {gateway}% vs 对端 {target}%）。",
+    "ui_title": "探针基线（抓包同时发的少量探测包）",
+    "ui_hint": "每 5 秒 1 轮，每目标 1 包；这些探针已从上面的业务统计里排除，不会伪造故障。",
+    "ui_empty": "本次没有发出探针（未拿到可用目标）。"
+  },
   "degraded_report": {
     "title": "# NetDiag · 网络矩阵 · 降级结论报告",
     "meta_line": "- 模式：{mode}｜生成时间：{at}",

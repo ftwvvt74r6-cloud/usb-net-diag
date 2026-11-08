@@ -26,6 +26,7 @@ from core.platform import winapi  # noqa: E402
 import analyzer  # noqa: E402
 import diagpack  # noqa: E402
 import logstore  # noqa: E402
+import pathprobe  # noqa: E402
 import report  # noqa: E402
 import tshark  # noqa: E402
 import verdict  # noqa: E402
@@ -490,8 +491,57 @@ def _explicit_empty_result(ts: Path, iface: dict, ordered: list[dict], duration:
             "error": _explicit_empty_error(iface, duration, bpf, traffic)}
 
 
+def _shadow_prober_for(target: str, duration: int, logger) -> "pathprobe.ShadowProber | None":
+    """构造影子探针（任何失败都只降级为「探针不可用」，绝不打断抓包）。
+
+    Args:
+        target: 抓包目标；用于发现业务对端（IP/CIDR/域名）。
+        duration: 抓包秒数，决定探针最多跑几轮（封顶 38 包/目标）。
+        logger: 日志回调。
+
+    Returns:
+        pathprobe.ShadowProber | None: 有可用目标时返回已构造但**未启动**的探针；
+            网关/目标都拿不到、或平台 API 抛异常时返回 ``None``（本次不做探针）。
+    """
+    try:
+        targets = pathprobe.discover_targets(target=target)
+        specs = pathprobe.shadow_specs(targets)
+        if not specs:
+            logger("[提示] 影子探测：没有可用目标（网关与业务目标都没拿到），本次跳过")
+            return None
+        prober = pathprobe.ShadowProber(
+            specs, interval_s=pathprobe.PROBE_INTERVAL_S,
+            max_rounds=pathprobe.rounds_for(duration))
+        logger(f"[提示] 影子探测已启用：每 {pathprobe.PROBE_INTERVAL_S:g} 秒 1 轮，"
+               f"{len(specs)} 个目标（{'、'.join(s.role for s in specs)}），"
+               f"最多约 {pathprobe.probe_len(specs) * prober.max_rounds} 个探测包")
+        return prober
+    except Exception as exc:                       # noqa: BLE001  探针失败只降级
+        logger(f"[提示] 影子探测不可用，已跳过（不影响诊断）："
+               f"{type(exc).__name__}: {exc}")
+        return None
+
+
+def _merge_probe_filter(bpf: str, prober) -> str:
+    """把探针排除式合并进用户抓包过滤器（``AND`` 语义，用户串必须加括号）。
+
+    Args:
+        bpf: 用户过滤器；空串表示抓全网。
+        prober: 已构造的影子探针；``None`` 时原样返回。
+
+    Returns:
+        str: 合并后的 BPF；没有探针/排除式时与入参相同。
+    """
+    if prober is None:
+        return bpf
+    exclusion = prober.exclusion_bpf()
+    if not exclusion:
+        return bpf
+    return f"({bpf}) and ({exclusion})" if bpf else exclusion
+
+
 def capture_live(target: str = "", duration: int = 30, interface: str | None = None,
-                 logger=log) -> dict:
+                 logger=log, shadow: bool = False) -> dict:
     """实时抓包并落盘到 ``captures/``。
 
     Args:
@@ -505,11 +555,16 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             抓到 0 包/0 字节也不换卡（尊重用户选择，避免「指定 Meta 却静默换到 WLAN」
             给出错误结论），直接返回带候选网卡与自助命令的错误。
         logger: 日志回调。
+        shadow: 是否在抓包同时启动影子探测（默认 ``False``；``run_scan``/UI 传
+            ``True``）。探针的抓包排除式会**合并进 BPF**（第一道隔离），账本随
+            成功结果以 ``probe`` 键返回（``run_scan`` 据此注入基线）。
 
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
-            "bpf": str, "duration": int}``；失败 ``{"ok": False, "error": str,
-            "degraded": bool, "empty": bool, "interface": str, "bpf": str}``。
+            "bpf": str, "duration": int}``（``shadow=True`` 且确实发出探针时再加
+            ``"probe"``：账本 + 聚合基线 + 三种过滤串）；失败 ``{"ok": False,
+            "error": str, "degraded": bool, "empty": bool, "interface": str,
+            "bpf": str}``。
             **所有**返回路径都带 ``interface`` / ``bpf``（没有可用值时为 ``""``），
             供降级卡与 ``degraded_*`` 报告写「最终网卡 / 实际过滤器」；``empty=True``
             表示抓包窗口内 0 包（可走 0 包降级），``degraded=True`` 表示
@@ -524,6 +579,10 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
         在写盘窗口期就开始分析会读到半份数据，进而产生幻影告警（T00）。
         0 包的空抓包文件会被删除（日志写一行「已删除空抓包」），避免在
         ``captures/`` 留下无法分析的垃圾。
+
+        影子探测的线程收尾放在 ``finally``：抓包成功/失败/抛异常都会
+        ``stop()`` + ``join(3)``；探针自身异常只写进账本 ``error``，不影响
+        本函数返回值与主诊断退出码。
     """
     ts = tshark.find_tshark()
     if not ts:
@@ -576,89 +635,120 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     duration = max(3, min(int(duration or 30), 180))
     CAPTURES.mkdir(parents=True, exist_ok=True)
 
+    # 影子探测必须在 tshark 启动**之前**构造：排除式要合并进 capture filter，
+    # 而 filter 一旦交给 tshark 就不能再改（账本随抓包增长，BPF 不能）。
+    prober = _shadow_prober_for(target, duration, logger) if shadow else None
+    if prober is not None:
+        bpf = _merge_probe_filter(bpf, prober)
+        if prober.exclusion_bpf():
+            logger("[提示] 影子探测：抓包过滤器已 AND 合并探针排除式（第一道隔离）")
+        try:
+            prober.start()
+        except Exception as exc:                   # noqa: BLE001  探针起不来不拦诊断
+            logger(f"[提示] 影子探测线程启动失败，已跳过：{type(exc).__name__}: {exc}")
+            prober = None
+
     # 显式指定只抓这一块；自动模式才允许「0 包换下一块」重试（最多 3 块）。
     plan = [iface] if explicit else _capture_candidates(iface, ordered, limit=3)
-    failures: list[str] = []
-    for attempt, cand in enumerate(plan, 1):
-        # 换卡重试用短时长：3 块 × 用户时长会让失败路径拖到 90s；重试只值 10s。
-        attempt_duration = duration if attempt == 1 else min(duration, 10)
-        pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
-        cmd = [str(ts), "-i", str(cand["index"]), "-w", str(pcap),
-               "-a", f"duration:{attempt_duration}", "-q"]
-        if bpf:
-            cmd += ["-f", bpf]
 
-        prefix = f"（第 {attempt}/{len(plan)} 块）" if len(plan) > 1 else ""
-        shorten = (f"（重试缩短时长，原 {duration}s）"
-                   if attempt_duration < duration else "")
-        logger(f"开始抓包{prefix}：网卡[{cand['index']}] "
-               f"{tshark.short_name(cand['name'])}，时长 {attempt_duration}s{shorten}，"
-               f"过滤器 `{bpf or '无（全网）'}`")
-        rc, out, err = tshark.run(cmd, timeout=attempt_duration + 120)
-        msg = (err or "") + (out or "")
+    def _attempts() -> dict:
+        """按候选网卡逐块抓包（内嵌函数：让探针的启动/收尾只有一对入口/出口）。"""
+        failures: list[str] = []
+        for attempt, cand in enumerate(plan, 1):
+            # 换卡重试用短时长：3 块 × 用户时长会让失败路径拖到 90s；重试只值 10s。
+            attempt_duration = duration if attempt == 1 else min(duration, 10)
+            pcap = CAPTURES / f"diag_{_stamp()}.pcapng"
+            cmd = [str(ts), "-i", str(cand["index"]), "-w", str(pcap),
+                   "-a", f"duration:{attempt_duration}", "-q"]
+            if bpf:
+                cmd += ["-f", bpf]
 
-        try:
-            size = pcap.stat().st_size
-        except OSError:
-            size = 0
-        if size == 0:
-            low = msg.lower()
-            if ("permission" in low or "access is denied" in low
-                    or "not permitted" in low or "admin" in low):
-                return {"ok": False, "degraded": True,
-                        "interface": tshark.short_name(cand["name"]),
-                        "bpf": bpf or "无（全网）",
-                        "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
-                                 "或使用「分析抓包文件」分析已有 pcap。"}
-            failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 字节(rc={rc})")
-            if explicit:
-                return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
-            logger(f"[提示] 网卡[{cand['index']}] 没有生成有效抓包（rc={rc}），"
-                   "自动换下一块候选网卡重试 ...")
-            continue
+            prefix = f"（第 {attempt}/{len(plan)} 块）" if len(plan) > 1 else ""
+            shorten = (f"（重试缩短时长，原 {duration}s）"
+                       if attempt_duration < duration else "")
+            logger(f"开始抓包{prefix}：网卡[{cand['index']}] "
+                   f"{tshark.short_name(cand['name'])}，时长 {attempt_duration}s{shorten}，"
+                   f"过滤器 `{bpf or '无（全网）'}`")
+            rc, out, err = tshark.run(cmd, timeout=attempt_duration + 120)
+            msg = (err or "") + (out or "")
 
-        # tshark 退出 ≠ 数据已经全部落盘（杀软扫描 / 大文件缓存回写会滞后）。
-        # 若此时立刻分析，tshark 会以 rc=14「cut short」读到一个残缺文件，
-        # 结论随抓包尾部是否已落地而变——这就是「同一文件两次结论不同」的来源。
-        stable = _wait_file_stable(pcap)
-        # 0 包也会写 ~444 B 的 pcapng 头：文件非空不代表抓到了流量，必须真读一帧。
-        if not _pcap_has_packets(ts, pcap):
-            failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 包")
             try:
-                pcap.unlink()
-                logger(f"[提示] 已删除空抓包：{pcap.name}")
+                size = pcap.stat().st_size
             except OSError:
-                pass
-            if explicit:
-                return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
-            logger(f"[提示] 网卡[{cand['index']}] {tshark.short_name(cand['name'])} "
-                   f"在 {attempt_duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
-            continue
+                size = 0
+            if size == 0:
+                low = msg.lower()
+                if ("permission" in low or "access is denied" in low
+                        or "not permitted" in low or "admin" in low):
+                    return {"ok": False, "degraded": True,
+                            "interface": tshark.short_name(cand["name"]),
+                            "bpf": bpf or "无（全网）",
+                            "error": "抓包权限不足（需要管理员权限 + Npcap 驱动）。请右键以管理员身份运行 start.bat，"
+                                     "或使用「分析抓包文件」分析已有 pcap。"}
+                failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 字节(rc={rc})")
+                if explicit:
+                    return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
+                logger(f"[提示] 网卡[{cand['index']}] 没有生成有效抓包（rc={rc}），"
+                       "自动换下一块候选网卡重试 ...")
+                continue
 
-        logger(f"抓包完成：{pcap.name}（{size / 1024:.0f} KB）")
-        if stable:
-            logger("抓包文件已落盘稳定，开始分析")
+            # tshark 退出 ≠ 数据已经全部落盘（杀软扫描 / 大文件缓存回写会滞后）。
+            # 若此时立刻分析，tshark 会以 rc=14「cut short」读到一个残缺文件，
+            # 结论随抓包尾部是否已落地而变——这就是「同一文件两次结论不同」的来源。
+            stable = _wait_file_stable(pcap)
+            # 0 包也会写 ~444 B 的 pcapng 头：文件非空不代表抓到了流量，必须真读一帧。
+            if not _pcap_has_packets(ts, pcap):
+                failures.append(f"{tshark.short_name(cand['name'])}[{cand['index']}] 0 包")
+                try:
+                    pcap.unlink()
+                    logger(f"[提示] 已删除空抓包：{pcap.name}")
+                except OSError:
+                    pass
+                if explicit:
+                    return _explicit_empty_result(ts, iface, ordered, duration, bpf, logger)
+                logger(f"[提示] 网卡[{cand['index']}] {tshark.short_name(cand['name'])} "
+                       f"在 {attempt_duration} 秒内未捕获到报文，自动换下一块候选网卡重试 ...")
+                continue
+
+            logger(f"抓包完成：{pcap.name}（{size / 1024:.0f} KB）")
+            if stable:
+                logger("抓包文件已落盘稳定，开始分析")
+            else:
+                logger("[提示] 抓包文件 3 秒内仍在变化，分析可能读到不完整内容")
+
+            return {"ok": True, "pcap": str(pcap), "interface": tshark.short_name(cand["name"]),
+                    "interface_index": cand["index"], "bpf": bpf or "无（全网）",
+                    "duration": attempt_duration}
+
+        durations = [duration if attempt == 1 else min(duration, 10)
+                     for attempt, _cand in enumerate(plan, 1)]
+        error = _capture_empty_error(plan, durations, bpf)
+        if failures:
+            error += f"（各网卡结果：{'；'.join(failures)}）"
+        # 复审阻塞 1：全失败也要交代「最终用的是哪块卡、哪个过滤器」，否则
+        # server 的降级卡与 degraded_* 报告只能填「自动选择 / 无（全网）」，
+        # 把实际用过的 `host 8.8.8.8` 误报成没过滤。
+        last = plan[-1] if plan else iface
+        return {"ok": False, "degraded": True, "empty": True,
+                "interface": tshark.short_name(last["name"]),
+                "interface_index": last["index"],
+                "bpf": bpf or "无（全网）",
+                "error": error}
+
+    try:
+        result = _attempts()
+    finally:
+        if prober is not None:
+            prober.stop()
+            if not prober.join(3.0):
+                logger("[提示] 影子探测线程 3 秒内未退出；它是 daemon 线程，不阻塞进程退出")
+    if prober is not None:
+        if prober.sent_count:
+            result["probe"] = prober.snapshot()
+            logger(f"影子探测结束：共发 {prober.sent_count} 个探针包")
         else:
-            logger("[提示] 抓包文件 3 秒内仍在变化，分析可能读到不完整内容")
-
-        return {"ok": True, "pcap": str(pcap), "interface": tshark.short_name(cand["name"]),
-                "interface_index": cand["index"], "bpf": bpf or "无（全网）",
-                "duration": attempt_duration}
-
-    durations = [duration if attempt == 1 else min(duration, 10)
-                 for attempt, _cand in enumerate(plan, 1)]
-    error = _capture_empty_error(plan, durations, bpf)
-    if failures:
-        error += f"（各网卡结果：{'；'.join(failures)}）"
-    # 复审阻塞 1：全失败也要交代「最终用的是哪块卡、哪个过滤器」，否则
-    # server 的降级卡与 degraded_* 报告只能填「自动选择 / 无（全网）」，
-    # 把实际用过的 `host 8.8.8.8` 误报成没过滤。
-    last = plan[-1] if plan else iface
-    return {"ok": False, "degraded": True, "empty": True,
-            "interface": tshark.short_name(last["name"]),
-            "interface_index": last["index"],
-            "bpf": bpf or "无（全网）",
-            "error": error}
+            logger("[提示] 影子探测没有发出任何探针，本次不注入探针基线")
+    return result
 
 
 def _fmt_ms(value: float) -> str:
@@ -869,7 +959,8 @@ def _wait_file_stable(path: Path, timeout: float = 3.0) -> bool:
 
 def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
              pcap: str | None = None, logger=log,
-             report_dir: str | Path | None = None) -> dict:
+             report_dir: str | Path | None = None,
+             shadow: bool = False) -> dict:
     """完整诊断：抓包（或复用已有 pcap）→ 分析 → 落盘报告 → 记一条 run。
 
     Args:
@@ -882,22 +973,34 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
         report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
             给定时只写该目录（目录不存在会自动创建），文件名清洗仍由
             :func:`report.save` 负责。
+        shadow: 实时抓包时是否同时做影子探测。**产品入口默认开**（CLI 不传
+            ``--no-shadow`` 即开、UI 默认勾选、``/api/scan`` 缺省 ``true``）；
+            本函数作为库入口默认 ``False``，保证旧调用方行为不变。**离线路径
+            （``pcap`` 非空）恒不启动探针**——用户可能只是在分析别人给的抓包
+            文件。
 
     Returns:
         dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
-            与 ``capture``（本次采集参数）。失败时 ``{"ok": False, "error": "..."}``。
+            与 ``capture``（本次采集参数）；有探针数据时 ``meta["probe_baseline"]``
+            里带「探针基线」（无数据时该键不存在，输出与 main 逐字节一致）。
+            失败时 ``{"ok": False, "error": "..."}``。
 
     Note:
         无论成功、失败还是抛异常，都会调用一次 :func:`logstore.record_run`
         （``mode`` 为 ``offline`` / ``live``）。UI 的 ``/api/scan`` 也走本函数，
         所以两个入口共用同一个记录点，一次分析只有一条记录。
+
+        影子探测的三层隔离都在本函数/``capture_live`` 内完成：抓包 BPF 合并、
+        分析阶段 ``-Y`` 显示过滤、报告里写「已排除 N 个探针包」；任何一步失败
+        都只降级为「探针不可用」，不改变主诊断结论与退出码。
     """
     started = time.monotonic()
     mode = "offline" if pcap else "live"
     params = _run_params(target, duration, interface, pcap)
     try:
         result = _run_scan(target=target, duration=duration, interface=interface,
-                           pcap=pcap, logger=logger, report_dir=report_dir)
+                           pcap=pcap, logger=logger, report_dir=report_dir,
+                           shadow=shadow)
     except Exception:
         _record_run(mode, params, started, {"ok": False}, error_code="E_INTERNAL")
         raise
@@ -983,7 +1086,8 @@ def _record_run(mode: str, params: dict, started: float, result: dict,
 
 def _run_scan(target: str = "", duration: int = 30, interface: str | None = None,
               pcap: str | None = None, logger=log,
-              report_dir: str | Path | None = None) -> dict:
+              report_dir: str | Path | None = None,
+              shadow: bool = False) -> dict:
     """``run_scan`` 的实现体（拆出来是为了让记录逻辑只包一层、不散落在每个 return）。"""
     cfg = load_config()
     cap: dict = {"ok": True, "bpf": verdict.OFFLINE_BPF, "interface": "-", "duration": 0}
@@ -996,7 +1100,8 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
             return {"ok": False, "error": f"抓包文件不存在: {pcap}"}
         cap["pcap"] = str(p)
     else:
-        cap = capture_live(target, duration, interface, logger=logger)
+        # 离线路径（上面的分支）恒不启动探针：用户可能只是在分析别人的 pcap。
+        cap = capture_live(target, duration, interface, logger=logger, shadow=shadow)
         if not cap.get("ok"):
             return {"ok": False, "error": cap.get("error", "抓包失败"),
                     "degraded": cap.get("degraded", False),
@@ -1004,14 +1109,49 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
                     "bpf": cap.get("bpf", ""),
                     "interface": cap.get("interface", "")}
 
+    probe = cap.get("probe") or {}
+    display_filter = str(probe.get("exclusion_display_filter") or "")
     logger("开始分析报文 ...")
-    result = analyzer.analyze(cap["pcap"], target=target, ti_key=cfg.get("threat_intel_key", ""), log=logger)
+    result = analyzer.analyze(cap["pcap"], target=target,
+                              ti_key=cfg.get("threat_intel_key", ""), log=logger,
+                              display_filter=display_filter or None)
+    if (not result.get("ok") and display_filter
+            and "filter" in str(result.get("error") or "").lower()):
+        # 显示过滤语法/字段问题属于「防御层」故障：退回未过滤分析保证诊断能出结论，
+        # 但要明确告知结果可能含探针流量（不静默）。
+        logger("[警告] 探针隔离显示过滤不可用，已退回未过滤分析；"
+               "本次统计可能包含探针流量")
+        result = analyzer.analyze(cap["pcap"], target=target,
+                                  ti_key=cfg.get("threat_intel_key", ""), log=logger)
     if not result.get("ok"):
         return result
 
     result["meta"]["interface"] = cap.get("interface", "-")
     result["meta"]["bpf"] = cap.get("bpf", "-")
     result["meta"]["capture_duration"] = cap.get("duration", 0)
+
+    # 探针基线只「有数据才注入」：没有探针记录时一个键都不加，保证离线路径与
+    # main 的 20 个产物逐字节一致（V11 红线；单测另有钉死）。
+    baseline = probe.get("baseline")
+    if isinstance(baseline, dict) and int(baseline.get("probe_count") or 0) > 0:
+        kinds = []
+        for item in probe.get("planned") or []:
+            try:
+                kinds.append(pathprobe.ProbeKind(str(item.get("kind"))))
+            except ValueError:
+                continue
+        excluded = 0
+        try:
+            ts = tshark.find_tshark()
+            if ts:
+                excluded = pathprobe.count_marked_packets(ts, cap["pcap"], kinds)
+        except Exception as exc:                   # noqa: BLE001  统计失败只影响说明数字
+            logger(f"[提示] 统计探针包数失败（不影响结论）：{type(exc).__name__}: {exc}")
+        baseline = dict(baseline)
+        baseline["excluded_packets"] = excluded
+        result["meta"]["probe_baseline"] = baseline
+        logger(f"探针基线：发出 {baseline.get('sent', 0)} 个、收到 "
+               f"{baseline.get('recv', 0)} 个；已从业务统计排除 {excluded} 个探针包")
 
     if result["meta"]["packets"] == 0:
         result["rows"].insert(0, {
@@ -1074,7 +1214,8 @@ def main(argv: list[str] | None = None) -> int:
             ``--interface`` / ``--pcap`` / ``--interfaces``（只列网卡）/ ``--json``（只打摘要）/
             ``--report-out``（把完整报告**只**写指定目录、**不再写** ``reports/``；
             省略时仍写 ``reports/``）/ ``--export-diag``（导出脱敏诊断包后退出，
-            可配 ``--include-reports`` / ``--raw`` / ``--out``）。
+            可配 ``--include-reports`` / ``--raw`` / ``--out``）/ ``--no-shadow``
+            （实时抓包时关闭影子探测；默认开，离线分析恒不发探针）。
 
     Returns:
         int: 0 成功；2 分析失败（如抓包文件不完整）；其它非 0 表示环境问题。
@@ -1103,6 +1244,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="诊断包不做脱敏（危险：保留原始 IP/域名/用户名/MAC）")
     ap.add_argument("--out", default=None, metavar="DIR",
                     help="诊断包输出目录；省略时写 logs/exports/")
+    ap.add_argument("--no-shadow", action="store_true",
+                    help="实时抓包时不发影子探测包（默认开：每 5 秒一轮、每目标 1 包，"
+                         "已从诊断统计里排除；离线分析恒不发）")
     args = ap.parse_args(argv)
 
     # 日志基建（CLI 也是一次「启动」）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
@@ -1122,7 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     res = run_scan(args.target, args.duration, args.interface, args.pcap,
-                   report_dir=args.report_out)
+                   report_dir=args.report_out, shadow=not args.no_shadow)
     if not res.get("ok"):
         print(f"[错误] {res.get('error')}", file=sys.stderr)
         if res.get("degraded"):

@@ -531,6 +531,88 @@ def _sufficiency(meta: dict, net_rows: list[dict]) -> Sufficiency:
     )
 
 
+#: 探针两侧对照的「显著差」阈值（百分点）：网关丢包比对端多这么多个点，
+#: 才敢说「疑似本地侧」；反过来是「疑似对端侧」。阈值内一律「证据不足」。
+PROBE_CONTRAST_DELTA_PCT = 10.0
+
+
+def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
+    """有探针基线且存在方向类 finding 时，产出「网关 vs 对端」两侧对照。
+
+    只在三个前提都满足时返回数据（否则返回 ``None``，verdict 输出与无探针时
+    **逐字节一致**）：
+
+    1. ``meta["probe_baseline"]`` 存在且含 ``roles``（实时 + 开了探针才有）；
+    2. 存在**方向类** finding：``category == "传输质量"`` 且严重度是严重/警告
+       （「传输质量」的 ``—``/``na`` 行不算方向类结论）；
+    3. 基线里同时有 ``gateway`` 和 ``target`` 两个角色（两侧才能对照）。
+
+    Args:
+        meta: 采集元信息（只读 ``probe_baseline``）。
+        net_rows: 已排除安全观察行的 ``rows[]``。
+
+    Returns:
+        dict | None: ``{"code": 机器码, "confidence": <1.0,
+        "gateway_loss_pct": float|None, "target_loss_pct": float|None,
+        "gateway_n": int, "target_n": int, "delta_pct": float|None}``。
+        ``code`` ∈ ``PROBE.CONTRAST.LOCAL_SIDE`` / ``.TARGET_SIDE`` /
+        ``.INSUFFICIENT``（中文文案由 ``core/report.py`` 从 copy 表取，
+        verdict 层不写中文长文案）。
+    """
+    baseline = meta.get("probe_baseline")
+    if not isinstance(baseline, dict):
+        return None
+    if not any(r.get("category") == "传输质量"
+               and r.get("severity") in PROBLEM_SEVERITIES for r in net_rows):
+        return None
+    by_role: dict[str, dict] = {}
+    for item in baseline.get("roles") or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        if role and role not in by_role:
+            by_role[role] = item
+    gateway = by_role.get("gateway")
+    target = by_role.get("target")
+    if gateway is None or target is None:
+        return None
+
+    gateway_n = _int(gateway.get("n"))
+    target_n = _int(target.get("n"))
+    gateway_loss = gateway.get("loss_pct")
+    target_loss = target.get("loss_pct")
+    if gateway_n <= 0 or target_n <= 0:
+        return {
+            "code": "PROBE.CONTRAST.INSUFFICIENT",
+            "confidence": 0.3,
+            "gateway_loss_pct": gateway_loss,
+            "target_loss_pct": target_loss,
+            "gateway_n": gateway_n,
+            "target_n": target_n,
+            "delta_pct": None,
+        }
+    delta = round(float(gateway_loss or 0.0) - float(target_loss or 0.0), 1)
+    if delta >= PROBE_CONTRAST_DELTA_PCT:
+        code = "PROBE.CONTRAST.LOCAL_SIDE"
+        confidence = 0.6
+    elif -delta >= PROBE_CONTRAST_DELTA_PCT:
+        code = "PROBE.CONTRAST.TARGET_SIDE"
+        confidence = 0.6
+    else:
+        # 两侧丢包接近（含「两侧都丢」与「两侧都不丢」）：无法归因，不许硬指一侧。
+        code = "PROBE.CONTRAST.INSUFFICIENT"
+        confidence = 0.3
+    return {
+        "code": code,
+        "confidence": confidence,
+        "gateway_loss_pct": gateway_loss,
+        "target_loss_pct": target_loss,
+        "gateway_n": gateway_n,
+        "target_n": target_n,
+        "delta_pct": delta,
+    }
+
+
 def build(result: dict) -> dict:
     """生成最终判定：一句话结论 + 分层状态 + 处置建议。
 
@@ -700,7 +782,7 @@ def build(result: dict) -> dict:
         if not steps:
             steps = [_t("next_step", "baseline")]
 
-    return {
+    out = {
         "level": level,
         "headline": headline,
         "plain": plain,
@@ -719,6 +801,12 @@ def build(result: dict) -> dict:
         },
         "sufficiency": suff.to_dict(),
     }
+    # 有探针基线且存在方向类 finding → 加法键；没有基线的离线路径一个键都不加，
+    # 保证 verdict 输出与 main 逐字节一致（V11 红线）。
+    contrast = _probe_contrast(meta, net_rows)
+    if contrast is not None:
+        out["probe_contrast"] = contrast
+    return out
 
 
 def _impact(main: dict, m: dict) -> str:

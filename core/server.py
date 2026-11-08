@@ -50,6 +50,7 @@ sys.path.insert(0, str(CORE))
 
 import ai  # noqa: E402
 import bootstrap  # noqa: E402
+import copytext  # noqa: E402
 import diagnose  # noqa: E402
 import diagpack  # noqa: E402
 import logstore  # noqa: E402
@@ -364,7 +365,44 @@ def _record_ui_run(mode: str, params: dict, started: float, result: dict) -> Non
         pass
 
 
-def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None) -> None:
+def _probe_ui_copy() -> dict:
+    """影子探测结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的 ``probe``）。
+
+    只把这一节随 ``/api/status`` 的结果下发，前端不另存一份中文文案：
+    ``ui/index.html`` 的行为「搬文案」而不是「写文案」。文案表损坏时返回空表，
+    前端在缺文案时不渲染该区块（不影响主结果）。
+
+    Returns:
+        dict: ``probe`` section 的字符串映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "probe")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def _attach_probe_ui_copy(result: dict | None) -> dict | None:
+    """给带探针基线的结果补一份 ``ui_copy``（避免在 JOB 里原地改结果对象）。
+
+    Args:
+        result: ``JOB["result"]``；没有探针基线时原样返回。
+
+    Returns:
+        dict | None: 有 ``meta.probe_baseline`` 时返回浅拷贝 + ``ui_copy``；
+            否则返回原对象（离线路径零改动）。
+    """
+    if not isinstance(result, dict):
+        return result
+    baseline = (result.get("meta") or {}).get("probe_baseline")
+    if not isinstance(baseline, dict):
+        return result
+    enriched = dict(result)
+    enriched["ui_copy"] = {"probe": _probe_ui_copy()}
+    return enriched
+
+
+def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None,
+            shadow: bool = False) -> None:
     # run 记录由 diagnose.run_scan() 统一写（UI 的 /api/scan 也走它），
     # 这里不再重复 record_run —— 否则同一次分析会出现两条记录。
     try:
@@ -372,7 +410,7 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             res = diagnose.run_scan(target=target, pcap=pcap, logger=log)
         else:
             res = diagnose.run_scan(target=target, duration=duration,
-                                    interface=interface, logger=log)
+                                    interface=interface, logger=log, shadow=shadow)
             if not res.get("ok") and res.get("empty_capture"):
                 # 0 包不直接判失败：自动做一次连通与速度测试（目标 → 默认网关），
                 # 拿到时延/抖动/丢包就降级成中性结论；拿不到才走红色失败。
@@ -411,6 +449,30 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             JOB["finished_at"] = time.time()
 
 
+def _to_bool(value, default: bool = True) -> bool:
+    """把请求体里的布尔开关解析成 ``bool``（缺省 / 脏值回退默认值）。
+
+    Args:
+        value: 原始值（``True``/``False``/``0``/``1``/``"false"``/``None`` 等）。
+        default: 缺省时的返回值；影子探测要求默认 **开**。
+
+    Returns:
+        bool: 解析结果；``None`` / 无法识别时返回 ``default``。
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
 def start_job(payload: dict) -> dict:
     """启动一次诊断任务（全网体检 / 单目标诊断 / 分析抓包文件）。
 
@@ -420,13 +482,16 @@ def start_job(payload: dict) -> dict:
             ``target``（目标 IP/网段/域名，最多 300 字符）、
             ``duration``（秒，夹在 3 ~ ``max_duration`` 之间）、
             ``interface``（网卡序号，可空=自动挑）、
-            ``pcap``（仅离线模式；**只接受 captures/ 下的文件名**，防任意文件读取）。
+            ``pcap``（仅离线模式；**只接受 captures/ 下的文件名**，防任意文件读取）、
+            ``shadow``（可选 bool，默认 ``True``：实时抓包同时做影子探测；离线忽略）。
+            旧版前端不传 ``shadow`` 时按默认开处理，行为兼容。
 
     Returns:
         dict: 成功 ``{"ok": True}``；已在跑或参数不合法时 ``{"ok": False, "error": "..."}``。
             任务本身在后台线程执行，进度请轮询 ``/api/status``。
     """
     cfg = diagnose.load_config()
+    shadow = _to_bool(payload.get("shadow"), True)
     with LOCK:
         if JOB["state"] == "running":
             return {"ok": False, "error": "已有诊断任务在执行，请等待完成"}
@@ -460,8 +525,11 @@ def start_job(payload: dict) -> dict:
                     "result": None, "error": "", "error_code": ""})
     if ignored_target:
         log(f"[提示] 全网体检（全网扫描）模式忽略目标 {ignored_target}，抓取全部流量")
-    log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s")
-    threading.Thread(target=_worker, args=(mode, target, duration, interface, pcap), daemon=True).start()
+    log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s"
+        f"{'' if mode == 'offline' else ('，影子探测=' + ('开' if shadow else '关'))}")
+    threading.Thread(target=_worker,
+                     args=(mode, target, duration, interface, pcap),
+                     kwargs={"shadow": shadow}, daemon=True).start()
     return {"ok": True}
 
 
@@ -991,6 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
             # 只进状态响应，不进报告，所以 faults_demo 快照不受影响。
             if data["state"] == "done" and data.get("result"):
                 data["link_actions"] = link_actions(data["result"], _gateway_now())
+                data["result"] = _attach_probe_ui_copy(data["result"])
             return self._json(data)
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]
