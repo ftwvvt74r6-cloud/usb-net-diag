@@ -236,7 +236,8 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |
 | `GET /api/report?path=` | 读报告 | 文件原文；只取 `Path(name).name`，防目录穿越 |
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
-| `GET /api/selfcheck` | 首屏准备检查（六项只读环境检查：python/tshark/npcap/scapy/port/admin，含首次运行标记与能力矩阵；与 `/api/app` 共用 1.5s 短 TTL 缓存） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
+| `GET /api/preflight` | 启动器 splash 与首屏自检的**统一能力快照**（H6；与 `/api/selfcheck` 同一份 `collect_cached` 缓存，无 `first_run`/ack 语义） | `ok/version/checks[...]/capabilities/ui_copy/fix_urls{key:URL}/source:"selfcheck"` |
+| `GET /api/selfcheck` | 首屏准备检查（六项只读环境检查：python/tshark/npcap/scapy/port/admin，含首次运行标记与能力矩阵；与 `/api/app`、`/api/preflight` 共用 1.5s 短 TTL 缓存） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
 | `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
 | `GET /api/probe?target=&port=&count=&proto=&path=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果；`path=0` 关闭逐跳（默认开） |
@@ -246,9 +247,10 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 
 ### 4.3.1 能力矩阵 `capabilities` 语义（F1/F2 + G2）
 
-`/api/selfcheck` 与 `/api/app` 都以**加法字段**下发同一个 `capabilities` 对象（唯一出处
-`core/selfcheck.py::capabilities()`；UI 只消费、不自己推断缺件。两个 GET 共用
-`collect_cached()` 的 1.5s 短 TTL 缓存，ack 写标记后清缓存，不会把全套检查跑两遍）：
+`/api/selfcheck`、`/api/app` 与 `/api/preflight` 都以**加法字段**下发同一个
+`capabilities` 对象（唯一出处 `core/selfcheck.py::capabilities()`；UI 只消费、
+不自己推断缺件。三个 GET 共用 `collect_cached()` 的 1.5s 短 TTL 缓存，
+ack 写标记后清缓存，不会把全套检查跑两遍）：
 
 ```json
 {"probe": true, "offline": false, "live": false, "passive": false,
@@ -503,7 +505,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 | 文件 | 职责 |
 |---|---|
-| `NetDiag.exe` | **推荐入口**（构建产物，不入 git）：C# 启动器，`asInvoker`，定位 Python → 隐藏启动 `core\app.py --no-elevate` → 轮询 `/api/ping` → 开浏览器；支持 `--dry-run --report` |
+| `NetDiag.exe` | **推荐入口**（构建产物，不入 git）：C# 启动器，`asInvoker`。WinForms splash 先显示 → `NETDIAG_NO_BROWSER=1` 隐藏启动 `core\app.py --no-elevate` → 轮询 `/api/ping` → 读 `/api/preflight` 点亮六项 → **唯一一次**打开浏览器；已有实例直接复用；`logs/startup.log` 记 t0~t3；支持 `--dry-run --report` / `--measure` / `--splash-test` / `--no-splash` / `--no-browser` |
 | `NetDiag.vbs` | 兼容入口：`pythonw` 隐藏启动；优先包内 `tools\python`，回退系统 Python / `py -3`；**不再自动提权** |
 | `NetDiag-stop.vbs` | 界面点不了时的兜底：先 `/api/quit`，失败按 `logs/netdiag.pid` 强杀 |
 | `start.bat` | Python 回退入口（带窗口）：bootstrap 自检 → Npcap 交互式安装 → 起 `core/server.py`；默认不提权，`start.bat --admin` 才请求 UAC（`start.bat ai` 可选拉 Harness） |
@@ -516,7 +518,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 |---|---|
 | `core/__init__.py` | 包标记 + 目标架构不变量；`__version__` 写死 `"0.3.1"`（升级时与 `VERSION` 同步） |
 | `core/analyzer.py` | 抓包分析引擎：一次 tshark 流式解析 → `meta/metrics/rows` + `findings_v2` + `provenance` |
-| `core/app.py` | 静默启动器：pythonw、单实例探测、空闲退出、错误弹窗；**启动不提权**（`--no-elevate`），提权只剩 `/api/elevate` 的 `--elevated` 新进程路径 |
+| `core/app.py` | 静默启动器：pythonw、单实例探测（先查监听端口表再发 HTTP）、空闲退出、错误弹窗；**浏览器打开权受 `NETDIAG_NO_BROWSER` 控制**（H1：launcher 是唯一打开点）；**启动不提权**（`--no-elevate`），提权只剩 `/api/elevate` 的 `--elevated` 新进程路径（不重开浏览器） |
 | `core/bootstrap.py` | 盘符自适应：按当前路径重写 MCP/Harness 配置 + 环境自检（`--check`/`--npcap`） |
 | `core/conclusion.py` | 结论边界唯一出处：`derive_confidence` 三档、`build_conclusion`、Markdown/纯文本整块渲染（E1）；可选 `report_id` 供 UI 复制/导出（E2） |
 | `core/config.py` | 统一配置加载：app/ai/thresholds/copy + `config_sha256()` |
@@ -540,7 +542,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/rules/legacy_map.py` | 旧 `rows[]` → `Finding` 的迁移桥（临时件；当前唯一规则相关实现） |
 | `core/sanitize.py` | 诊断包脱敏：IP/域名/用户名/MAC/路径 → 不可还原伪名（幂等） |
 | `core/selfcheck.py` | 首屏准备检查：六项只读环境检查（Python/tshark/Npcap/**scapy**/端口/管理员）+ `capabilities()` 能力矩阵（UI 置灰的唯一依据；含 `path_probe` / `mtr_engine`）+ `config/ui-first-run.json` 标记读写；不触发 UAC、不抓包 |
-| `core/server.py` | 本地 Web UI + HTTP API：路由、Host/Origin 校验、任务槽、单实例、退出 |
+| `core/server.py` | 本地 Web UI + HTTP API：路由（含 H6 `/api/preflight`）、Host/Origin 校验、任务槽、单实例、退出；`__main__` 的浏览器打开同样受 `NETDIAG_NO_BROWSER` 控制 |
 | `core/tshark.py` | tshark/dumpcap 定位与执行封装（`TSHARK_PATH`、便携路径、网卡探测） |
 | `core/verdict.py` | 判定：`rows/meta/metrics/summary` → level/四层状态/问题明细/证据充分性 |
 | `core/version.py` | 产品版本号唯一读取点：`VERSION`，剥 BOM 与空白，缺失回退 `0.0.0` |
@@ -552,12 +554,13 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 |---|---|
 | `mcp/wireshark-mcp/server.py` | MCP stdio 服务：7 个工具，零第三方依赖，JSON-RPC |
 | `scripts/gen_api_doc.py` | AST 扫 `core/` + `mcp/` → `api-reference.md` / `docstring-gaps.md`；`--check 0.95` |
-| `scripts/build_launcher.py` | 系统 csc 编译 `launcher/NetDiagLauncher.cs` → `NetDiag.exe`；`--check` 只读校验（ubuntu CI 可跑） |
+| `scripts/build_launcher.py` | 系统 csc 编译 `launcher/NetDiagLauncher.cs` + `launcher/SplashForm.cs` → `NetDiag.exe`（引用系统 WinForms/Drawing）；`--check` 只读校验（ubuntu CI 可跑） |
 | `scripts/build_release.py` | 三种发布包；lite 包现场编译 `NetDiag.exe` 并放进 zip 根 |
+| `launcher/SplashForm.cs` | H3 启动等待窗口：6 项 ✓/⚠/✗、失败按钮（官网/提权重启/继续降级）、ESC 跳过、200~400ms 淡出、`AutoScaleMode.Dpi`；`--splash-test` 离屏渲染 4 PNG + `splash-states.json`；**不含任何能力判定**（只消费 `/api/preflight`） |
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（4,000+ 行；无构建链、无前端框架；首屏自检/能力置灰/说明卡/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 36 个 `test_*.py`（814 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 44 个 `test_*.py`（918 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -579,7 +582,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ❌ 历史（v0.3.0） |
 | `docs/release-v0.2.0.md` | v0.2.0 发布资产与法务修正回合证据 | ❌ 历史（v0.2.0） |
 | `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
-| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检六项 / 能力置灰与说明卡 / 表单保留 / 常见启动失败 | ✅ 当前（C2 + F2 + G2） |
+| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检六项 / 能力置灰与说明卡 / 表单保留 / **H1 单次打开浏览器、H2 计时与 `--measure`、H3 splash 与 `--splash-test`、H6 `/api/preflight`** / 常见启动失败 | ✅ 当前（C2 + F2 + G2 + H-A） |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/path-probe.md` | 路径剖面（MTR）：scapy / 系统 tracert 两条实现路径（命令、样本、精度、失败形态、AGENTS §3-11 声明例外）、逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2 + G2） |

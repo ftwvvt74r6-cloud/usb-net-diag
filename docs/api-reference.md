@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**33** 个（有模块说明 33 个）
-- 公开符号：**311** 个（有 docstring 311 个，合格 311 个）
+- 公开符号：**314** 个（有 docstring 314 个，合格 314 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -308,13 +308,58 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `redirect_output` | function | 39 | ✅ |
-| `msgbox` | function | 57 | ✅ |
-| `is_admin` | function | 74 | ✅ |
-| `relaunch_as_admin` | function | 86 | ✅ |
-| `find_running` | function | 109 | ✅ |
-| `first_free_port` | function | 135 | ✅ |
-| `main` | function | 162 | ✅ |
+| `browser_disabled` | function | 50 | ✅ |
+| `open_browser` | function | 68 | ✅ |
+| `redirect_output` | function | 93 | ✅ |
+| `msgbox` | function | 111 | ✅ |
+| `is_admin` | function | 128 | ✅ |
+| `relaunch_as_admin` | function | 140 | ✅ |
+| `find_running` | function | 195 | ✅ |
+| `first_free_port` | function | 224 | ✅ |
+| `main` | function | 251 | ✅ |
+
+### `browser_disabled`
+
+```python
+def browser_disabled() -> bool
+```
+
+```text
+本进程是否已被启动器接管浏览器打开（H1 单次打开的开关）。
+
+Returns:
+    bool: 环境变量 :data:`NO_BROWSER_ENV` 为 ``1/true/yes/on`` 时 True。
+        读不到环境变量（极简运行环境）时按 False 处理，保持兼容。
+
+Example:
+    >>> os.environ["NETDIAG_NO_BROWSER"] = "1"
+    >>> browser_disabled()
+    True
+```
+
+### `open_browser`
+
+```python
+def open_browser(url: str) -> bool
+```
+
+```text
+打开默认浏览器（受 :func:`browser_disabled` 控制的唯一入口）。
+
+所有打开点都走这里，而不是直接调 ``webbrowser.open``：这样「谁启动、谁决定
+是否开浏览器」只有一处判断，测试也只需要 mock 一个函数。
+
+Args:
+    url: 要打开的本地界面地址；空串直接忽略。
+
+Returns:
+    bool: True 表示已调用系统浏览器；被环境变量接管、URL 为空或调用失败时 False。
+
+Example:
+    >>> os.environ["NETDIAG_NO_BROWSER"] = "1"
+    >>> open_browser("http://127.0.0.1:8787/")
+    False
+```
 
 ### `redirect_output`
 
@@ -372,6 +417,11 @@ def relaunch_as_admin() -> bool
 ```text
 用 UAC 提权重启自己。
 
+提权只重启**服务进程**，界面标签页已经开着；所以提权后的新进程必须继承
+``NETDIAG_NO_BROWSER=1``（H1：否则用户会在提权后再被弹出第二个标签页）。
+``ShellExecuteW`` 创建的子进程继承当前进程环境，这里在调用前显式置位，
+也覆盖「直接从命令行启动、没经过 launcher」的情况。
+
 Returns:
     bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
         False 表示用户点了「否」或调用失败 —— 此时**不要**退出，
@@ -388,7 +438,8 @@ def find_running() -> str
 探测本机是否已有实例在跑（单实例保护）。
 
 逐个试 8787~8796 的 ``/api/ping``，并核对 ``app`` 字段是本程序，
-避免把别的服务误认成自己。
+避免把别的服务误认成自己。先用 :func:`_port_open` 过滤没人监听的端口，
+不对关闭端口发 HTTP（H2：否则 10 个端口会白等 7 秒）。
 
 Returns:
     str: 已运行实例的界面地址（如 ``http://127.0.0.1:8787/``）；没有则空串。
@@ -5300,31 +5351,32 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 149 | ✅ |
-| `request_quit` | function | 154 | ✅ |
-| `cleanup_pid` | function | 202 | ✅ |
-| `BodyTooLarge` | class | 212 | ✅ |
-| `doctor_cached` | function | 291 | ✅ |
-| `log` | function | 408 | ✅ |
-| `evidence_payload` | function | 504 | ✅ |
-| `conclusion_report_id` | function | 628 | ✅ |
-| `build_status_conclusion` | function | 659 | ✅ |
-| `start_job` | function | 1015 | ✅ |
-| `report_index` | function | 1076 | ✅ |
-| `request_elevation` | function | 1110 | ✅ |
-| `engine_info` | function | 1149 | ✅ |
-| `passive_start` | function | 1192 | ✅ |
-| `passive_status` | function | 1227 | ✅ |
-| `link_actions` | function | 1301 | ✅ |
-| `Handler` | class | 1382 | ✅ |
-| `Handler.handle_one_request` | method | 1408 | ✅ |
-| `Handler.log_message` | method | 1453 | ✅ |
-| `Handler.do_GET` | method | 1591 | ✅ |
-| `Handler.do_POST` | method | 1613 | ✅ |
-| `DiagServer` | class | 1920 | ✅ |
-| `DiagServer.handle_error` | method | 1931 | ✅ |
-| `create_server` | function | 1959 | ✅ |
-| `main` | function | 2006 | ✅ |
+| `touch` | function | 151 | ✅ |
+| `request_quit` | function | 156 | ✅ |
+| `cleanup_pid` | function | 204 | ✅ |
+| `BodyTooLarge` | class | 214 | ✅ |
+| `doctor_cached` | function | 293 | ✅ |
+| `log` | function | 410 | ✅ |
+| `evidence_payload` | function | 506 | ✅ |
+| `conclusion_report_id` | function | 630 | ✅ |
+| `build_status_conclusion` | function | 661 | ✅ |
+| `start_job` | function | 1017 | ✅ |
+| `report_index` | function | 1078 | ✅ |
+| `request_elevation` | function | 1112 | ✅ |
+| `preflight_payload` | function | 1150 | ✅ |
+| `engine_info` | function | 1192 | ✅ |
+| `passive_start` | function | 1235 | ✅ |
+| `passive_status` | function | 1270 | ✅ |
+| `link_actions` | function | 1344 | ✅ |
+| `Handler` | class | 1425 | ✅ |
+| `Handler.handle_one_request` | method | 1451 | ✅ |
+| `Handler.log_message` | method | 1496 | ✅ |
+| `Handler.do_GET` | method | 1634 | ✅ |
+| `Handler.do_POST` | method | 1656 | ✅ |
+| `DiagServer` | class | 1967 | ✅ |
+| `DiagServer.handle_error` | method | 1978 | ✅ |
+| `create_server` | function | 2006 | ✅ |
+| `main` | function | 2053 | ✅ |
 
 ### `touch`
 
@@ -5546,6 +5598,36 @@ Returns:
         本来就有权限 ``{"ok": True, "restarted": False, "already_admin": True,
         "message": ...}``；失败 ``{"ok": False, "restarted": False,
         "error": "..."}`` —— 失败**不抛异常、不杀当前进程**。
+```
+
+### `preflight_payload`
+
+```python
+def preflight_payload() -> dict
+```
+
+```text
+启动器与界面共用的能力快照（H6：``GET /api/preflight``）。
+
+与 ``GET /api/selfcheck`` **同源**：内部只调 :func:`selfcheck.collect_cached`，
+不复制任何判定逻辑。唯一的语义差别是 preflight 不带 ``first_run`` / ack ——
+那是首屏面板的一次性提醒，不是「这台机器现在能不能用」的一部分。
+
+为什么让启动器也读这个接口（而不是自己再实现一套 Python/tshark/Npcap 判断）：
+C# 里重复判定迟早和 Python 分叉（版本号解析、scapy 可选、端口语义都会漂移）。
+启动器在服务未起时只显示 Python/端口两个本地占位，服务起来后以本接口为准。
+
+Returns:
+    dict: 键 ``ok``（六项是否全过）/ ``version`` / ``checks``（固定 6 项，字段与
+        selfcheck 完全一致，含 ``fix_kind`` / ``fix_url`` / ``fix_command`` /
+        ``impact``）/ ``capabilities``（能力矩阵）/ ``ui_copy``（``{"startup": {...}}``
+        文案）/ ``fix_urls``（有官网链接的项 → URL，启动器按钮直接取用）/
+        ``source``（固定 ``"selfcheck"``，明示同源）。
+
+Example:
+    >>> payload = preflight_payload()
+    >>> [item["key"] for item in payload["checks"]][:2]
+    ['python', 'tshark']
 ```
 
 ### `engine_info`

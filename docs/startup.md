@@ -3,8 +3,9 @@
 > 面向使用者与维护者。目标是把「拿到包 → 双击 → 能用」做成一条不折腾的路径：
 > **启动不提权**，需要管理员的功能再按需请求；首次运行先做六项只读检查。
 >
-> C1（启动器 + 启动不提权）与 C2（按需提权 UI / 表单保留 / 首屏自检）均已实现，
-> 本文描述的是当前行为。
+> C1（启动器 + 启动不提权）与 C2（按需提权 UI / 表单保留 / 首屏自检）均已实现；
+> H1（单次打开浏览器）、H2（启动计时 + 优化）、H3（WinForms splash）、
+> H6（`/api/preflight` 统一能力探测）也已实现，本文描述的是当前行为。
 
 ---
 
@@ -26,24 +27,34 @@
 
 ## 2. 双击 `NetDiag.exe` 发生什么
 
-1. 启动器以 **`asInvoker`** 运行（manifest 声明），**不弹 UAC**。
-2. 先探测 `http://127.0.0.1:8787~8796/api/ping`：
-   - 已有本程序实例在跑 → 直接打开浏览器，**不再启动第二个进程**；
+1. 启动器以 **`asInvoker`** 运行（manifest 声明），**不弹 UAC**；随后显示一个
+   屏幕正中的无边框等待窗口（splash），逐项点亮六项检查。
+2. 先探测 `http://127.0.0.1:8787~8796/api/ping`（先查本机监听端口表，**只对真的
+   在监听的端口发 HTTP**，8787 优先）：
+   - 已有本程序实例在跑 → splash 显示「复用已运行服务」→ 直接打开浏览器 →
+     **不再启动第二个进程**，也不退出别人的服务；
    - 端口上回应的不是本程序（`app` 不含 `NetDiag`）→ 忽略，继续找。
-3. 定位 Python（顺序见 §3）。
-4. 以隐藏窗口启动：
+3. 定位 Python（顺序见 §3；结果缓存在 `config\launcher-cache.json`，见 §3.6）。
+4. 以隐藏窗口启动（环境变量 `NETDIAG_NO_BROWSER=1` 是 H1 的关键）：
 
    ```text
    <python> "<root>\core\app.py" --no-elevate
+   NETDIAG_NO_BROWSER=1
    ```
 
    工作目录 = `<root>`；不传 `--elevated`；`CreateNoWindow=true`、`UseShellExecute=false`。
 5. 每 **200 ms** 轮询 `/api/ping`，总超时 **30 秒**；校验 `ok == true` 且 `app` 含 `NetDiag`。
-6. 就绪后交给系统默认浏览器打开 `http://127.0.0.1:<port>/`。
+6. 服务就绪后读一次 `GET /api/preflight`（与 `/api/selfcheck` 同源，见 §5.6），
+   在 splash 上点亮六项；全部通过自动继续，有缺件/降级则停在 splash，给
+   **[打开官网]、[以管理员身份重启]、[继续使用降级功能]** 或 **[跳过检查]/ESC**。
+7. **启动器是唯一打开浏览器的地方**：`/api/ping` 成功（或复用旧实例）后只开
+   **一次**；随后 splash 200~400ms 淡出、关闭。`app.py` / `server.py` 内的
+   `webbrowser.open` 在 `NETDIAG_NO_BROWSER=1` 下一律不执行（连打开线程都不启动）。
+8. 计时写入 `logs\startup.log`（t0~t3，见 §3.5）。
 
-失败时用系统 MessageBox 给出可操作提示（查看 `<root>\logs\app-*.log`、检查 Python/Npcap、
-端口是否被占），退出码见 §3.3。启动器不检测、不请求管理员权限；用户自己右键
-「以管理员身份运行」时它也不会二次提权。
+失败时用 splash 展示安装指引（无 splash 的路径用系统 MessageBox）给出可操作提示
+（查看 `<root>\logs\app-*.log`、检查 Python/Npcap、端口是否被占），退出码见 §3.3。
+启动器不检测、不请求管理员权限；用户自己右键「以管理员身份运行」时它也不会二次提权。
 
 ---
 
@@ -92,9 +103,91 @@ NetDiag.exe --dry-run --report "<临时目录>\launcher.json"
 ### 3.4 安全边界
 
 - manifest 固定 `asInvoker`，启动器**自身不提权**；
-- 只访问 `127.0.0.1`（探测 `/api/ping`），不走系统代理、不联网；
+- 只访问 `127.0.0.1`（探测 `/api/ping`、读 `/api/preflight`、POST 退出/提权），
+  不走系统代理、不联网；
 - 不写注册表、不装服务、不开机自启、不做 UAC bypass；
 - 不写真实路径/用户名进仓库；日志里的路径由运行环境决定。
+
+### 3.5 启动计时（`logs\startup.log`）
+
+启动器记录 4 个时间点（t0 恒为 0 = `Main` 进入）：
+
+| 时间点 | 含义 |
+|---|---|
+| `t0` | `NetDiag.exe` 的 `Main` 进入 |
+| `t1` | `Process.Start` 返回（Python 子进程已 spawn） |
+| `t2` | `/api/ping` 首次成功（本地服务就绪） |
+| `t3` | 打开浏览器（`NETDIAG_NO_BROWSER=1` / `--measure` 时为「跳过打开」） |
+
+每次启动向 `logs\startup.log` **追加一行 JSON**（U 盘只读/目录被锁时静默跳过，
+绝不影响启动）。关键键：
+
+```json
+{"ts":"...","action":"launch","mode":"cold","t0_ms":0,"t1_ms":28,"t2_ms":2072,
+ "t3_ms":2073,"spawn_ms":28,"ready_ms":2044,"browse_ms":1,"total_ms":2073,
+ "python_kind":"bundled-pythonw","python_candidates":1,"python_cache":"miss",
+ "port":8787,"reused":false,"first_run":true,"browser":"opened",
+ "no_browser":false,"measure":false,"quit_ok":false,"quit_exited":false,"quit_ms":0,
+ "ok":true,"error":""}
+```
+
+- `mode`：`cold`（首跑/缓存失效）、`warm`（Python 缓存命中）、`reuse`（复用已有实例）；
+- `browser`：`opened` / `skipped` / `failed`；
+- `python_cache`：`miss` / `hit` / `invalid:<原因>`（缓存校验失败会全扫并重写）；
+- `first_run`：本次启动前既没有 Python 缓存也没有 `startup.log`（splash 据此显示
+  「正在加载组件（首次可能较慢）」）。
+
+splash 上的「已用时 X.Xs」即 t3 之前的实时耗时；`--measure` 不显示 splash，
+只写日志与报告。
+
+### 3.6 Python 候选缓存（`config\launcher-cache.json`）
+
+定位结果缓存到 `config\launcher-cache.json`（在 `.gitignore` 的 `config/` 内）：
+
+```json
+{"format":1,"app":"NetDiag","app_version":"0.3.2",
+ "python":"<root>\\tools\\python\\pythonw.exe","python_kind":"bundled-pythonw",
+ "prefix_args":"","size":101656,"mtime_utc":134384307333947915}
+```
+
+- **命中不跳过存在性校验**：文件必须仍存在，且 `size` / `mtime_utc` 与记录一致、
+  `format` / `app_version` 匹配；
+- 任一项不符（升级包、换 Python、文件被替换）→ 缓存作废，**回退全量扫描**并重写；
+- 写失败（U 盘只读、目录被锁）只影响下次速度，不影响启动；
+- 只缓存「Python 路径」，**不缓存**端口/网络状态。
+
+### 3.7 `--measure`（启动耗时测量，供验收/自动化）
+
+```bat
+NetDiag.exe --measure --report "<临时目录>\measure.json"
+```
+
+- 完整走真实启动（隐藏窗口 + 子进程 `NETDIAG_NO_BROWSER=1`），等 `/api/ping` 成功；
+- 写 `logs\startup.log` 后 **POST `/api/quit`** 优雅退出自己拉起的子进程（8 秒超时才强杀）；
+- **不开浏览器、不显示 splash**；已有实例时走复用路径，只记录、**不退出别人的服务**；
+- `--report` 写一行 JSON（同 `startup.log` 的字段，另含 `quit_ok` / `quit_exited` /
+  `quit_ms`）。没有 `--report` 时尝试输出到父控制台。
+- 典型验收：冷启动 3 次 + 热启动 3 次，目标 **冷 ≤10s / 热 ≤4s**；不达标必须给
+  分段瓶颈（本批实测见审查证据，不在仓库内）。
+
+### 3.8 `--splash-test`（离屏截图）
+
+```bat
+NetDiag.exe --splash-test "<输出目录>"
+```
+
+- 构造 4 种状态（加载中 / 全绿 / 缺 tshark / 非管理员）各渲染一张 PNG；
+- **不显示可见窗口**：窗体临时放到屏幕外 `(-32000,-32000)`、`ShowInTaskbar=false`，
+  `Form.DrawToBitmap` 渲染后立即隐藏；不启动服务、不打开浏览器；
+- 同目录写 `splash-states.json`，含每种状态的六项 `state`（`ok/degraded/missing/checking`）、
+  文案与可见按钮（`skip/continue/install/elevate/close`）——launcher 测试用它断言
+  「状态映射 / 按钮可见性」，不靠肉眼看图。
+
+### 3.9 高 DPI
+
+`launcher\NetDiag.exe.manifest` 声明 `dpiAware=true/pm` + `dpiAwareness=PerMonitorV2`；
+splash 使用 `AutoScaleMode.Dpi`、字号 ≥9pt（正文 10.5pt、标题 22pt），按屏幕工作区
+居中，高 DPI 下不出现字体/控件错位。
 
 ---
 
@@ -317,6 +410,28 @@ lite 公开包不带 `tools\python`，需要系统 **Python 3.11+**（安装时�
 本地服务起不来，界面无法打开；弹窗会提示关掉占用端口的程序或重启电脑后重试。
 此时不是缺 tshark，也不会误报。
 
+### 5.6 `GET /api/preflight`（H6：启动器与首屏自检同源）
+
+`GET /api/preflight` 与 `GET /api/selfcheck` **读同一份** `selfcheck.collect_cached()`
+缓存，所以两个接口的 `checks` / `capabilities` / `ui_copy` 逐键一致：
+
+| 接口 | 用途 | 是否含 `first_run` / ack |
+|---|---|---|
+| `/api/preflight` | 启动器 splash（服务起来后）+ 任何「现在能不能用」的消费者 | **否** |
+| `/api/selfcheck` | UI 首屏「准备检查」面板 + 重新检测 | 是（一次性的首次运行提醒） |
+
+`/api/preflight` 的响应键：`ok` / `version` / `checks` / `capabilities` /
+`ui_copy` / `fix_urls`（失败项的官网链接扁平索引，启动器按钮直接取用）/
+`source`（固定 `"selfcheck"`，明示同源）。**不写文件、不触发 UAC、不抓包**；
+ack 语义只属于 `/api/selfcheck/ack`。
+
+启动器在服务未起时只显示 **Python / 端口** 两个本地占位（这两件它确实知道），
+其余四项一律「检查中…」；服务起来后以 `/api/preflight` 为准。C# 侧**不复制**一套
+tshark/Npcap/scapy 判定，只做 `ok → ✓ / 降级 → ⚠ / 缺失 → ✗` 的展示映射。
+
+> UI 继续用 `/api/selfcheck` 也仍然同源：两个接口共用 1.5s TTL 缓存，先到先算，
+> 后到直接复用；`/api/selfcheck/ack` 清缓存后两边都会重新检查。
+
 ---
 
 ## 6. `start.bat`（Python 回退入口）
@@ -363,19 +478,32 @@ python scripts\build_launcher.py --check
 # 2) 本机编译（默认输出到仓库根 NetDiag.exe；*.exe 不进 git）
 python scripts\build_launcher.py
 
-# 3) 只定位 Python，不启动服务/不开浏览器
+# 3) 只定位 Python，不启动服务/不开浏览器（报告含 env / 唯一打开点字段）
 .\NetDiag.exe --dry-run --report "$env:TEMP\netdiag-launcher.json"
 
-# 4) 启动器/提权契约测试
+# 4) 启动耗时（真实启动 → 等就绪 → 写 startup.log → POST /api/quit；不开浏览器）
+.\NetDiag.exe --measure --report "$env:TEMP\netdiag-measure.json"
+Get-Content .\logs\startup.log -Tail 1
+
+# 5) splash 离屏截图（不显示窗口、不开浏览器；产出 4 PNG + splash-states.json）
+.\NetDiag.exe --splash-test "$env:TEMP\netdiag-splash"
+
+# 6) 启动器/提权契约测试
 python -m unittest discover -s tests -p "test_launcher_exe.py" -v
+python -m unittest discover -s tests -p "test_launcher_startup.py" -v
 python -m unittest discover -s tests -p "test_elevate_api.py" -v
 
-# 5) C2：首屏自检 / 表单保留 / 权限卡静态接线
+# 7) H1 单次浏览器 + H6 preflight
+python -m unittest discover -s tests -p "test_no_browser.py" -v
+python -m unittest discover -s tests -p "test_preflight.py" -v
+
+# 8) C2：首屏自检 / 表单保留 / 权限卡静态接线
 python -m unittest discover -s tests -p "test_selfcheck.py" -v
 python -m unittest discover -s tests -p "test_startup_ui.py" -v
 ```
 
 本机 UI 验收**不启动可见浏览器**：用 headless Edge + 独立 `--user-data-dir`
 （例如 `%TEMP%\c2-edge`，用完删除），或直接看 `/api/selfcheck` 的 JSON。
+splash 截图一律走 `--splash-test` 的离屏渲染，**不会**出现可见窗口。
 **自动化里绝不点击真实提权**（`/api/elevate` 必须 mock），真机 UAC 由用户按
 PR 的「需人工验收项」操作。

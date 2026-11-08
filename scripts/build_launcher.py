@@ -16,8 +16,8 @@
     * 不修改系统 Python、不启动服务、不请求管理员权限。
 
 输入输出：
-    输入：``launcher/NetDiagLauncher.cs`` + ``launcher/NetDiag.exe.manifest``
-    + ``NetDiag.ico``。
+    输入：``launcher/NetDiagLauncher.cs`` + ``launcher/SplashForm.cs``
+    + ``launcher/NetDiag.exe.manifest`` + ``NetDiag.ico``。
     输出：目标目录下的 ``NetDiag.exe``（默认仓库根；``--out DIR`` 可改）。
 
 用法::
@@ -38,18 +38,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "launcher" / "NetDiagLauncher.cs"
+SPLASH_SOURCE = ROOT / "launcher" / "SplashForm.cs"
 MANIFEST = ROOT / "launcher" / "NetDiag.exe.manifest"
 ICON = ROOT / "NetDiag.ico"
 EXE_NAME = "NetDiag.exe"
-#: 一个 /target:winexe 的托管启动器正常约 10~20 KB；小于 8 KB 说明编出来的
+#: 一个 /target:winexe 的托管启动器正常约 20~60 KB；小于 8 KB 说明编出来的
 #: 不是完整 PE（或只是空壳），发出去双击必然失败，所以在这里就拦住。
 MIN_EXE_BYTES = 8 * 1024
 COMPILE_TIMEOUT_S = 300
+#: splash 用到的系统程序集（.NET Framework 自带，发布包不许带第三方 DLL）。
+SYSTEM_ASSEMBLIES = ("System.Windows.Forms.dll", "System.Drawing.dll")
 
 #: --check 的源码契约：任何一条缺失都说明启动器行为被删（例如 --dry-run 没了）。
+#: H1/H2/H3/H6 的契约标记也在内 —— 它们对应「单次打开浏览器 / 计时 / splash /
+#: 统一 preflight」四件容易在后续重构里被悄悄删掉的事。
 REQUIRED_SOURCE_MARKERS = (
     "--dry-run",
     "--report",
+    "--measure",
+    "--no-splash",
+    "--no-browser",
+    "--splash-test",
     "--no-elevate",
     "CreateNoWindow = true",
     "UseShellExecute = false",
@@ -65,6 +74,12 @@ REQUIRED_SOURCE_MARKERS = (
     "ExitNoPython = 2",
     "ExitWaitTimeout = 3",
     "ExitLaunchFailed = 4",
+    "NETDIAG_NO_BROWSER",
+    "EnvironmentVariables",
+    "startup.log",
+    "launcher-cache.json",
+    "/api/preflight",
+    "SplashForm",
 )
 
 
@@ -100,6 +115,10 @@ def check_structure() -> list[str]:
         problems.append(f"缺少启动器源码：{SOURCE}")
     elif SOURCE.stat().st_size < 1024:
         problems.append(f"启动器源码异常小（{SOURCE.stat().st_size} 字节）：{SOURCE}")
+    if not SPLASH_SOURCE.is_file():
+        problems.append(f"缺少 splash 源码：{SPLASH_SOURCE}")
+    elif SPLASH_SOURCE.stat().st_size < 1024:
+        problems.append(f"splash 源码异常小（{SPLASH_SOURCE.stat().st_size} 字节）：{SPLASH_SOURCE}")
     if not MANIFEST.is_file():
         problems.append(f"缺少 manifest：{MANIFEST}")
     if not ICON.is_file():
@@ -111,17 +130,23 @@ def check_structure() -> list[str]:
             problems.append("manifest 缺少 requestedExecutionLevel level=\"asInvoker\"")
         if 'level="requireAdministrator"' in text:
             problems.append("manifest 出现 requireAdministrator：启动器会变成启动即提权")
+        # H3 / V13：高 DPI 下 splash 居中不错位必须有 DPI 声明。
+        if "dpiAware" not in text:
+            problems.append("manifest 缺少 dpiAware（splash 在高 DPI 下会错位）")
         try:
             ET.parse(MANIFEST)
         except ET.ParseError as exc:
             problems.append(f"manifest 不是合法 XML：{exc}")
 
-    if SOURCE.is_file():
-        text = SOURCE.read_text(encoding="utf-8")
+    combined = ""
+    for path in (SOURCE, SPLASH_SOURCE):
+        if path.is_file():
+            combined += path.read_text(encoding="utf-8") + "\n"
+    if combined:
         for marker in REQUIRED_SOURCE_MARKERS:
-            if marker not in text:
+            if marker not in combined:
                 problems.append(f"启动器源码缺少契约标记：{marker}")
-        if "requireAdministrator" in text:
+        if "requireAdministrator" in combined:
             problems.append("启动器源码出现 requireAdministrator（启动器自身不许提权）")
     return problems
 
@@ -152,8 +177,11 @@ def compile_launcher(csc: Path, out_dir: Path) -> Path:
         f"/win32icon:{ICON}",
         f"/win32manifest:{MANIFEST}",
         f"/out:{out}",
-        str(SOURCE),
     ]
+    # WinForms splash（H3）只用系统 .NET Framework 程序集，发布包不带第三方 DLL。
+    for assembly in SYSTEM_ASSEMBLIES:
+        cmd.append(f"/r:{assembly}")
+    cmd.extend((str(SOURCE), str(SPLASH_SOURCE)))
     proc = subprocess.run(
         cmd, cwd=str(ROOT), capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=COMPILE_TIMEOUT_S,
@@ -197,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.check:
         print(f"LAUNCHER CHECK OK: {SOURCE.relative_to(ROOT)} + "
+              f"{SPLASH_SOURCE.relative_to(ROOT)} + "
               f"{MANIFEST.relative_to(ROOT)} (asInvoker, no csc needed)")
         return 0
 
