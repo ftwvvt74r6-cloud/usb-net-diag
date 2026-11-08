@@ -130,7 +130,8 @@ responder, error, seq)`。时钟口径：pcap 用系统时钟、探测用 `monot
 
 UI（`ui/index.html`）：
 
-* 仅 **全网体检 / 单目标诊断** 显示开关 `抓包同时做探针基线（每 5 秒，少量探测包）`，
+* 仅 **全网体检 / 单目标诊断** 显示开关
+  `抓包同时做路径剖面与探针基线（每 5 秒，少量探测包）`，
   **默认勾选**；被动监听 / 分析抓包文件不显示；
 * 请求体带加法字段 `shadow: bool`；旧版前端不传时后端默认 `true`（兼容）；
 * 结果页区块的文案不写死在页面里：随 `/api/status` 的 `ui_copy.probe` 下发
@@ -139,22 +140,27 @@ UI（`ui/index.html`）：
 CLI：
 
 ```bat
-python core\diagnose.py --duration 30              REM 默认开探针
-python core\diagnose.py --duration 30 --no-shadow  REM 关闭
+python core\diagnose.py --duration 30              REM 默认开探针（+ 路径剖面）
+python core\diagnose.py --duration 30 --no-shadow  REM 关闭（探针与 MTR 都不发）
 python core\diagnose.py --pcap x.pcap              REM 离线分析：恒不发探针
 ```
+
+> D+ 增量 2 起，同一个开关还控制**路径剖面（MTR 逐跳）**：有目标时抓包同时跑一次
+> TTL 递增探测，报告多一个「路径剖面」区块；语义与隔离细节见 `docs/path-probe.md`。
 
 ---
 
 ## 6. 明确不做 / 已知边界
 
-* **MTR / TTL 逐跳**：`pathprobe.run()` 仍是 `NotImplementedError`，留给后续 PR；
 * **被动监听期间探针**：「只听不发」是产品承诺，`core/passive.py` 不引用本模块；
 * **离线分析探针**：用户可能只是在分析别人给的 pcap，`--pcap` 路径恒不启动；
 * **服务端探针 / 双侧抓包**：只留数据模型文字说明，本批不实现；
 * **探针结果联网上报**：本工具不联网，探针只进本地报告；
-* **DNS 角色**：`winapi.dns_servers()` 尚未实现，拿不到 DNS 服务器时自动跳过该角色
-  （不报错）；网关 / 业务目标两个角色足以做两侧对照；
+* **DNS 角色**：`winapi.dns_servers()` 已实现（读注册表，不解析本地化 CLI 文本）；
+  环回 DNS（本机 stub）会优雅跳过并在日志说明，详见 `docs/path-probe.md` §7；
 * **探针诱发的 ICMP 不可达**：BPF/显示过滤只排除「带固定标记的探针报文」；路由器因探针
-  回送的 ICMP unreachable 目前不在排除范围（TCP 探针正常会收到 RST/SYN-ACK，极少触发）。
-  这是已知残余风险，后续若要收口，需按 ICMP 内嵌报文端口做过滤。
+  回送的 ICMP unreachable（type 3）目前不在排除范围（TCP 探针正常会收到 RST/SYN-ACK，
+  极少触发）。这是已知残余风险，后续若要收口，需按 ICMP 内嵌报文端口做过滤。
+* **MTR 诱发的 ICMP time-exceeded**：路径探测期间会在显示过滤里追加
+  `not (icmp.type == 11)`（外层 id 认不出探针），并把排除数量写进报告；残余风险
+  见 `docs/path-probe.md` §6。

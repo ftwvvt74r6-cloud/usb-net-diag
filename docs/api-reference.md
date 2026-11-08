@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**30** 个（有模块说明 30 个）
-- 公开符号：**257** 个（有 docstring 257 个，合格 257 个）
+- 公开符号：**274** 个（有 docstring 274 个，合格 274 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -1582,10 +1582,10 @@ Returns:
 | `log` | function | 113 | ✅ |
 | `capture_filter_for` | function | 219 | ✅ |
 | `bpf_for` | function | 305 | ✅ |
-| `capture_live` | function | 543 | ✅ |
-| `degraded_empty_capture_result` | function | 783 | ✅ |
-| `run_scan` | function | 960 | ✅ |
-| `main` | function | 1209 | ✅ |
+| `capture_live` | function | 603 | ✅ |
+| `degraded_empty_capture_result` | function | 871 | ✅ |
+| `run_scan` | function | 1048 | ✅ |
+| `main` | function | 1322 | ✅ |
 
 ### `load_config`
 
@@ -1686,14 +1686,17 @@ Args:
         抓到 0 包/0 字节也不换卡（尊重用户选择，避免「指定 Meta 却静默换到 WLAN」
         给出错误结论），直接返回带候选网卡与自助命令的错误。
     logger: 日志回调。
-    shadow: 是否在抓包同时启动影子探测（默认 ``False``；``run_scan``/UI 传
-        ``True``）。探针的抓包排除式会**合并进 BPF**（第一道隔离），账本随
-        成功结果以 ``probe`` 键返回（``run_scan`` 据此注入基线）。
+    shadow: 是否在抓包同时启动影子探测与路径探测（MTR）。默认 ``False``；
+        ``run_scan``/UI 传 ``True``。两类探针的抓包排除式都会**合并进 BPF**
+        （第一道隔离），账本/路径结果随成功结果分别以 ``probe`` / ``path``
+        键返回（``run_scan`` 据此注入基线/路径剖面）。**MTR 只在有目标时启动**：
+        全网体检没有对端，逐跳没有意义。
 
 Returns:
     dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
         "bpf": str, "duration": int}``（``shadow=True`` 且确实发出探针时再加
-        ``"probe"``：账本 + 聚合基线 + 三种过滤串）；失败 ``{"ok": False,
+        ``"probe"``：账本 + 聚合基线 + 三种过滤串；MTR 产出了逐跳数据时再加
+        ``"path"``：路径剖面 + 两种过滤串）；失败 ``{"ok": False,
         "error": str, "degraded": bool, "empty": bool, "interface": str,
         "bpf": str}``。
         **所有**返回路径都带 ``interface`` / ``bpf``（没有可用值时为 ``""``），
@@ -1713,7 +1716,8 @@ Note:
 
     影子探测的线程收尾放在 ``finally``：抓包成功/失败/抛异常都会
     ``stop()`` + ``join(3)``；探针自身异常只写进账本 ``error``，不影响
-    本函数返回值与主诊断退出码。
+    本函数返回值与主诊断退出码。路径探测同理：线程异常只写进 ``path.error``，
+    时间预算（抓包时长 + 5s）用完就返回已完成的跳，绝不阻塞抓包。
 ```
 
 ### `degraded_empty_capture_result`
@@ -1764,16 +1768,17 @@ Args:
     report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
         给定时只写该目录（目录不存在会自动创建），文件名清洗仍由
         :func:`report.save` 负责。
-    shadow: 实时抓包时是否同时做影子探测。**产品入口默认开**（CLI 不传
-        ``--no-shadow`` 即开、UI 默认勾选、``/api/scan`` 缺省 ``true``）；
-        本函数作为库入口默认 ``False``，保证旧调用方行为不变。**离线路径
-        （``pcap`` 非空）恒不启动探针**——用户可能只是在分析别人给的抓包
-        文件。
+    shadow: 实时抓包时是否同时做影子探测**与路径探测（MTR）**。**产品入口默认开**
+        （CLI 不传 ``--no-shadow`` 即开、UI 默认勾选、``/api/scan`` 缺省
+        ``true``）；本函数作为库入口默认 ``False``，保证旧调用方行为不变。
+        **离线路径（``pcap`` 非空）恒不启动探针**——用户可能只是在分析别人
+        给的抓包文件。MTR 只在有目标时启动（全网体检没有对端）。
 
 Returns:
     dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
         与 ``capture``（本次采集参数）；有探针数据时 ``meta["probe_baseline"]``
-        里带「探针基线」（无数据时该键不存在，输出与 main 逐字节一致）。
+        里带「探针基线」、有逐跳数据时 ``meta["path_profile"]`` 里带「路径剖面」
+        （无数据时这两个键都不存在，输出与 main 逐字节一致）。
         失败时 ``{"ok": False, "error": "..."}``。
 
 Note:
@@ -1783,7 +1788,8 @@ Note:
 
     影子探测的三层隔离都在本函数/``capture_live`` 内完成：抓包 BPF 合并、
     分析阶段 ``-Y`` 显示过滤、报告里写「已排除 N 个探针包」；任何一步失败
-    都只降级为「探针不可用」，不改变主诊断结论与退出码。
+    都只降级为「探针不可用」，不改变主诊断结论与退出码。路径探测同理，并且
+    多一条：ICMP type 11（TTL 超时）整类从**显示过滤**排除，排除数量写进报告。
 ```
 
 ### `main`
@@ -2496,54 +2502,71 @@ Returns:
 
 ## `core/pathprobe.py`
 
-**职责**：影子探测（Shadow Probing）+ 路径探测（MTR）骨架 —— D 批次迁移落点。
+**职责**：影子探测（Shadow Probing）+ 路径探测（MTR）—— D 批次实现。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `ProbeKind` | class | 67 | ✅ |
-| `HopStatus` | class | 75 | ✅ |
-| `ProbeSpec` | class | 86 | ✅ |
-| `ProbeSpec.to_dict` | method | 112 | ✅ |
-| `ProbeRecord` | class | 137 | ✅ |
-| `ProbeRecord.to_dict` | method | 161 | ✅ |
-| `ProbeLedger` | class | 182 | ✅ |
-| `ProbeLedger.ports` | method | 198 | ✅ |
-| `ProbeLedger.targets` | method | 206 | ✅ |
-| `ProbeLedger.kinds` | method | 214 | ✅ |
-| `ProbeLedger.has_icmp` | method | 222 | ✅ |
-| `ProbeLedger.exclusion_bpf` | method | 230 | ✅ |
-| `ProbeLedger.exclusion_display_filter` | method | 249 | ✅ |
-| `ProbeLedger.window` | method | 257 | ✅ |
-| `ProbeLedger.baseline` | method | 265 | ✅ |
-| `ProbeLedger.to_dict` | method | 287 | ✅ |
-| `HopStat` | class | 310 | ✅ |
-| `HopStat.loss_pct` | method | 322 | ✅ |
-| `PathProbeResult` | class | 333 | ✅ |
-| `PathProbeResult.to_dict` | method | 343 | ✅ |
-| `classify` | function | 366 | ✅ |
-| `exclusion_bpf` | function | 420 | ✅ |
-| `exclusion_display_filter` | function | 444 | ✅ |
-| `probe_marker_display_filter` | function | 465 | ✅ |
-| `discover_targets` | function | 544 | ✅ |
-| `plan` | function | 587 | ✅ |
-| `shadow_specs` | function | 613 | ✅ |
-| `rounds_for` | function | 634 | ✅ |
-| `probe_len` | function | 651 | ✅ |
-| `probe_src_port` | function | 663 | ✅ |
-| `send_probe` | function | 680 | ✅ |
-| `ShadowProber` | class | 757 | ✅ |
-| `ShadowProber.start` | method | 784 | ✅ |
-| `ShadowProber.stop` | method | 794 | ✅ |
-| `ShadowProber.join` | method | 798 | ✅ |
-| `ShadowProber.run_round` | method | 813 | ✅ |
-| `ShadowProber.exclusion_bpf` | method | 857 | ✅ |
-| `ShadowProber.exclusion_display_filter` | method | 866 | ✅ |
-| `ShadowProber.marker_display_filter` | method | 875 | ✅ |
-| `ShadowProber.sent_count` | method | 885 | ✅ |
-| `ShadowProber.snapshot` | method | 894 | ✅ |
-| `aggregate_records` | function | 915 | ✅ |
-| `count_marked_packets` | function | 983 | ✅ |
-| `run` | function | 1017 | ✅ |
+| `ProbeKind` | class | 119 | ✅ |
+| `HopStatus` | class | 127 | ✅ |
+| `ProbeSpec` | class | 138 | ✅ |
+| `ProbeSpec.to_dict` | method | 164 | ✅ |
+| `ProbeRecord` | class | 189 | ✅ |
+| `ProbeRecord.to_dict` | method | 213 | ✅ |
+| `ProbeLedger` | class | 234 | ✅ |
+| `ProbeLedger.ports` | method | 250 | ✅ |
+| `ProbeLedger.targets` | method | 258 | ✅ |
+| `ProbeLedger.kinds` | method | 266 | ✅ |
+| `ProbeLedger.has_icmp` | method | 274 | ✅ |
+| `ProbeLedger.exclusion_bpf` | method | 282 | ✅ |
+| `ProbeLedger.exclusion_display_filter` | method | 301 | ✅ |
+| `ProbeLedger.window` | method | 309 | ✅ |
+| `ProbeLedger.baseline` | method | 317 | ✅ |
+| `ProbeLedger.to_dict` | method | 339 | ✅ |
+| `HopStat` | class | 362 | ✅ |
+| `HopStat.loss_pct` | method | 382 | ✅ |
+| `HopStat.to_dict` | method | 391 | ✅ |
+| `PathProbeResult` | class | 416 | ✅ |
+| `PathProbeResult.to_dict` | method | 443 | ✅ |
+| `classify` | function | 479 | ✅ |
+| `clamp_path_options` | function | 519 | ✅ |
+| `build_hop_stats` | function | 560 | ✅ |
+| `degraded_hops` | function | 614 | ✅ |
+| `first_degraded_hop` | function | 647 | ✅ |
+| `looks_like_tun` | function | 666 | ✅ |
+| `summarize_path` | function | 699 | ✅ |
+| `exclusion_bpf` | function | 784 | ✅ |
+| `exclusion_display_filter` | function | 808 | ✅ |
+| `probe_marker_display_filter` | function | 829 | ✅ |
+| `path_exclusion_display_filter` | function | 854 | ✅ |
+| `discover_targets` | function | 933 | ✅ |
+| `plan` | function | 998 | ✅ |
+| `shadow_specs` | function | 1024 | ✅ |
+| `rounds_for` | function | 1045 | ✅ |
+| `probe_len` | function | 1062 | ✅ |
+| `probe_src_port` | function | 1074 | ✅ |
+| `send_probe` | function | 1091 | ✅ |
+| `ShadowProber` | class | 1168 | ✅ |
+| `ShadowProber.start` | method | 1195 | ✅ |
+| `ShadowProber.stop` | method | 1205 | ✅ |
+| `ShadowProber.join` | method | 1209 | ✅ |
+| `ShadowProber.run_round` | method | 1224 | ✅ |
+| `ShadowProber.exclusion_bpf` | method | 1268 | ✅ |
+| `ShadowProber.exclusion_display_filter` | method | 1277 | ✅ |
+| `ShadowProber.marker_display_filter` | method | 1286 | ✅ |
+| `ShadowProber.sent_count` | method | 1296 | ✅ |
+| `ShadowProber.snapshot` | method | 1305 | ✅ |
+| `aggregate_records` | function | 1326 | ✅ |
+| `count_marked_packets` | function | 1394 | ✅ |
+| `count_time_exceeded_packets` | function | 1425 | ✅ |
+| `probe_tcp_reachable` | function | 1491 | ✅ |
+| `check_target_port` | function | 1526 | ✅ |
+| `run` | function | 1734 | ✅ |
+| `PathProfiler` | class | 1864 | ✅ |
+| `PathProfiler.start` | method | 1899 | ✅ |
+| `PathProfiler.stop` | method | 1910 | ✅ |
+| `PathProfiler.join` | method | 1914 | ✅ |
+| `PathProfiler.should_stop` | method | 1929 | ✅ |
+| `PathProfiler.snapshot` | method | 1949 | ✅ |
 
 ### `ProbeKind`  (class)
 
@@ -2792,7 +2815,11 @@ class HopStat
 ```
 
 ```text
-路径探测（MTR，后续 PR）的单跳统计；本批只保留数据结构与 ``classify``。
+路径探测（MTR）的单跳统计。
+
+``sent`` / ``lost`` 表达「有没有样本」（``sent=0`` = 这一跳根本没探），
+``rtt_n`` 表达「有没有 RTT 样本」（回了包但拿不到时间戳时为 0）；
+RTT 三个值 + 抖动在 ``rtt_n=0`` 时是 ``None``，**不许用 0.0 冒充**。
 ```
 
 ### `HopStat.loss_pct`  (method)
@@ -2807,7 +2834,23 @@ def loss_pct(self) -> float
 
 Returns:
     float: ``lost / sent * 100``；``sent == 0``（无样本）时返回 0.0。
-        本批 MTR 未实现，``sent`` 本身承担「有没有样本」的表达。
+        「有没有样本」由 ``sent`` / ``rtt_n`` 表达，不要只看这个比例。
+```
+
+### `HopStat.to_dict`  (method)
+
+```python
+def to_dict(self) -> dict
+```
+
+```text
+把单跳统计转成可 JSON 序列化的字典（报告 / ``meta.path_profile`` 用）。
+
+Returns:
+    dict: 键 ``ttl``/``ip``/``sent``/``lost``/``loss_pct``/
+        ``rtt_min_ms``/``rtt_avg_ms``/``rtt_max_ms``/``jitter_ms``/
+        ``rtt_n``/``status``（机器码）；没有 RTT 样本时三个 RTT 与抖动
+        都是 ``None``。
 ```
 
 ### `PathProbeResult`  (class)
@@ -2818,7 +2861,10 @@ class PathProbeResult
 ```
 
 ```text
-路径探测（MTR）结果；``run()`` 本批未实现，结构先冻结给后续 PR 用。
+路径探测（MTR）结果：逐跳数据 + 结论机器码 + 方法/降级标注。
+
+``verdict_key`` 只用 :data:`PATH_OK` 等 6 个机器码；``unreachable`` 是附加
+布尔（ICMP 与 TCP 都没响应时，渲染层据此写「目标不可达」而不是「正常」）。
 ```
 
 ### `PathProbeResult.to_dict`  (method)
@@ -2828,11 +2874,14 @@ def to_dict(self) -> dict
 ```
 
 ```text
-把路径探测结果转成可 JSON 序列化的字典。
+把路径探测结果转成可 JSON 序列化的字典（``meta.path_profile`` 的底稿）。
 
 Returns:
-    dict: 键 ``target``/``verdict_key``/``icmp_filtered``/
-        ``target_port_reachable``/``hops``（逐跳）/``ledger``。
+    dict: 键 ``target``/``target_ip``/``verdict_key``/``degraded_ttl``/
+        ``baseline_ms``/``icmp_filtered``/``target_port_reachable``/
+        ``method``/``reached_target``/``completed``/``tun_suspected``/
+        ``unreachable``/``max_hops``/``samples``/``timeout_s``/
+        ``probes_sent``/``error``/``hops``（逐跳）/``ledger``。
 ```
 
 ### `classify`
@@ -2856,6 +2905,159 @@ Returns:
     （``PATH.OK`` / ``PATH.LOCAL_SIDE`` / ``PATH.SERVER_EDGE`` /
     ``PATH.TRANSPORT_NET`` / ``PATH.ICMP_FILTERED`` / ``PATH.NO_DATA``），
     由渲染层负责翻成中文。
+```
+
+### `clamp_path_options`
+
+```python
+def clamp_path_options(max_hops: int=PATH_DEFAULT_MAX_HOPS, samples: int=PATH_DEFAULT_SAMPLES, timeout_s: float=1.0) -> tuple[int, int, float]
+```
+
+```text
+把路径探测的三个参数夹到安全范围（纯函数，调用方/测试共用）。
+
+「MTR 长什么样」不设上限的话，一次 32 跳 × 10 样本 × 3 秒能把网卡打满，
+也能把一次实时抓包拖到几分钟 —— 所以参数一律先夹取再使用。
+
+Args:
+    max_hops: 请求的最大跳数；夹到 :data:`PATH_MAX_HOPS_RANGE`。
+    samples: 请求的每跳采样数；夹到 :data:`PATH_SAMPLES_RANGE`。
+    timeout_s: 请求的单包等待上限（秒）；夹到 :data:`PATH_TIMEOUT_RANGE`。
+
+Returns:
+    tuple[int, int, float]: ``(max_hops, samples, timeout_s)``；脏值（``None`` /
+        非数字）回落默认值而不是抛异常。
+
+Example:
+    >>> clamp_path_options(999, 0, 99)
+    (32, 1, 3.0)
+```
+
+### `build_hop_stats`
+
+```python
+def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]
+```
+
+```text
+把原始采样记录聚合成逐跳统计（纯函数，MTR 与单测共用）。
+
+每条原始记录键：``ttl``（整数）、``responded``（布尔）、``rtt_ms``
+（浮点或 ``None``）、``responder``（响应方 IP，空串表示没响应）。
+
+Args:
+    rows: 原始采样记录（顺序无关，内部按 ``ttl`` 排序输出）。
+
+Returns:
+    tuple[HopStat, ...]: 按 TTL 升序的逐跳统计。``sent`` 是该 TTL 的采样数，
+    ``lost`` 是没响应的采样数；``ip`` 取该跳出现过的非空响应方（取第一个），
+    ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
+    ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
+    ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
+
+Example:
+    >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
+    [1, 2]
+```
+
+### `degraded_hops`
+
+```python
+def degraded_hops(hops: Sequence[HopStat]) -> tuple[int, ...]
+```
+
+```text
+列出「已经劣化」的跳（纯函数，阈值全部来自模块常量）。
+
+两条判据，任一命中即算劣化：
+
+1. **丢包**：``loss_pct >= PATH_LOSS_DEGRADED_PCT``（默认 20%）；
+2. **RTT 突增**：当前跳平均 RTT ≥ 基线 × :data:`PATH_RTT_SPIKE_FACTOR`
+   且绝对增量 ≥ :data:`PATH_RTT_SPIKE_DELTA_MS`。基线取「已响应跳里最小的
+   平均 RTT」（首跳自身不参与比较，避免把第一跳的正常抖动当成突增）。
+
+Args:
+    hops: 逐跳统计（顺序无关，内部按 ttl 排序）。
+
+Returns:
+    tuple[int, ...]: 劣化跳的 TTL（升序）；没有劣化时是空元组。
+```
+
+### `first_degraded_hop`
+
+```python
+def first_degraded_hop(hops: Sequence[HopStat]) -> int | None
+```
+
+```text
+「第几跳开始劣化」——第一条命中 :func:`degraded_hops` 判据的 TTL。
+
+Args:
+    hops: 逐跳统计。
+
+Returns:
+    int | None: 劣化跳的 TTL；全部正常或没有任何样本时返回 ``None``。
+        **没有样本 ≠ 正常**：调用方必须再看 ``sent`` / ``rtt_n`` 才能下结论
+        （见 :func:`summarize_path` 的 ``PATH.NO_DATA``）。
+
+Example:
+    >>> first_degraded_hop(()) is None
+    True
+```
+
+### `looks_like_tun`
+
+```python
+def looks_like_tun(hops: Sequence[HopStat], target_ip: str='') -> bool
+```
+
+```text
+猜「本次逐跳走的是代理/TUN 的虚拟路径」。
+
+两个信号（任一命中即提示，措辞用「可能」）：
+
+1. 目标解析到 ``198.18.0.0/15``（RFC 2544 基准测试网段，TUN 代理的 fake-ip
+   常用这段）；
+2. 有响应的跳最多只到 1~2 跳 —— 真实物理路径通常至少经过「网关 + 出口」两跳
+   以上，只看到 1~2 跳多半是本地 TUN 在代为应答。
+
+Args:
+    hops: 逐跳统计。
+    target_ip: 本次探测的目标 IP 字面量；空串表示不知道。
+
+Returns:
+    bool: 疑似走 TUN/代理时为 True。``hops`` 完全没有响应时返回 ``False``
+        （那是「没数据」，不是「只探到 1~2 跳」）。
+```
+
+### `summarize_path`
+
+```python
+def summarize_path(hops: Sequence[HopStat], target_port_reachable: bool | None=None, method: str='icmp', target_ip: str='') -> dict
+```
+
+```text
+把逐跳统计翻成「第几跳开始劣化 + 该找谁」（纯函数，无中文长文案）。
+
+与 :func:`classify` 的区别：这里同时看**丢包**与 **RTT 突增**，并且把
+「没有样本」「ICMP 被过滤」「目标不可达」明确分开 —— 三者都不许落成「正常」。
+
+Args:
+    hops: 逐跳统计。
+    target_port_reachable: 目标端口 TCP 是否可达；``None`` 表示没测。
+    method: ``"icmp"`` / ``"tcp"``；只有 ICMP 方法才可能判定「被过滤」。
+    target_ip: 目标 IP 字面量，用于判断「是否已探到目标」与 TUN 提示。
+
+Returns:
+    dict: 键 ``verdict_key``（:data:`PATH_OK` 等 6 个机器码）/
+        ``degraded_ttl``（第几跳开始劣化，无则 ``None``）/``baseline_ms``
+        （基线平均 RTT，无样本 ``None``）/``icmp_filtered``/``unreachable``/
+        ``reached_target``/``tun_suspected``。没有样本时恒为 ``PATH.NO_DATA``，
+        绝不返回 ``PATH.OK``。
+
+Example:
+    >>> summarize_path(())["verdict_key"]
+    'PATH.NO_DATA'
 ```
 
 ### `exclusion_bpf`
@@ -2909,6 +3111,31 @@ Returns:
     str: 显示过滤串；``kinds`` 为空时返回空串（调用方应跳过统计）。
 ```
 
+### `path_exclusion_display_filter`
+
+```python
+def path_exclusion_display_filter(kinds: Iterable[ProbeKind]=(ProbeKind.ICMP, ProbeKind.TCP_SYN)) -> str
+```
+
+```text
+MTR 期间的显示过滤：探针标记 + 排除 ICMP time-exceeded（type 11）。
+
+为什么必须多排一条：路径上设备回的 ``ICMP type 11`` 外层 ident 不是
+:data:`PROBE_ID`（我们的 id 埋在「原始 IP 头 + 8 字节」里），按 id/端口认不出来；
+而分析层会把 type 11 计入 ``icmp_timeout``，不排就会凭空多出「TTL 耗尽」故障。
+
+Args:
+    kinds: MTR 可能发出的探针协议；默认 ICMP + TCP SYN（TCP 降级用）。
+
+Returns:
+    str: tshark ``-Y`` 串；``kinds`` 为空时也会返回 ``not (icmp.type == 11)``
+        （只要 MTR 跑过，这一步就必须有）。
+
+Example:
+    >>> path_exclusion_display_filter([])
+    'not (icmp.type == 11)'
+```
+
 ### `discover_targets`
 
 ```python
@@ -2919,15 +3146,20 @@ def discover_targets(vdi_hint: str='', target: str='') -> dict[str, str]
 发现网关 / DNS / 业务目标（**绝不抛异常**，拿不到就不返回该键）。
 
 平台能力复用 :mod:`core.platform.winapi`：``default_gateway()`` 走
-``GetBestRoute``（不解析本地化文本）；``dns_servers()`` 尚未实现时按「无 DNS
-角色」降级。业务目标来自抓包目标（IP / CIDR 取第一个主机 / 域名先解析）。
+``GetBestRoute``、``dns_servers()`` 读注册表（都不解析本地化 CLI 文本）。
+业务目标来自抓包目标（IP / CIDR 取第一个主机 / 域名先解析）。
+
+DNS 角色有一条「优雅跳过」规则：DNS 服务器是 ``127.0.0.0/8`` / ``::1`` 时
+探针发出去只会打到自己（本地 stub 解析器），不产生任何有效对照，所以跳过并在
+返回值里用 ``dns_skip`` 说明原因 —— 调用方据此在日志里交代一句，而不是发无效探针。
 
 Args:
     vdi_hint: 调用方显式给的业务目标提示（优先于 ``target``）。
     target: 用户填写的诊断目标；空表示全网体检（没有业务目标角色）。
 
 Returns:
-    dict[str, str]: 可能含 ``gateway`` / ``dns`` / ``vdi`` / ``vdi_port``。
+    dict[str, str]: 可能含 ``gateway`` / ``dns`` / ``vdi`` / ``vdi_port``；
+        出现但不可用时含 ``dns_skip``（``loopback`` / ``unusable``）。
         键缺失表示该角色这次不可用；不抛异常、不写文件。
 
 Example:
@@ -3222,39 +3454,204 @@ Returns:
         （统计失败不改变诊断结论）。
 ```
 
-### `run`
+### `count_time_exceeded_packets`
 
 ```python
-def run(target: str, port: int | None=None, max_hops: int=16, samples: int=5, timeout_s: float=1.0) -> PathProbeResult
+def count_time_exceeded_packets(tshark_path, pcap) -> int
 ```
 
 ```text
-TTL 递增路径探测（MTR）—— **本批不实现，后续 PR**。
+统计 pcap 里的 ``ICMP type 11``（TTL 超时）报文数。
 
-为什么不在本批做（SPEC §5）：本批只交付「影子探测」；MTR 需要逐跳 TTL
-递增、每跳采样与丢包率统计，属于另一个可独立验收的增量。这里保留 API 与
-数据结构，后续 PR 用 scapy 实现：
+MTR 期间设备回的 time-exceeded 认不出探针 id，只能整类排除；这个数字就是
+「已排除 N 个路径探测相关 ICMP」的取数口（同窗口其它流量的 TTL 超时也会被
+算进来 —— 这是残余风险，文档里写明）。
 
-    pkt = IP(dst=target, ttl=ttl) / ICMP(id=PROBE_ID, seq=n)
-    ans, unans = sr(pkt, timeout=timeout, verbose=0)
+Args:
+    tshark_path: tshark 可执行文件路径（``Path`` 或字符串）。
+    pcap: 已抓好的抓包文件。
 
-另外两件必做的事（后续 PR 一起做）：
+Returns:
+    int: 命中的 type 11 报文数；tshark 失败 / 文件读不了返回 0
+        （统计失败不改变诊断结论）。
+```
 
-1. 抓包侧同时生效 ``ledger.exclusion_bpf()``（否则探针污染诊断）；
-2. 探测前先测一次目标端口 TCP 连通性，用于判定「ICMP 被过滤」而不是「链路故障」。
+### `probe_tcp_reachable`
+
+```python
+def probe_tcp_reachable(ip: str, port: int, timeout_s: float=PATH_TCP_CHECK_TIMEOUT_S) -> bool
+```
+
+```text
+用一次普通 TCP 连接判断「目标端口是否可达」（不发送任何数据）。
+
+判定口径与影子探针一致：**SYN-ACK（连上）或 RST（连接被拒）都算可达** ——
+两种都证明「去目标的那条路是通的」，这正是区分「ICMP 被过滤」与「链路故障」
+所需的证据；超时 / 网络不可达 / 参数非法都算不可达。
+
+Args:
+    ip: 目标 IPv4 字面量。
+    port: 目标端口。
+    timeout_s: 单次连接超时（秒）。
+
+Returns:
+    bool: 可达为 True；任何失败为 False（不抛异常）。
+```
+
+### `check_target_port`
+
+```python
+def check_target_port(ip: str, port: int | None=None, timeout_s: float=PATH_TCP_CHECK_TIMEOUT_S, checker: Callable[..., bool] | None=None) -> tuple[bool | None, int | None]
+```
+
+```text
+判断目标端口可达性；未给端口时按 :data:`PATH_FALLBACK_PORTS` 依次尝试。
+
+Args:
+    ip: 目标 IPv4 字面量。
+    port: 显式端口；``None`` 时尝试 443 → 80。
+    timeout_s: 单次连接超时（秒）。
+    checker: 可注入的单端口判定函数；省略时用 :func:`probe_tcp_reachable`
+        （单测用，避免真连网）。
+
+Returns:
+    tuple[bool | None, int | None]: ``(reachable, port)``。``reachable`` 为
+        ``None`` 表示根本没测（ip 为空）；``port`` 是实际测的那个端口
+        （显式给的，或第一个可达的；都不可达时是第一个试的端口）。
+```
+
+### `run`
+
+```python
+def run(target: str, port: int | None=None, max_hops: int=PATH_DEFAULT_MAX_HOPS, samples: int=PATH_DEFAULT_SAMPLES, timeout_s: float=1.0, *, should_stop: Callable[[], bool] | None=None, sender: PathSender | None=None, tcp_checker: Callable[..., bool] | None=None) -> PathProbeResult
+```
+
+```text
+TTL 递增路径探测（MTR）：逐跳 RTT/丢包/抖动 + 劣化判定 + ICMP→TCP 降级。
+
+流程（全部在 IPv4 上）：
+
+1. 目标解析（域名先解析；IPv6 明确拒绝）；
+2. 先测一次目标端口 TCP 可达性（``port`` 未给时试 443/80），留作「ICMP 被过滤」
+   的判据；
+3. **ICMP 逐跳**：TTL 1..max_hops 按 :data:`PATH_BATCH_HOPS` 分批，每批一次
+   ``sr()``；收到目标自己的回复即停；
+4. 若 ICMP **一个响应都没有**而目标端口 TCP 可达 → 判定 ICMP 被策略过滤，
+   改用 **TCP SYN 逐跳**重扫（样本减半），结果带 ``icmp_filtered=True`` /
+   ``method="tcp"``；TCP 也不可达 → ``PATH.NO_DATA`` + ``unreachable=True``；
+5. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
 
 Args:
     target: 目标 IP / 域名。
-    port: 目标端口；``None`` 时探测逻辑自行决定。
-    max_hops: 最大跳数。
-    samples: 每跳采样数。
-    timeout_s: 单包等待上限（秒）。
+    port: 目标端口；``None`` 时用 443/80 做可达性判断，TCP 降级时也用它。
+    max_hops: 最大跳数，夹到 :data:`PATH_MAX_HOPS_RANGE`。
+    samples: 每跳采样数，夹到 :data:`PATH_SAMPLES_RANGE`。
+    timeout_s: 单批等待上限（秒），夹到 :data:`PATH_TIMEOUT_RANGE`。
+    should_stop: 可选的取消判定；每批发包前调用一次，返回 True 就收尾并把
+        ``completed`` 置 False（实时抓包取消/时间预算用）。
+    sender: 可注入的批量发送器（单测用；省略时走 scapy）。
+    tcp_checker: 可注入的可达性判定 ``(ip, port, timeout) -> bool``；省略时
+        等价于 :func:`probe_tcp_reachable`（单测用，避免真连网）。
 
 Returns:
-    不返回：本批固定抛 :class:`NotImplementedError`。
+    :class:`PathProbeResult`: 逐跳统计 + ``verdict_key`` / ``degraded_ttl`` /
+    ``method`` / ``icmp_filtered`` / ``tun_suspected`` 等；参数非法 / 解析失败 /
+    scapy 不可用时也返回结果（``hops`` 为空、``error`` 写明原因），**不抛异常**
+    —— 调用方（实时抓包 / 体检）绝不允许被路径探测拖垮。
 
-Raises:
-    NotImplementedError: 恒抛，提示实现见本函数 docstring。
+Note:
+    本函数**不写文件、不读配置**；发出的每个包都带固定标记（ICMP id =
+    :data:`PROBE_ID`、TCP 源端口 ∈ :data:`PROBE_SRC_PORT_RANGE`），抓包侧
+    必须同时生效 :func:`exclusion_bpf` 与 :func:`path_exclusion_display_filter`。
+    TCP 降级重扫失败时**保留** ICMP 的逐跳数据（「ICMP 全丢」本身已是结论），
+    只把原因写进 ``error``，不会因此返回空路径。
+```
+
+### `PathProfiler`  (class)
+
+```python
+class PathProfiler
+```
+
+```text
+后台路径探测线程：实时抓包同时跑 MTR，可取消、失败只降级。
+
+生命周期与 :class:`ShadowProber` 一致（daemon 线程 + ``Event`` 取消 +
+``join(timeout)``），额外带**时间预算**：到点后 :func:`run` 在下一批发包前
+收尾并返回已完成的跳（``completed=False``），绝不把抓包主流程拖住。
+
+Attributes:
+    target: 目标 IP / 域名。
+    port: 目标端口（``None`` 表示按 443/80 判断）。
+    max_hops / samples / timeout_s: 已夹取的探测参数。
+    budget_s: 时间预算（秒），由抓包时长 + 5 秒得出。
+    result: :class:`PathProbeResult`；线程未跑完时为 ``None``。
+    error: 线程内异常（探针不可用）的描述，成功为空串。
+```
+
+### `PathProfiler.start`  (method)
+
+```python
+def start(self) -> None
+```
+
+```text
+启动后台线程（幂等：已在跑时直接返回）。
+```
+
+### `PathProfiler.stop`  (method)
+
+```python
+def stop(self) -> None
+```
+
+```text
+请求停止：置取消位，当前这一批发完即收尾（不阻塞调用方）。
+```
+
+### `PathProfiler.join`  (method)
+
+```python
+def join(self, timeout: float=3.0) -> bool
+```
+
+```text
+等线程退出（最多 ``timeout`` 秒）。
+
+Args:
+    timeout: 最长等待秒数。
+
+Returns:
+    bool: 已退出返回 True；仍存活返回 False。
+```
+
+### `PathProfiler.should_stop`  (method)
+
+```python
+def should_stop(self) -> bool
+```
+
+```text
+取消判定：外部 ``stop()`` 或时间预算到点都算停。
+
+Returns:
+    bool: 该收尾时为 True。
+```
+
+### `PathProfiler.snapshot`  (method)
+
+```python
+def snapshot(self) -> dict
+```
+
+```text
+把「参数 + 结果 + 过滤串」打包成可 JSON 序列化的快照。
+
+Returns:
+    dict: 键 ``profile``（:meth:`PathProbeResult.to_dict`；没有结果时
+        ``None``）/``error``/``planned_kinds``/``started_epoch``/
+        ``finished_epoch``/``budget_s``/``exclusion_bpf``/
+        ``exclusion_display_filter``/``marker_display_filter``。
 ```
 
 ## `core/platform/__init__.py`
@@ -3528,14 +3925,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `is_admin` | function | 77 | ✅ |
-| `npcap_installed` | function | 92 | ✅ |
-| `Adapter` | class | 128 | ✅ |
-| `adapters` | function | 169 | ✅ |
-| `default_gateway` | function | 211 | ✅ |
-| `icmp_stats` | function | 240 | ✅ |
-| `dns_servers` | function | 326 | ✅ |
-| `interface_index_map` | function | 341 | ✅ |
+| `is_admin` | function | 79 | ✅ |
+| `npcap_installed` | function | 94 | ✅ |
+| `Adapter` | class | 130 | ✅ |
+| `adapters` | function | 171 | ✅ |
+| `default_gateway` | function | 213 | ✅ |
+| `icmp_stats` | function | 242 | ✅ |
+| `dns_servers` | function | 413 | ✅ |
+| `interface_index_map` | function | 435 | ✅ |
 
 ### `is_admin`
 
@@ -3667,16 +4064,20 @@ def dns_servers() -> tuple[str, ...]
 ```
 
 ```text
-当前生效的 DNS 服务器列表。
+当前生效的 DNS 服务器列表（只读注册表，不解析本地化 CLI 文本）。
 
-注意 DNS 可能来自 DHCP / 组策略 / 每网卡独立配置，开了 DoH 之后
-注册表里的地址与真正发查询的地址还可能不一致 —— 报告里必须标注这一不确定性。
+注意 DNS 可能来自 DHCP / 组策略 / 每网卡独立配置，开了 DoH（DNS over HTTPS）
+之后注册表里的地址与真正发查询的地址还可能不一致 —— 报告里必须标注这一
+不确定性：探 DNS 服务器只能证明「这台机器到该地址的 UDP/53 通不通」。
 
 Returns:
-    tuple[str, ...]: DNS 服务器地址。
+    tuple[str, ...]: 去重后的 IPv4 地址（静态配置优先于 DHCP 下发，网卡顺序按
+    注册表枚举顺序）；非 Windows、注册表不可读、没有任何有效地址时返回
+    ``()`` —— **不抛异常**（探针拿不到 DNS 角色只会少一行，不该拖垮诊断）。
 
-Raises:
-    NotImplementedError: 本阶段未实现（随 ``adapters()`` 一起落地）。
+Example:
+    >>> dns_servers()  # doctest: +SKIP
+    ('192.0.2.53',)
 ```
 
 ### `interface_index_map`
@@ -3739,10 +4140,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 204 | ✅ |
-| `save` | function | 456 | ✅ |
-| `render_degraded` | function | 505 | ✅ |
-| `save_degraded` | function | 571 | ✅ |
+| `render_markdown` | function | 342 | ✅ |
+| `save` | function | 600 | ✅ |
+| `render_degraded` | function | 649 | ✅ |
+| `save_degraded` | function | 715 | ✅ |
 
 ### `render_markdown`
 
@@ -4108,26 +4509,26 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 123 | ✅ |
-| `request_quit` | function | 128 | ✅ |
-| `cleanup_pid` | function | 176 | ✅ |
-| `BodyTooLarge` | class | 186 | ✅ |
-| `doctor_cached` | function | 265 | ✅ |
-| `log` | function | 319 | ✅ |
-| `start_job` | function | 482 | ✅ |
-| `report_index` | function | 542 | ✅ |
-| `request_elevation` | function | 576 | ✅ |
-| `engine_info` | function | 609 | ✅ |
-| `passive_start` | function | 652 | ✅ |
-| `passive_status` | function | 687 | ✅ |
-| `link_actions` | function | 761 | ✅ |
-| `Handler` | class | 808 | ✅ |
-| `Handler.log_message` | method | 854 | ✅ |
-| `Handler.do_GET` | method | 992 | ✅ |
-| `Handler.do_POST` | method | 1009 | ✅ |
-| `DiagServer` | class | 1220 | ✅ |
-| `create_server` | function | 1232 | ✅ |
-| `main` | function | 1279 | ✅ |
+| `touch` | function | 125 | ✅ |
+| `request_quit` | function | 130 | ✅ |
+| `cleanup_pid` | function | 178 | ✅ |
+| `BodyTooLarge` | class | 188 | ✅ |
+| `doctor_cached` | function | 267 | ✅ |
+| `log` | function | 363 | ✅ |
+| `start_job` | function | 547 | ✅ |
+| `report_index` | function | 608 | ✅ |
+| `request_elevation` | function | 642 | ✅ |
+| `engine_info` | function | 675 | ✅ |
+| `passive_start` | function | 718 | ✅ |
+| `passive_status` | function | 753 | ✅ |
+| `link_actions` | function | 827 | ✅ |
+| `Handler` | class | 874 | ✅ |
+| `Handler.log_message` | method | 920 | ✅ |
+| `Handler.do_GET` | method | 1058 | ✅ |
+| `Handler.do_POST` | method | 1075 | ✅ |
+| `DiagServer` | class | 1293 | ✅ |
+| `create_server` | function | 1305 | ✅ |
+| `main` | function | 1352 | ✅ |
 
 ### `touch`
 
@@ -4231,7 +4632,8 @@ Args:
         ``duration``（秒，夹在 3 ~ ``max_duration`` 之间）、
         ``interface``（网卡序号，可空=自动挑）、
         ``pcap``（仅离线模式；**只接受 captures/ 下的文件名**，防任意文件读取）、
-        ``shadow``（可选 bool，默认 ``True``：实时抓包同时做影子探测；离线忽略）。
+        ``shadow``（可选 bool，默认 ``True``：实时抓包同时做影子探测**与路径
+        剖面（MTR）**；离线忽略；MTR 只在有目标时跑）。
         旧版前端不传 ``shadow`` 时按默认开处理，行为兼容。
 
 Returns:
