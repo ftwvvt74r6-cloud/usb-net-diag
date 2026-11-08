@@ -221,7 +221,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `POST /api/diagpack` | `{raw?: bool, include_reports?: bool}` | `{ok: true, path, size, entries}`（默认脱敏） |
 | `POST /api/upload` | 原始字节 + `?name=x.pcap`；只收 `.pcap/.pcapng/.cap` | `{ok: true, file, size}`（落到 `captures/`） |
 
-### 4.3 GET 路由（2 个核心 + 13 个只读 + 静态页）
+### 4.3 GET 路由（2 个核心 + 14 个只读 + 静态页）
 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|

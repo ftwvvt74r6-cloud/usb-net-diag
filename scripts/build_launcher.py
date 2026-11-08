@@ -42,7 +42,7 @@ SPLASH_SOURCE = ROOT / "launcher" / "SplashForm.cs"
 MANIFEST = ROOT / "launcher" / "NetDiag.exe.manifest"
 ICON = ROOT / "NetDiag.ico"
 EXE_NAME = "NetDiag.exe"
-#: 一个 /target:winexe 的托管启动器正常约 20~60 KB；小于 8 KB 说明编出来的
+#: 一个 /target:winexe 的托管启动器正常约 30~90 KB；小于 8 KB 说明编出来的
 #: 不是完整 PE（或只是空壳），发出去双击必然失败，所以在这里就拦住。
 MIN_EXE_BYTES = 8 * 1024
 COMPILE_TIMEOUT_S = 300
