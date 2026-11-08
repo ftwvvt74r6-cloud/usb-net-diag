@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -22,6 +25,11 @@ ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
 COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
 STARTUP = COPY["startup"]
+
+#: 纯 JS 能力锁矩阵用 Node 直接跑（不启浏览器）；CI windows 自带 node，缺了跳过。
+NODE = shutil.which("node")
+LOCK_START = "/* ---------- 能力锁矩阵：纯函数"
+LOCK_END = "/* ---------- 能力锁矩阵结束 ---------- */"
 
 
 def _slice(start: str, end: str, label: str) -> str:
@@ -42,6 +50,133 @@ def _onclick(selector: str) -> str:
     begin = HTML.index(start)
     end = HTML.index("\n};", begin)
     return HTML[begin:end]
+
+
+def _check(key: str, ok: bool) -> dict:
+    """构造一项与后端 ``collect()`` 同结构的检查结果（只填 UI 用得到的键）。"""
+    return {
+        "key": key,
+        "name": key,
+        "ok": ok,
+        "detail": f"{key}-detail",
+        "fix_kind": "none" if ok else "url",
+        "fix_url": "" if ok else f"https://example.invalid/{key}",
+        "fix_command": "",
+        "impact": f"{key}-impact（缺了会怎样）",
+        "doc_url": "docs/startup.md",
+    }
+
+
+def _checks(tshark: bool = True, npcap: bool = True, python: bool = True,
+            port: bool = True, admin: bool = True) -> list[dict]:
+    return [_check("python", python), _check("tshark", tshark),
+            _check("npcap", npcap), _check("port", port), _check("admin", admin)]
+
+
+def _caps(tshark: bool = True, npcap: bool = True, scapy: bool = False) -> dict:
+    """按 ``core/selfcheck.py::capabilities()`` 的真值表构造能力矩阵。"""
+    live = tshark and npcap
+    offline = tshark
+    passive = tshark or scapy
+    missing = {}
+    if not offline:
+        missing["offline"] = "tshark"
+    if not live:
+        if not tshark and not npcap:
+            missing["live"] = "tshark|npcap"
+        else:
+            missing["live"] = "tshark" if not tshark else "npcap"
+    if not passive:
+        missing["passive"] = "tshark|scapy"
+    return {"probe": True, "offline": offline, "live": live, "passive": passive,
+            "reports": True, "settings": True, "missing": missing, "scapy": scapy}
+
+
+def _payload(tshark: bool = True, npcap: bool = True, scapy: bool = False,
+             first_run: bool = False, with_caps: bool = True) -> dict:
+    data = {
+        "ok": tshark and npcap,
+        "version": "0.3.2",
+        "first_run": first_run,
+        "checks": _checks(tshark=tshark, npcap=npcap),
+        "ui_copy": {"startup": STARTUP},
+    }
+    if with_caps:
+        data["capabilities"] = _caps(tshark=tshark, npcap=npcap, scapy=scapy)
+    return data
+
+
+def _lock_js() -> str:
+    """抽取 ``ui/index.html`` 里标记过的纯函数段（能力锁矩阵，不碰 DOM）。"""
+    begin = HTML.index(LOCK_START)
+    end = HTML.index(LOCK_END, begin)
+    return HTML[begin:end]
+
+
+def _run_lock_harness(payloads: dict) -> dict:
+    """用 Node 在无浏览器环境执行纯 JS 锁矩阵，返回各载荷 × 管理员组合的锁态。"""
+    if not NODE:
+        raise unittest.SkipTest("本机没有 Node.js：纯 JS 锁矩阵用例跳过（CI windows 自带）")
+    prelude = (
+        "let CAPS = null;\n"
+        "let CHECKS = [];\n"
+        "let IS_ADMIN = null;\n"
+        'const LOCKED = new Set(["scan", "live", "passive"]);\n'
+        f"const UI_COPY = {json.dumps(STARTUP, ensure_ascii=False)};\n"
+    )
+    harness = """
+const PAYLOADS = __PAYLOADS__;
+const MODES = ["scan", "live", "passive", "offline", "probe", "reports", "settings"];
+const out = { payloads: {}, panel: {}, recheck: {} };
+Object.keys(PAYLOADS).forEach((name) => {
+  out.payloads[name] = {};
+  [false, true].forEach((admin) => {
+    applyCapabilities(PAYLOADS[name]);
+    IS_ADMIN = admin;
+    const row = {};
+    MODES.forEach((mode) => {
+      const lock = lockInfo(mode);
+      row[mode] = lock ? { locked: true, kind: lock.kind, tag: lock.tag }
+                       : { locked: false };
+    });
+    out.payloads[name][String(admin)] = row;
+  });
+});
+function panel(name) {
+  applyCapabilities(PAYLOADS[name]);
+  return shouldShowStartup(PAYLOADS[name]);
+}
+out.panel.first_run_green = panel("first_run_green");
+out.panel.critical_missing = panel("missing_tshark");
+out.panel.green_not_first = panel("all_green");
+out.panel.old_green = panel("old_payload_green");
+out.panel.old_missing = panel("old_payload_missing");
+out.panel.null_payload = shouldShowStartup(null);
+applyCapabilities(PAYLOADS.missing_tshark);
+IS_ADMIN = true;
+const before = { scan: isLocked("scan"), offline: isLocked("offline"),
+                 passive: isLocked("passive") };
+applyCapabilities(PAYLOADS.all_green);
+const afterLock = lockInfo("scan");
+const after = { scan: isLocked("scan"), offline: isLocked("offline"),
+                passive: isLocked("passive"),
+                tag: afterLock ? afterLock.tag : "" };
+out.recheck = { before: before, after: after };
+console.log(JSON.stringify(out));
+""".replace("__PAYLOADS__", json.dumps(payloads, ensure_ascii=False))
+    with tempfile.TemporaryDirectory(prefix="netdiag-f2-js-") as tmp:
+        script = Path(tmp) / "lock_matrix.js"
+        script.write_text(prelude + _lock_js() + harness, encoding="utf-8", newline="\n")
+        proc = subprocess.run(
+            [NODE, str(script)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120,
+        )
+    if proc.returncode != 0:
+        raise AssertionError(f"Node 锁矩阵执行失败：{proc.stderr[-2000:]}")
+    lines = [line for line in (proc.stdout or "").splitlines() if line.strip()]
+    if not lines:
+        raise AssertionError("Node 锁矩阵没有输出")
+    return json.loads(lines[-1])
 
 
 class StartupPanelStaticTest(unittest.TestCase):
@@ -119,12 +254,15 @@ class PermissionCardStaticTest(unittest.TestCase):
     def test_capture_actions_go_through_check_admin(self):
         start = _slice("async function startCapture", "function stopRun",
                        "startCapture")
+        self.assertIn("if (!guardMode(MODE)) return;", start,
+                      "强制入口必须走统一闸门（能力锁与管理员锁都不许绕过）")
         self.assertIn("if (!checkAdmin()) return;", start,
-                      "被动监听入口必须走权限卡")
+                      "被动监听入口必须走权限卡/说明卡")
         self.assertIn("cfg.needs_admin && !checkAdmin()", start,
-                      "实时抓包入口必须走权限卡，不许静默失败")
+                      "实时抓包入口必须走权限卡/说明卡，不许静默失败")
         check = _slice("function checkAdmin()", "$(\"#perm-close\")", "checkAdmin")
-        self.assertIn("showPermModal();", check)
+        self.assertIn("guardMode(MODE);", check,
+                      "能力锁要弹说明卡、管理员锁要弹权限卡，统一由 guardMode 分派")
 
     def test_elevate_failure_keeps_non_admin_and_explains(self):
         block = _onclick("#perm-elevate")
@@ -238,6 +376,266 @@ class ServerWiringStaticTest(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, collect,
                                  "collect() 必须纯读：不写文件/不触发 UAC/不抓包")
+
+
+class CapabilityMatrixRuntimeTest(unittest.TestCase):
+    """能力置灰矩阵：Node 执行 UI 的纯 JS 锁函数（无浏览器 / 无网络 / 无 tshark）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        hostile = _payload()
+        hostile["capabilities"]["probe"] = False   # 即使后端异常，probe 也必须可点
+        cls.matrix = _run_lock_harness({
+            "missing_tshark": _payload(tshark=False),
+            "missing_npcap": _payload(tshark=True, npcap=False),
+            "all_green": _payload(),
+            "missing_both": _payload(tshark=False, npcap=False),
+            "old_payload_green": _payload(with_caps=False),
+            "old_payload_missing": _payload(tshark=False, with_caps=False),
+            "first_run_green": _payload(first_run=True),
+            "hostile_probe_false": hostile,
+        })
+
+    def _row(self, name: str, admin: bool = False) -> dict:
+        return self.matrix["payloads"][name][str(admin).lower()]
+
+    def _assert_cap(self, row: dict, mode: str, tag: str):
+        with self.subTest(mode=mode):
+            self.assertTrue(row[mode]["locked"], f"{mode} 应置灰")
+            self.assertEqual(row[mode]["kind"], "cap")
+            self.assertEqual(row[mode]["tag"], tag)
+
+    def test_tshark_missing_locks_scan_live_passive_offline(self):
+        row = self._row("missing_tshark")
+        for mode in ("scan", "live", "passive", "offline"):
+            self._assert_cap(row, mode, STARTUP["lock_tag_tshark"])
+        for mode in ("probe", "reports", "settings"):
+            with self.subTest(mode=mode):
+                self.assertFalse(row[mode]["locked"], f"{mode} 不许置灰")
+
+    def test_npcap_missing_locks_live_only(self):
+        row = self._row("missing_npcap")
+        for mode in ("scan", "live"):
+            self._assert_cap(row, mode, STARTUP["lock_tag_npcap"])
+        # 被动监听：tshark 在就能用，不因 Npcap 缺而能力置灰；非管理员仍按 C2 锁（admin）。
+        self.assertNotEqual(row["passive"].get("kind"), "cap",
+                            "缺 Npcap 不该能力锁 passive（被动监听不需要 Npcap）")
+        for mode in ("offline", "probe", "reports", "settings"):
+            with self.subTest(mode=mode):
+                self.assertFalse(row[mode]["locked"],
+                                 f"缺 Npcap 不该锁 {mode}（分析 pcap / 被动监听走 tshark）")
+        admin_row = self._row("missing_npcap", admin=True)
+        for mode in ("passive", "offline", "probe"):
+            with self.subTest(mode=mode, admin=True):
+                self.assertFalse(admin_row[mode]["locked"])
+
+    def test_all_present_is_only_admin_locked(self):
+        row = self._row("all_green")
+        for mode in ("scan", "live", "passive"):
+            with self.subTest(mode=mode):
+                self.assertEqual(row[mode]["kind"], "admin")
+                self.assertEqual(row[mode]["tag"], STARTUP["lock_tag_admin"])
+        for mode in ("offline", "probe", "reports", "settings"):
+            with self.subTest(mode=mode):
+                self.assertFalse(row[mode]["locked"])
+        admin_row = self._row("all_green", admin=True)
+        self.assertFalse(any(admin_row[m]["locked"] for m in admin_row),
+                         "管理员 + 组件齐全时不许有任何锁")
+
+    def test_both_missing_tags_are_specific(self):
+        row = self._row("missing_both")
+        self._assert_cap(row, "live", STARTUP["lock_tag_both"])
+        self._assert_cap(row, "scan", STARTUP["lock_tag_both"])
+        self._assert_cap(row, "offline", STARTUP["lock_tag_tshark"])
+        self._assert_cap(row, "passive", STARTUP["lock_tag_tshark"])
+
+    def test_old_payload_without_capabilities_keeps_c2_admin_only(self):
+        # 旧载荷：即使 checks 里 tshark 是 ❌，也不能凭 checks 自造能力锁。
+        row = self._row("old_payload_missing")
+        for mode in ("scan", "live", "passive"):
+            with self.subTest(mode=mode):
+                self.assertEqual(row[mode]["kind"], "admin")
+                self.assertEqual(row[mode]["tag"], STARTUP["lock_tag_admin"],
+                                 "旧载荷只能显示管理员锁，不许误灰成缺组件")
+        for mode in ("offline", "probe", "reports", "settings"):
+            with self.subTest(mode=mode):
+                self.assertFalse(row[mode]["locked"], "旧载荷不许误灰")
+        admin_row = self._row("old_payload_missing", admin=True)
+        self.assertFalse(any(admin_row[m]["locked"] for m in admin_row),
+                         "旧载荷 + 管理员：全部可点（C2 现状）")
+
+    def test_probe_never_locked_even_with_hostile_caps(self):
+        row = self._row("hostile_probe_false", admin=True)
+        self.assertFalse(row["probe"]["locked"],
+                         "probe 只用标准库 socket，任何 capability 载荷都不许锁")
+
+    def test_recheck_all_green_unlocks_and_clears_tags(self):
+        recheck = self.matrix["recheck"]
+        self.assertEqual(recheck["before"], {"scan": True, "offline": True,
+                                             "passive": True})
+        self.assertEqual(recheck["after"], {"scan": False, "offline": False,
+                                            "passive": False, "tag": ""})
+
+    def test_panel_visibility_rules(self):
+        panel = self.matrix["panel"]
+        self.assertTrue(panel["first_run_green"], "全绿但首次运行 → 显示")
+        self.assertTrue(panel["critical_missing"], "非首次但有缺件 → 显示")
+        self.assertFalse(panel["green_not_first"], "全绿且非首次 → 不显示（保持 C2）")
+        self.assertFalse(panel["old_green"], "旧载荷无 capabilities → 不显示")
+        self.assertFalse(panel["old_missing"], "旧载荷不许凭 checks 弹出缺件面板")
+        self.assertFalse(panel["null_payload"])
+
+
+class StartupExtensionStaticTest(unittest.TestCase):
+    """首屏自检扩展：always fetch / impact + 指引 / 重新检测后重绘 / 恢复入口。"""
+
+    def test_fetches_selfcheck_even_when_not_first_run(self):
+        init = _slice("async function initStartup", "function setCapMsg", "initStartup")
+        self.assertLess(init.index("loadSelfcheck()"), init.index("data.first_run !== true"),
+                        "必须先拉 selfcheck 存 CAPS，再看 first_run 决定面板")
+        load = _slice("async function loadSelfcheck", "async function initStartup",
+                      "loadSelfcheck")
+        self.assertIn('fetch("/api/selfcheck"', load)
+        self.assertIn("applyCapabilities(data)", load)
+        self.assertIn("paintLocks();", load,
+                      "首屏/重新检测拿到能力矩阵后必须立即重绘置灰矩阵")
+
+    def test_failed_rows_have_impact_fix_text_and_doc_link(self):
+        render = _slice("function renderStartup", "function setStartupEnter",
+                        "renderStartup")
+        for token in ("c.impact", "fixTextFor(c.key)", "fixtext",
+                      "startupDocLink()", 'target="_blank" rel="noopener"'):
+            with self.subTest(token=token):
+                self.assertIn(token, render)
+        self.assertIn('class="impact"', render)
+        self.assertIn("data-startup-elevate", render)
+        self.assertIn('replace(/[；;]?\\s*详见\\s*docs\\/startup\\.md/g, "")',
+                      _slice("function fixTextFor", "function startupDocLink",
+                             "fixTextFor"),
+                      "fix_* 已含文档路径：额外渲染可点击链接前必须去重")
+
+    def test_recheck_rebuilds_panel_and_matrix(self):
+        recheck = _slice("async function recheckSelfcheck", "function waitForElevatedReload",
+                         "recheckSelfcheck")
+        self.assertIn("loadSelfcheck()", recheck)
+        self.assertIn("showCapabilityCard(capMode)", recheck,
+                      "没恢复时说明卡也要同步刷新原因")
+        self.assertIn("renderStartup(data)", recheck)
+        self.assertIn("setStartupEnter(true)", recheck,
+                      "恢复后要提供「进入主界面」")
+
+    def test_all_green_offers_enter_after_manual_recheck(self):
+        init = _slice("async function initStartup", "function setCapMsg", "initStartup")
+        self.assertIn("setStartupEnter(allGreen)", init)
+        self.assertIn("UI_COPY.ready_enter", init)
+        self.assertIn("finishStartup(true)", init, "C2 全绿首次运行仍要自动 ack")
+        enter = _slice("function setStartupEnter", "function showStartup", "setStartupEnter")
+        self.assertIn('"enter"', enter)
+        self.assertIn("limited_enter", enter)
+
+    def test_panel_can_be_reopened_from_settings(self):
+        self.assertIn('id="sysinfo-startup"', HTML)
+        self.assertIn('data-copy="startup_open"', HTML)
+        sysinfo = _slice('$("#sysinfo-startup").onclick', 'wireFormPersistence();',
+                         "sysinfo-startup")
+        self.assertIn("initStartup({ manual: true, force: true })", sysinfo)
+
+
+class CapabilityCardStaticTest(unittest.TestCase):
+    """点击置灰项 → 能力说明卡：缺什么 / 缺了会怎样 / 怎么修复 / 重新检测 / 知道了。"""
+
+    def test_card_markup_exists_and_uses_copy_table(self):
+        for element_id in ("cap-mask", "cap-title", "cap-sub", "cap-need",
+                           "cap-impact", "cap-fix", "cap-recheck", "cap-close2"):
+            with self.subTest(id=element_id):
+                self.assertIn(f'id="{element_id}"', HTML)
+        for key in ("disabled_title", "disabled_recheck", "disabled_close",
+                    "disabled_need_label", "disabled_impact_label",
+                    "disabled_fix_label"):
+            with self.subTest(key=key):
+                self.assertTrue(str(STARTUP.get(key, "")).strip())
+
+    def test_card_body_has_need_impact_fix_and_links(self):
+        card = _slice("function showCapabilityCard", "async function recheckSelfcheck",
+                      "showCapabilityCard")
+        for token in ("cap-need", "cap-impact", "cap-fix", "disabled_need",
+                      "disabled_impact", "disabled_fix", "impact_", "fix_",
+                      "startupDocLink()", "fix_url", "fixUrl", "_url",
+                      'rel="noopener"'):
+            with self.subTest(token=token):
+                self.assertIn(token, card)
+        self.assertIn('UI_COPY[key + "_url"]', card,
+                      "CHECKS 尚未到达时下载链接回退到 copy 表 URL，不能缺指引")
+
+    def test_guard_mode_dispatches_two_kinds_of_locks(self):
+        guard = _slice("function guardMode", "function paintLocks", "guardMode")
+        self.assertIn("capLockInfo(mode)", guard)
+        self.assertIn("showCapabilityCard(mode)", guard)
+        self.assertIn("showPermModal()", guard,
+                      "管理员锁仍走 C2 权限卡，不能被能力卡合并")
+        self.assertIn("return false;", guard)
+
+    def test_locked_mode_click_is_not_silent(self):
+        nav = _slice('$("#nav").addEventListener("click"', 'function markActive',
+                     "nav handler")
+        self.assertIn("switchMode(modeBtn.dataset.mode)", nav)
+        self.assertNotIn("if (isLocked(mode)) { showPermModal(); return; }", HTML,
+                         "旧实现只弹权限卡，必须换成 guardMode 分派")
+        switch = _slice("function switchMode", "function setMode", "switchMode")
+        self.assertIn("guardMode(mode)", switch)
+        self.assertIn("if (!guardMode(mode)) return false;", switch)
+
+    def test_card_buttons_wired(self):
+        self.assertIn('$("#cap-close").onclick = hideCapCard;', HTML)
+        self.assertIn('$("#cap-close2").onclick = hideCapCard;', HTML)
+        recheck = _onclick("#cap-recheck")
+        self.assertIn("recheckSelfcheck", recheck)
+        self.assertIn('$("#cap-mask").addEventListener("mousedown"', HTML)
+
+    def test_nav_badge_uses_dynamic_data_lock(self):
+        self.assertEqual(HTML.count("content:attr(data-lock)"), 2,
+                         "导航角标必须按锁定原因动态渲染")
+        locks = _slice("function paintLocks", "function legacyCapMode", "paintLocks")
+        self.assertIn('b.setAttribute("data-lock", tag)', locks)
+        self.assertIn('t.setAttribute("data-lock", tag)', locks)
+        self.assertIn("lock_tag_both", _slice("function capTag", "function capLockInfo",
+                                              "capTag"))
+
+
+class NoHardcodedPathStaticTest(unittest.TestCase):
+    """文案红线：不出现开发商口吻硬路径；新文案可操作。"""
+
+    def test_forbidden_phrases_are_absent(self):
+        corpus = HTML + "\n" + json.dumps(COPY, ensure_ascii=False)
+        for phrase in ("请把 Wireshark 便携版解压到", "G:\\", "C:\\"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(corpus.count(phrase), 0,
+                                 f"文案里不许出现 {phrase!r}")
+
+    def test_capability_copy_is_actionable(self):
+        for key in ("fix_tshark", "fix_npcap", "fix_python", "fix_port",
+                    "lock_tag_tshark", "lock_tag_npcap", "lock_tag_admin",
+                    "lock_tag_both", "need_tshark", "need_npcap", "need_both",
+                    "missing_tshark", "missing_npcap", "need_passive",
+                    "disabled_title", "disabled_hint",
+                    "disabled_need", "disabled_impact_label", "disabled_fix_label",
+                    "disabled_recheck", "disabled_close", "disabled_rechecking",
+                    "recheck_still", "recheck_all_ok", "ready_enter", "enter",
+                    "lock_banner_caps", "lock_banner_admin", "startup_open",
+                    "docs_url", "docs_hint", "wireshark_url", "npcap_url"):
+            with self.subTest(key=key):
+                self.assertTrue(str(STARTUP.get(key, "")).strip(), f"{key} 不能为空")
+        self.assertIn("TSHARK_PATH", STARTUP["fix_tshark"])
+        self.assertIn("docs/startup.md", STARTUP["fix_tshark"])
+        self.assertIn("Wireshark", STARTUP["need_tshark"])
+        self.assertIn("Npcap", STARTUP["need_npcap"])
+        self.assertIn("docs/startup.md", STARTUP["docs_hint"])
+        self.assertTrue(STARTUP["docs_url"].startswith("https://"))
+
+    def test_docs_url_reuses_payload_relative_doc(self):
+        self.assertEqual(STARTUP["docs_url"].rsplit("/", 1)[-1], "startup.md")
+        self.assertIn("docs/startup.md",
+                      (ROOT / "core" / "selfcheck.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -225,7 +225,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|
 | `GET /api/ping` | 单实例/存活探测 | `ok/app/version/pid/url/started_at` |
-| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser` |
+| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/capabilities` |
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
 | `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed`；完成时另加 `conclusion`（7 键结论对象）、`result.conclusion_text` / `conclusion_markdown` / `conclusion_export`、`ui_copy.conclusion`（E2 加法字段） |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
@@ -233,13 +233,41 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |
 | `GET /api/report?path=` | 读报告 | 文件原文；只取 `Path(name).name`，防目录穿越 |
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
-| `GET /api/selfcheck` | 首屏准备检查（五项只读环境检查，含首次运行标记） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command}]/ui_copy.startup` |
+| `GET /api/selfcheck` | 首屏准备检查（五项只读环境检查，含首次运行标记与能力矩阵） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
 | `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
 | `GET /api/probe?target=&port=&count=&proto=&path=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果；`path=0` 关闭逐跳（默认开） |
 | `GET /api/evidence?full=0\|1&fmt=md\|txt` | 通用取证请求单（只读、纯计算、不写文件） | `ok/fmt/full/dimensions/content`；`full=1` 无结果也返回全 7 维 |
 
 注意 `/api/probe` 同时有 GET 与 POST；两者都受并发闸门 `MAX_CONCURRENT_PROBE = 3` 限制。
+
+### 4.3.1 能力矩阵 `capabilities` 语义（F1/F2）
+
+`/api/selfcheck` 与 `/api/app` 都以**加法字段**下发同一个 `capabilities` 对象（唯一出处
+`core/selfcheck.py::capabilities()`；UI 只消费、不自己推断缺件）：
+
+```json
+{"probe": true, "offline": false, "live": false, "passive": false,
+ "reports": true, "settings": true,
+ "missing": {"offline": "tshark", "live": "tshark|npcap", "passive": "tshark|scapy"},
+ "scapy": false}
+```
+
+| 键 | 语义 | 约束 |
+|---|---|---|
+| `probe` | 连通与速度测试 | **恒 true**（只用标准库 socket） |
+| `offline` | 分析抓包文件 | = tshark 可用；不需要 Npcap |
+| `live` | 实时抓包（scan/live） | = tshark **且** Npcap |
+| `passive` | 通信观察 | = tshark **或** 内置 scapy；lite 包无 scapy 时等价于 tshark |
+| `reports` / `settings` | 报告与导出 / 设置 | **恒 true** |
+| `missing[mode]` | 该模式不可用的原因机器码 | `tshark` / `npcap` / `tshark|npcap` / `tshark|scapy`；只列不可用模式 |
+| `scapy` | 被动监听是否有 scapy 引擎 | 复用 `passive.engine_status()` |
+
+**`admin` 不是能力硬门槛**：非管理员仍走 C2 的按需提权权限卡，不因 admin 置灰。
+每项 `checks[]` 还带 `impact`（缺了会怎样）与 `doc_url`（相对文档路径）；
+`tshark` 的 `fix_url` 指向 Wireshark 下载页，`npcap` 指向 Npcap 下载页。
+**旧载荷兼容**：`/api/selfcheck` 没有 `capabilities` 时，UI 把 `CAPS` 置 null，退回
+「仅管理员锁」的 C2 行为，不崩、不误灰；`checks` 缺 `capabilities` 不能拿来自己推断。
 
 ### 4.4.1 CLI `--json` 的结论结构
 
@@ -500,7 +528,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `core/rules/__init__.py` | 规则包标记（渐进迁移中） |
 | `core/rules/legacy_map.py` | 旧 `rows[]` → `Finding` 的迁移桥（临时件；当前唯一规则相关实现） |
 | `core/sanitize.py` | 诊断包脱敏：IP/域名/用户名/MAC/路径 → 不可还原伪名（幂等） |
-| `core/selfcheck.py` | 首屏准备检查：五项只读环境检查（Python/tshark/Npcap/端口/管理员）+ `config/ui-first-run.json` 标记读写；不触发 UAC、不抓包 |
+| `core/selfcheck.py` | 首屏准备检查：五项只读环境检查（Python/tshark/Npcap/端口/管理员）+ `capabilities()` 能力矩阵（UI 置灰的唯一依据）+ `config/ui-first-run.json` 标记读写；不触发 UAC、不抓包 |
 | `core/server.py` | 本地 Web UI + HTTP API：路由、Host/Origin 校验、任务槽、单实例、退出 |
 | `core/tshark.py` | tshark/dumpcap 定位与执行封装（`TSHARK_PATH`、便携路径、网卡探测） |
 | `core/verdict.py` | 判定：`rows/meta/metrics/summary` → level/四层状态/问题明细/证据充分性 |
@@ -517,8 +545,8 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/build_release.py` | 三种发布包；lite 包现场编译 `NetDiag.exe` 并放进 zip 根 |
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
-| `ui/index.html` | 单文件控制台（3,300+ 行；无构建链、无前端框架；首屏自检/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 34 个 `test_*.py`（722 条）+ `tests/selftest.py` 人工自检脚本 |
+| `ui/index.html` | 单文件控制台（4,000+ 行；无构建链、无前端框架；首屏自检/能力置灰/说明卡/权限卡/表单保留都在这一个文件里） |
+| `tests/` | 35 个 `test_*.py`（762 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -540,7 +568,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ❌ 历史（v0.3.0） |
 | `docs/release-v0.2.0.md` | v0.2.0 发布资产与法务修正回合证据 | ❌ 历史（v0.2.0） |
 | `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
-| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检五项 / 表单保留 / 常见启动失败 | ✅ 当前（C2） |
+| `docs/startup.md` | 三个入口 / 启动不提权 / 按需提权权限卡 / 首屏自检五项 / 能力置灰与说明卡 / 表单保留 / 常见启动失败 | ✅ 当前（C2 + F2） |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/path-probe.md` | 路径剖面（MTR）：逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2） |
