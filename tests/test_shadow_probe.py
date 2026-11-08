@@ -347,6 +347,99 @@ class ProbeLifecycleTest(unittest.TestCase):
             self.assertNotIn(needle, source)
 
 
+# ---------------------------------------------------------------- V4 接线
+
+
+class CaptureLiveShadowWiringTest(unittest.TestCase):
+    """capture_live(shadow=True)：BPF 必须 AND 合并排除式，账本随结果返回。"""
+
+    IFACES = [{"index": 5, "name": r"\Device\NPF_{W} (WLAN)", "raw": "5"}]
+
+    def test_shadow_true_merges_bpf_and_returns_ledger(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        captures = Path(tmp.name) / "captures"
+        filters: list[str] = []
+
+        def fake_run(args, timeout=180):
+            if "-w" in args:
+                if "-f" in args:
+                    filters.append(args[args.index("-f") + 1])
+                pcap = Path(args[args.index("-w") + 1])
+                pcap.parent.mkdir(parents=True, exist_ok=True)
+                pcap.write_bytes(b"\x0a\x0d\x0d\x0a" + b"\x00" * 200)
+                time.sleep(0.3)          # 给探针线程留出首轮发送窗口
+                return 0, "", ""
+            if "-r" in args:
+                return 0, "1\n", ""
+            return 0, "", ""
+
+        logs: list[str] = []
+        with mock.patch.object(diagnose, "CAPTURES", captures), \
+                mock.patch.object(diagnose, "_wait_file_stable", return_value=True), \
+                mock.patch.object(tshark, "find_tshark",
+                                  return_value=Path("tshark.exe")), \
+                mock.patch.object(tshark, "npcap_installed", return_value=True), \
+                mock.patch.object(tshark, "list_interfaces",
+                                  return_value=list(self.IFACES)), \
+                mock.patch.object(tshark, "run", side_effect=fake_run), \
+                mock.patch.object(diagnose.pathprobe, "discover_targets",
+                                  return_value={"gateway": GW}), \
+                mock.patch.object(diagnose.pathprobe, "send_probe",
+                                  return_value=(True, 1.0, GW, "")):
+            result = diagnose.capture_live(target="8.8.8.8", duration=3,
+                                           interface="5", shadow=True,
+                                           logger=logs.append)
+
+        self.assertTrue(result.get("ok"), result)
+        expected = (f"(host 8.8.8.8) and "
+                    f"({pathprobe.exclusion_bpf([pathprobe.ProbeKind.ICMP])})")
+        self.assertEqual(filters, [expected],
+                         "用户 BPF 必须与探针排除式 AND 合并（只加排除式或只加用户式都不对）")
+        self.assertIn("合并探针排除式", "\n".join(logs))
+        probe = result.get("probe") or {}
+        self.assertGreaterEqual(probe["baseline"]["probe_count"], 1,
+                                "抓包期间必须真的跑过至少一轮探针")
+        self.assertEqual(probe["baseline"]["roles"][0]["role"], "gateway")
+
+    def test_shadow_true_does_not_merge_when_no_targets(self):
+        """拿不到网关/目标时：不合并过滤、不注入 probe，抓包照常。"""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        captures = Path(tmp.name) / "captures"
+        filters: list[str] = []
+
+        def fake_run(args, timeout=180):
+            if "-w" in args:
+                if "-f" in args:
+                    filters.append(args[args.index("-f") + 1])
+                pcap = Path(args[args.index("-w") + 1])
+                pcap.parent.mkdir(parents=True, exist_ok=True)
+                pcap.write_bytes(b"\x0a\x0d\x0d\x0a" + b"\x00" * 200)
+                return 0, "", ""
+            if "-r" in args:
+                return 0, "1\n", ""
+            return 0, "", ""
+
+        with mock.patch.object(diagnose, "CAPTURES", captures), \
+                mock.patch.object(diagnose, "_wait_file_stable", return_value=True), \
+                mock.patch.object(tshark, "find_tshark",
+                                  return_value=Path("tshark.exe")), \
+                mock.patch.object(tshark, "npcap_installed", return_value=True), \
+                mock.patch.object(tshark, "list_interfaces",
+                                  return_value=list(self.IFACES)), \
+                mock.patch.object(tshark, "run", side_effect=fake_run), \
+                mock.patch.object(diagnose.pathprobe, "discover_targets",
+                                  return_value={}):
+            result = diagnose.capture_live(target="8.8.8.8", duration=3,
+                                           interface="5", shadow=True,
+                                           logger=lambda _m: None)
+
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(filters, ["host 8.8.8.8"], "没有探针目标时不许改用户过滤器")
+        self.assertNotIn("probe", result)
+
+
 # ---------------------------------------------------------------- V4 隔离
 
 
