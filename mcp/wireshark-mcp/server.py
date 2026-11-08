@@ -24,14 +24,52 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "core"))
 
 import bootstrap  # noqa: E402
+import conclusion  # noqa: E402
 import diagnose  # noqa: E402
 import passive  # noqa: E402
 import probe  # noqa: E402
 import report  # noqa: E402
 import tshark  # noqa: E402
+import verdict  # noqa: E402
 
 SERVER_INFO = {"name": "wireshark-mcp", "version": "1.0.0"}
 PROTOCOL = "2024-11-05"
+
+#: 用户定稿措辞：只展示结论、不读边界即误用。三条诊断工具共用。
+BOUNDARY_WORDING = "返回的结论必须连同边界字段一起读取，单独展示结论视为误用"
+
+#: 结论对象的输出 Schema（本地常量，不引第三方依赖）。
+#: 三个边界字段是 ``required``：MCP 客户端/Agent 只要解析 JSON 就会看到它们，
+#: 单独拿 ``conclusion`` 字段展示在 schema 层就属于「残缺读取」。
+CONCLUSION_SCHEMA = {
+    "type": "object",
+    "required": ["conclusion", "basis", "coverage", "not_covered",
+                 "confidence", "confidence_level", "key_limit"],
+    "properties": {
+        "conclusion": {"type": "string", "minLength": 1},
+        "basis": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "coverage": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "not_covered": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "confidence_level": {"type": "string", "enum": ["高", "中", "低"]},
+        "key_limit": {"type": "string", "minLength": 1},
+    },
+    "additionalProperties": True,
+}
+
+#: 诊断类工具的统一返回结构：``{ok, conclusion, markdown, summary?}``。
+DIAG_OUTPUT_SCHEMA = {
+    "type": "object",
+    "required": ["ok", "conclusion", "markdown"],
+    "properties": {
+        "ok": {"type": "boolean"},
+        "conclusion": {"$ref": "#/$defs/conclusion"},
+        "markdown": {"type": "string", "minLength": 1},
+        "summary": {"type": "object"},
+    },
+    "additionalProperties": True,
+    "$defs": {"conclusion": CONCLUSION_SCHEMA},
+}
 
 TOOLS = [
     {
@@ -43,7 +81,7 @@ TOOLS = [
         "name": "capture_live_packets",
         "description": ("对指定目标实时抓包并做分层故障定位：L2 链路 / L3 网络 / L4 传输 / L7 应用，"
                         "给出「哪一层、哪个协议、哪个对端、怎么处理」的 Markdown 报告。"
-                        "target_ip 为空时抓全网。"),
+                        "target_ip 为空时抓全网。" + BOUNDARY_WORDING + "。"),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -53,10 +91,12 @@ TOOLS = [
             },
             "additionalProperties": False,
         },
+        "outputSchema": DIAG_OUTPUT_SCHEMA,
     },
     {
         "name": "scan_network_threats",
-        "description": "不做目标过滤，抓取本机网卡全部流量并做分层故障定位（延迟/丢包/解析/服务响应）。",
+        "description": ("不做目标过滤，抓取本机网卡全部流量并做分层故障定位（延迟/丢包/解析/服务响应）。"
+                        + BOUNDARY_WORDING + "。"),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -65,10 +105,12 @@ TOOLS = [
             },
             "additionalProperties": False,
         },
+        "outputSchema": DIAG_OUTPUT_SCHEMA,
     },
     {
         "name": "analyze_pcap",
-        "description": "分析抓包文件（离线分析已有 pcap/pcapng），输出同样格式的诊断报告。权限受限无法实时抓包时使用。",
+        "description": ("分析抓包文件（离线分析已有 pcap/pcapng），输出同样格式的诊断报告。"
+                        "权限受限无法实时抓包时使用。" + BOUNDARY_WORDING + "。"),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -78,6 +120,7 @@ TOOLS = [
             "required": ["pcap_file"],
             "additionalProperties": False,
         },
+        "outputSchema": DIAG_OUTPUT_SCHEMA,
     },
     {
         "name": "probe_link",
@@ -142,6 +185,127 @@ def _err(msg: str) -> dict:
     return {"content": [{"type": "text", "text": f"错误：{msg}"}], "isError": True}
 
 
+def _type_ok(value, expected: str) -> bool:
+    """最小类型检查（只覆盖本文件 Schema 用到的类型，不引 jsonschema）。"""
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return True
+
+
+def _resolve_ref(schema: dict, root: dict) -> dict:
+    """解析本地 ``#/$defs/name`` 引用；解析不到时返回空 schema（由调用方记为错误）。"""
+    ref = schema.get("$ref")
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        return schema
+    node: object = root
+    for part in ref[2:].split("/"):
+        if not isinstance(node, dict) or part not in node:
+            return {}
+        node = node[part]
+    return node if isinstance(node, dict) else {}
+
+
+def _validate(value, schema: dict, path: str, root: dict, errors: list[str]) -> None:
+    """递归校验一个值；把 ``路径: 原因`` 追加进 ``errors``，不抛异常。"""
+    schema = _resolve_ref(schema, root)
+    if not schema:
+        errors.append(f"{path}: Schema 引用无法解析")
+        return
+    expected = schema.get("type")
+    if expected and not _type_ok(value, expected):
+        errors.append(f"{path}: 类型应为 {expected}，实际 {type(value).__name__}")
+        return
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path}: 取值必须是 {schema['enum']} 之一，实际 {value!r}")
+    if isinstance(value, str) and "minLength" in schema and len(value) < schema["minLength"]:
+        errors.append(f"{path}: 不能为空（minLength={schema['minLength']}）")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            errors.append(f"{path}: 不能小于 {schema['minimum']}，实际 {value!r}")
+        if "maximum" in schema and value > schema["maximum"]:
+            errors.append(f"{path}: 不能大于 {schema['maximum']}，实际 {value!r}")
+    if isinstance(value, list):
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            errors.append(f"{path}: 至少需要 {schema['minItems']} 项，实际 {len(value)} 项")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                _validate(item, item_schema, f"{path}[{index}]", root, errors)
+    if isinstance(value, dict):
+        required = schema.get("required") or []
+        for key in required:
+            if key not in value:
+                errors.append(f"{path}.{key}: 缺少 required 字段")
+        properties = schema.get("properties") or {}
+        for key, item in value.items():
+            if key in properties:
+                _validate(item, properties[key], f"{path}.{key}", root, errors)
+            elif schema.get("additionalProperties") is False:
+                errors.append(f"{path}.{key}: 不允许的额外字段")
+
+
+def validate_payload(payload, schema: dict = DIAG_OUTPUT_SCHEMA) -> list[str]:
+    """用本地最小 JSON Schema 校验器校验输出（不引依赖、不抛异常）。
+
+    覆盖本文件实际用到的关键字：``type`` / ``required`` / ``properties`` /
+    ``items`` / ``minItems`` / ``minLength`` / ``enum`` / ``minimum`` / ``maximum`` /
+    ``additionalProperties`` / ``$ref`` / ``$defs``。**缺 required 字段一定会被报出来**。
+
+    Args:
+        payload: 待校验的 Python 对象（通常是诊断返回的 dict）。
+        schema: 根 Schema；默认 :data:`DIAG_OUTPUT_SCHEMA`。
+
+    Returns:
+        list[str]: 错误列表；空列表表示通过。每条错误都是可操作的中文路径说明。
+    """
+    errors: list[str] = []
+    _validate(payload, schema, "$", schema, errors)
+    return errors
+
+
+def build_diagnostic_payload(result: dict) -> dict:
+    """把一次诊断结果转成 MCP 结构化返回（结论对象与 CLI/报告/MCP 同源）。
+
+    Args:
+        result: ``diagnose.run_scan`` 的成功结果（含 ``summary`` / ``meta`` /
+            ``rows`` / 可选 ``verdict``）。
+
+    Returns:
+        dict: 键 ``ok``（True）/ ``conclusion``（:func:`core.conclusion.build_conclusion`
+        的 7 键对象，``basis`` / ``coverage`` / ``not_covered`` 必填）/ ``markdown``
+        （同一报告的 Markdown 正文）/ ``summary``（摘要，便于 Agent 少读大段正文）。
+        结论只在这里构造一次，三个诊断工具共用。
+    """
+    verdict_data = result.get("verdict")
+    if not isinstance(verdict_data, dict) or not verdict_data:
+        verdict_data = verdict.build(result)
+    block = conclusion.build_conclusion(result, verdict_data)
+    return {
+        "ok": True,
+        "conclusion": block,
+        "markdown": report.render_markdown(result, verdict_data),
+        "summary": result.get("summary", {}),
+    }
+
+
+def _diag_text(result: dict) -> dict:
+    """诊断类工具的返回：先校验 required，缺字段就返回错误，绝不静默降级。"""
+    payload = build_diagnostic_payload(result)
+    errors = validate_payload(payload)
+    if errors:
+        return _err("MCP 输出校验失败（缺 required 或类型不符，已拒绝返回）："
+                    + "；".join(errors))
+    return _text(payload)
+
+
 def _flows_markdown(res: dict) -> str:
     """把会话表转成适合直接读的 Markdown。"""
     s = res["summary"]
@@ -189,7 +353,7 @@ def call_tool(name: str, args: dict) -> dict:
         if not res.get("ok"):
             hint = " 可改用 analyze_pcap 分析抓包文件。" if res.get("degraded") else ""
             return _err(res.get("error", "抓包失败") + hint)
-        return _text(report.render_markdown(res))
+        return _diag_text(res)
 
     if name == "scan_network_threats":
         res = diagnose.run_scan(target="",
@@ -198,7 +362,7 @@ def call_tool(name: str, args: dict) -> dict:
         if not res.get("ok"):
             hint = " 可改用 analyze_pcap 分析抓包文件。" if res.get("degraded") else ""
             return _err(res.get("error", "扫描失败") + hint)
-        return _text(report.render_markdown(res))
+        return _diag_text(res)
 
     if name == "probe_link":
         target = (args.get("target") or "").strip()
@@ -226,7 +390,7 @@ def call_tool(name: str, args: dict) -> dict:
         res = diagnose.run_scan(target=args.get("target", ""), pcap=pcap, logger=lambda m: None)
         if not res.get("ok"):
             return _err(res.get("error", "分析失败"))
-        return _text(report.render_markdown(res))
+        return _diag_text(res)
 
     return _err(f"未知工具: {name}")
 

@@ -20,6 +20,9 @@
 并回答四个问题：**哪一层坏了 / 哪个协议 / 哪个对端 / 下一步做什么**。
 
 - **L2–L7 四层定位**：每层都给出结论、指标和帧号证据，而不是一句“网络异常”。
+- **结论自带依据与边界（六出口一致）**：UI / CLI / 报告 / 诊断包 / 取证单 / MCP 共用同一结论对象；
+  「复制给二线」和导出整块包含依据、本次覆盖、明确未覆盖与置信等级，不是只给一句结论
+  （见 [`docs/conclusion-boundary.md`](docs/conclusion-boundary.md)）。
 - **重传方向归因**：有 dup-ACK 证据时才判定上行 / 下行丢包；证据不足不硬编方向。
 - **证据不足就说证据不足**：没抓到样本 ≠ 网络正常，四层状态里会明确显示“无样本”。
 
@@ -176,10 +179,10 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 
 | 项目 | 实测值 | 出处 / 复现方式 |
 |---|---|---|
-| 自动化测试 | **620** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
-| 测试文件 | **32** 个（31 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
+| 自动化测试 | **719** 项；本机 `OK (skipped=2)`，干净 checkout `OK (skipped=27)` | `python -m unittest discover -s tests` |
+| 测试文件 | **34** 个（33 个 `test_*.py` + `selftest.py`） | `git ls-files 'tests/*.py'` |
 | CI | **2 个 job**：Windows 语法 + 启动器契约；Ubuntu 注释覆盖率 + 文档同步 | [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) |
-| 注释覆盖率 | **292 / 292 = 100.0%**，32 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
+| 注释覆盖率 | **302 / 302 = 100.0%**，33 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
 | 判定可复现 | demo + 9 个确定性样本 = **20 / 20** 个产物逐字节相同 | `captures/faults_demo.pcap` + `scaffold/tests/fixtures/gen_pcap.py` |
 | API 契约 | **12 个 POST + 13 个 GET** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
 | 发布包 | v0.3.0 lite：**169 个受控文件 / 974,570 B**（解压后 2,590,174 B） | [`docs/release-v0.3.0.md`](docs/release-v0.3.0.md) §2–§3 |
@@ -211,11 +214,11 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 NetDiag/
 ├── NetDiag.exe                  # lite 包入口（构建产物，不入库；源码在 launcher/）
 ├── start.bat / NetDiag.vbs      # Python 回退 / 兼容入口：优先包内 Python，回退系统 python / py -3
-├── core/                        # 31 个 Python 模块：采集 / 解析 / 判定 / 报告 / 服务
+├── core/                        # 32 个 Python 模块：采集 / 解析 / 判定 / 报告 / 服务
 ├── ui/index.html                # 单文件控制台（无构建链、无前端框架）
 ├── mcp/wireshark-mcp/server.py  # MCP stdio 服务，7 个工具
 ├── scripts/                     # 发布打包 / 启动器编译 / API 文档生成 / 特征导出 / 图标生成
-├── tests/                       # 32 个测试文件，620 条用例
+├── tests/                       # 34 个测试文件，719 条用例
 ├── captures/faults_demo.pcap    # 首次试跑样本
 ├── reports/faults_demo.md|json  # 入库报告快照
 ├── docs/                        # 交接、API、日志、许可、构建、发布记录

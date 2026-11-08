@@ -657,7 +657,23 @@
       "medium": "探测/逐跳基于 ICMP，不代表 TCP 路径",
       "low": "本次无有效样本或采样异常"
     },
-    "unknown": "未知（原因：{reason}）"
+    "unknown": "未知（原因：{reason}）",
+    "report_line": "报告标识：{report_id}",
+    "ui_title": "结论与边界",
+    "ui_kicker": "整块阅读 · 不可折叠",
+    "ui_conclusion_label": "结论",
+    "ui_basis_heading": "依据",
+    "ui_coverage_heading": "本次覆盖",
+    "ui_not_covered_heading": "明确未覆盖",
+    "ui_confidence_line": "置信度：{level}（{confidence:.2f}） · 关键边界：{key_limit}",
+    "btn_copy": "复制给二线",
+    "btn_export_md": "导出结论（.md）",
+    "btn_export_json": "导出结论（.json）",
+    "copy_ok": "已复制 ✓",
+    "copy_fail": "复制失败，请手动选择文本",
+    "export_fail": "导出失败：{reason}",
+    "fallback_unknown": "未知（原因：旧数据缺少边界字段）",
+    "fallback_title": "旧数据兼容（低置信）"
   },
   "degraded_report": {
     "title": "# NetDiag · 网络矩阵 · 降级结论报告",

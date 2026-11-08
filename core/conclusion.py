@@ -784,14 +784,35 @@ def _normalized(block: dict) -> dict:
     }
 
 
-def render_conclusion_markdown(block: dict) -> str:
-    """把结论边界对象渲染成 Markdown 整块（报告 / 取证单共用）。
+def _report_line(report_id: str | None) -> str:
+    """渲染「报告标识」尾注（只给导出/复制用；报告正文不传，保持逐字节不变）。
+
+    Args:
+        report_id: 报告文件名 + 生成时间等可追溯标识；空值表示不追加。
+
+    Returns:
+        str: 非空时返回 copy 表 ``conclusion.report_line`` 的填充结果，否则空串。
+    """
+    text = str(report_id or "").strip()
+    if not text:
+        return ""
+    raw = _raw("conclusion", "report_line") or "报告标识：{report_id}"
+    try:
+        return raw.format(report_id=text).strip()
+    except (KeyError, IndexError, ValueError):
+        return f"报告标识：{text}"
+
+
+def render_conclusion_markdown(block: dict, report_id: str | None = None) -> str:
+    """把结论边界对象渲染成 Markdown 整块（报告 / 取证单 / 导出共用）。
 
     输出固定包含：结论句、依据、本次覆盖、明确未覆盖、置信等级/关键边界。
     任何字段缺失都会补「未知」；函数**永远不返回空串**。
 
     Args:
         block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
+        report_id: 可选的报告标识（文件名 + 生成时间）。省略时不追加任何行 ——
+            报告正文必须保持逐字节不变，只有复制/导出才带上标识。
 
     Returns:
         str: 以 ``### 结论与边界`` 开头、以单个换行结尾的 Markdown 文本。
@@ -817,18 +838,23 @@ def render_conclusion_markdown(block: dict) -> str:
         tail = (f"**置信度**：{data['confidence_level']}"
                 f"（{data['confidence']:.2f}）　**关键边界**：{data['key_limit']}")
     lines.append(tail)
+    extra = _report_line(report_id)
+    if extra:
+        lines.append(extra)
     return "\n".join(lines) + "\n"
 
 
-def render_conclusion_text(block: dict) -> str:
+def render_conclusion_text(block: dict, report_id: str | None = None) -> str:
     """把结论边界对象渲染成纯文本整块（复制给二线 / 发微信 / 工单）。
 
     与 :func:`render_conclusion_markdown` 同源，但不含 Markdown 符号
     （无 ``#`` 标题、无 ``|`` 表格），并显式列出「结论 + 依据 + 本次覆盖 +
-    明确未覆盖 + 置信等级/关键边界」。
+    明确未覆盖 + 置信等级/关键边界」。传 ``report_id`` 时在末尾追加报告标识，
+    让二线能手查到对应的 `.md` / `.json` 报告。
 
     Args:
         block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
+        report_id: 可选的报告标识（文件名 + 生成时间）；省略时不追加。
 
     Returns:
         str: 纯文本整块（以单个换行结尾，保证非空）。
@@ -858,6 +884,9 @@ def render_conclusion_text(block: dict) -> str:
         lines.append(_label("text_key_limit").format(key_limit=data["key_limit"]))
     except (KeyError, IndexError, ValueError):
         lines.append("关键边界：" + data["key_limit"])
+    extra = _report_line(report_id)
+    if extra:
+        lines.append(extra)
     return "\n".join(lines) + "\n"
 
 

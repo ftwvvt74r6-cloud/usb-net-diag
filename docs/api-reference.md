@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**33** 个（有模块说明 33 个）
-- 公开符号：**298** 个（有 docstring 298 个，合格 298 个）
+- 公开符号：**302** 个（有 docstring 302 个，合格 302 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -519,8 +519,8 @@ Returns:
 |---|---|---|---|
 | `derive_confidence` | function | 520 | ✅ |
 | `build_conclusion` | function | 654 | ✅ |
-| `render_conclusion_markdown` | function | 787 | ✅ |
-| `render_conclusion_text` | function | 823 | ✅ |
+| `render_conclusion_markdown` | function | 806 | ✅ |
+| `render_conclusion_text` | function | 847 | ✅ |
 
 ### `derive_confidence`
 
@@ -576,17 +576,19 @@ Returns:
 ### `render_conclusion_markdown`
 
 ```python
-def render_conclusion_markdown(block: dict) -> str
+def render_conclusion_markdown(block: dict, report_id: str | None=None) -> str
 ```
 
 ```text
-把结论边界对象渲染成 Markdown 整块（报告 / 取证单共用）。
+把结论边界对象渲染成 Markdown 整块（报告 / 取证单 / 导出共用）。
 
 输出固定包含：结论句、依据、本次覆盖、明确未覆盖、置信等级/关键边界。
 任何字段缺失都会补「未知」；函数**永远不返回空串**。
 
 Args:
     block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
+    report_id: 可选的报告标识（文件名 + 生成时间）。省略时不追加任何行 ——
+        报告正文必须保持逐字节不变，只有复制/导出才带上标识。
 
 Returns:
     str: 以 ``### 结论与边界`` 开头、以单个换行结尾的 Markdown 文本。
@@ -595,7 +597,7 @@ Returns:
 ### `render_conclusion_text`
 
 ```python
-def render_conclusion_text(block: dict) -> str
+def render_conclusion_text(block: dict, report_id: str | None=None) -> str
 ```
 
 ```text
@@ -603,10 +605,12 @@ def render_conclusion_text(block: dict) -> str
 
 与 :func:`render_conclusion_markdown` 同源，但不含 Markdown 符号
 （无 ``#`` 标题、无 ``|`` 表格），并显式列出「结论 + 依据 + 本次覆盖 +
-明确未覆盖 + 置信等级/关键边界」。
+明确未覆盖 + 置信等级/关键边界」。传 ``report_id`` 时在末尾追加报告标识，
+让二线能手查到对应的 `.md` / `.json` 报告。
 
 Args:
     block: :func:`build_conclusion` 的返回值（或结构相同的对象）。
+    report_id: 可选的报告标识（文件名 + 生成时间）；省略时不追加。
 
 Returns:
     str: 纯文本整块（以单个换行结尾，保证非空）。
@@ -5100,27 +5104,29 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 131 | ✅ |
-| `request_quit` | function | 136 | ✅ |
-| `cleanup_pid` | function | 184 | ✅ |
-| `BodyTooLarge` | class | 194 | ✅ |
-| `doctor_cached` | function | 273 | ✅ |
-| `log` | function | 369 | ✅ |
-| `evidence_payload` | function | 465 | ✅ |
-| `start_job` | function | 629 | ✅ |
-| `report_index` | function | 690 | ✅ |
-| `request_elevation` | function | 724 | ✅ |
-| `engine_info` | function | 763 | ✅ |
-| `passive_start` | function | 806 | ✅ |
-| `passive_status` | function | 841 | ✅ |
-| `link_actions` | function | 915 | ✅ |
-| `Handler` | class | 962 | ✅ |
-| `Handler.log_message` | method | 1008 | ✅ |
-| `Handler.do_GET` | method | 1146 | ✅ |
-| `Handler.do_POST` | method | 1163 | ✅ |
-| `DiagServer` | class | 1402 | ✅ |
-| `create_server` | function | 1414 | ✅ |
-| `main` | function | 1461 | ✅ |
+| `touch` | function | 132 | ✅ |
+| `request_quit` | function | 137 | ✅ |
+| `cleanup_pid` | function | 185 | ✅ |
+| `BodyTooLarge` | class | 195 | ✅ |
+| `doctor_cached` | function | 274 | ✅ |
+| `log` | function | 370 | ✅ |
+| `evidence_payload` | function | 466 | ✅ |
+| `conclusion_report_id` | function | 590 | ✅ |
+| `build_status_conclusion` | function | 621 | ✅ |
+| `start_job` | function | 764 | ✅ |
+| `report_index` | function | 825 | ✅ |
+| `request_elevation` | function | 859 | ✅ |
+| `engine_info` | function | 898 | ✅ |
+| `passive_start` | function | 941 | ✅ |
+| `passive_status` | function | 976 | ✅ |
+| `link_actions` | function | 1050 | ✅ |
+| `Handler` | class | 1097 | ✅ |
+| `Handler.log_message` | method | 1143 | ✅ |
+| `Handler.do_GET` | method | 1281 | ✅ |
+| `Handler.do_POST` | method | 1298 | ✅ |
+| `DiagServer` | class | 1544 | ✅ |
+| `create_server` | function | 1556 | ✅ |
+| `main` | function | 1603 | ✅ |
 
 ### `touch`
 
@@ -5235,6 +5241,42 @@ Returns:
     dict: 成功 ``{"ok": True, "fmt", "full", "dimensions": [维度机器码],
     "content": str}``；``full=False`` 且没有结果 / 本次不需要取证时
     ``{"ok": False, "error": "..."}``（错误可直接展示给用户）。
+```
+
+### `conclusion_report_id`
+
+```python
+def conclusion_report_id(result: dict) -> str
+```
+
+```text
+生成给人看的「报告标识」（复制给二线 / 导出时用于追溯）。
+
+优先用真实落盘文件名（``.md`` / ``.json``），退化为抓包文件名 + 生成时间；
+都没有时返回「本次诊断（未落盘报告）」。只在状态响应/导出里出现，不写进报告。
+
+Args:
+    result: 诊断结果字典（读 ``report`` / ``meta``）。
+
+Returns:
+    str: 非空标识，如 ``faults_demo.md / faults_demo.json · 2026-11-07 21:49:03``。
+```
+
+### `build_status_conclusion`
+
+```python
+def build_status_conclusion(result: dict) -> dict
+```
+
+```text
+为 ``/api/status`` 构造结论边界对象（与 CLI/报告/MCP 同一 ``build_conclusion``）。
+
+Args:
+    result: ``JOB["result"]``（正常或 0 包降级结果）。
+
+Returns:
+    dict: :func:`core.conclusion.build_conclusion` 的 7 键对象；任何字段填充
+        失败都由渲染器显式降级为「未知（原因：…）」+ 低置信，不返回空块。
 ```
 
 ### `start_job`
@@ -5851,9 +5893,52 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `call_tool` | function | 161 | ✅ |
-| `handle` | function | 234 | ✅ |
-| `main` | function | 275 | ✅ |
+| `validate_payload` | function | 255 | ✅ |
+| `build_diagnostic_payload` | function | 274 | ✅ |
+| `call_tool` | function | 325 | ✅ |
+| `handle` | function | 398 | ✅ |
+| `main` | function | 439 | ✅ |
+
+### `validate_payload`
+
+```python
+def validate_payload(payload, schema: dict=DIAG_OUTPUT_SCHEMA) -> list[str]
+```
+
+```text
+用本地最小 JSON Schema 校验器校验输出（不引依赖、不抛异常）。
+
+覆盖本文件实际用到的关键字：``type`` / ``required`` / ``properties`` /
+``items`` / ``minItems`` / ``minLength`` / ``enum`` / ``minimum`` / ``maximum`` /
+``additionalProperties`` / ``$ref`` / ``$defs``。**缺 required 字段一定会被报出来**。
+
+Args:
+    payload: 待校验的 Python 对象（通常是诊断返回的 dict）。
+    schema: 根 Schema；默认 :data:`DIAG_OUTPUT_SCHEMA`。
+
+Returns:
+    list[str]: 错误列表；空列表表示通过。每条错误都是可操作的中文路径说明。
+```
+
+### `build_diagnostic_payload`
+
+```python
+def build_diagnostic_payload(result: dict) -> dict
+```
+
+```text
+把一次诊断结果转成 MCP 结构化返回（结论对象与 CLI/报告/MCP 同源）。
+
+Args:
+    result: ``diagnose.run_scan`` 的成功结果（含 ``summary`` / ``meta`` /
+        ``rows`` / 可选 ``verdict``）。
+
+Returns:
+    dict: 键 ``ok``（True）/ ``conclusion``（:func:`core.conclusion.build_conclusion`
+    的 7 键对象，``basis`` / ``coverage`` / ``not_covered`` 必填）/ ``markdown``
+    （同一报告的 Markdown 正文）/ ``summary``（摘要，便于 Agent 少读大段正文）。
+    结论只在这里构造一次，三个诊断工具共用。
+```
 
 ### `call_tool`
 
