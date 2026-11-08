@@ -2684,40 +2684,40 @@ Returns:
 | `degraded_hops` | function | 614 | ✅ |
 | `first_degraded_hop` | function | 647 | ✅ |
 | `looks_like_tun` | function | 666 | ✅ |
-| `summarize_path` | function | 699 | ✅ |
-| `exclusion_bpf` | function | 784 | ✅ |
-| `exclusion_display_filter` | function | 808 | ✅ |
-| `probe_marker_display_filter` | function | 829 | ✅ |
-| `path_exclusion_display_filter` | function | 854 | ✅ |
-| `discover_targets` | function | 933 | ✅ |
-| `plan` | function | 998 | ✅ |
-| `shadow_specs` | function | 1024 | ✅ |
-| `rounds_for` | function | 1045 | ✅ |
-| `probe_len` | function | 1062 | ✅ |
-| `probe_src_port` | function | 1074 | ✅ |
-| `send_probe` | function | 1091 | ✅ |
-| `ShadowProber` | class | 1168 | ✅ |
-| `ShadowProber.start` | method | 1195 | ✅ |
-| `ShadowProber.stop` | method | 1205 | ✅ |
-| `ShadowProber.join` | method | 1209 | ✅ |
-| `ShadowProber.run_round` | method | 1224 | ✅ |
-| `ShadowProber.exclusion_bpf` | method | 1268 | ✅ |
-| `ShadowProber.exclusion_display_filter` | method | 1277 | ✅ |
-| `ShadowProber.marker_display_filter` | method | 1286 | ✅ |
-| `ShadowProber.sent_count` | method | 1296 | ✅ |
-| `ShadowProber.snapshot` | method | 1305 | ✅ |
-| `aggregate_records` | function | 1326 | ✅ |
-| `count_marked_packets` | function | 1394 | ✅ |
-| `count_time_exceeded_packets` | function | 1425 | ✅ |
-| `probe_tcp_reachable` | function | 1491 | ✅ |
-| `check_target_port` | function | 1526 | ✅ |
-| `run` | function | 1734 | ✅ |
-| `PathProfiler` | class | 1864 | ✅ |
-| `PathProfiler.start` | method | 1899 | ✅ |
-| `PathProfiler.stop` | method | 1910 | ✅ |
-| `PathProfiler.join` | method | 1914 | ✅ |
-| `PathProfiler.should_stop` | method | 1929 | ✅ |
-| `PathProfiler.snapshot` | method | 1949 | ✅ |
+| `summarize_path` | function | 713 | ✅ |
+| `exclusion_bpf` | function | 798 | ✅ |
+| `exclusion_display_filter` | function | 822 | ✅ |
+| `probe_marker_display_filter` | function | 843 | ✅ |
+| `path_exclusion_display_filter` | function | 868 | ✅ |
+| `discover_targets` | function | 947 | ✅ |
+| `plan` | function | 1012 | ✅ |
+| `shadow_specs` | function | 1038 | ✅ |
+| `rounds_for` | function | 1059 | ✅ |
+| `probe_len` | function | 1076 | ✅ |
+| `probe_src_port` | function | 1088 | ✅ |
+| `send_probe` | function | 1105 | ✅ |
+| `ShadowProber` | class | 1182 | ✅ |
+| `ShadowProber.start` | method | 1209 | ✅ |
+| `ShadowProber.stop` | method | 1219 | ✅ |
+| `ShadowProber.join` | method | 1223 | ✅ |
+| `ShadowProber.run_round` | method | 1238 | ✅ |
+| `ShadowProber.exclusion_bpf` | method | 1282 | ✅ |
+| `ShadowProber.exclusion_display_filter` | method | 1291 | ✅ |
+| `ShadowProber.marker_display_filter` | method | 1300 | ✅ |
+| `ShadowProber.sent_count` | method | 1310 | ✅ |
+| `ShadowProber.snapshot` | method | 1319 | ✅ |
+| `aggregate_records` | function | 1340 | ✅ |
+| `count_marked_packets` | function | 1408 | ✅ |
+| `count_time_exceeded_packets` | function | 1439 | ✅ |
+| `probe_tcp_reachable` | function | 1505 | ✅ |
+| `check_target_port` | function | 1540 | ✅ |
+| `run` | function | 1748 | ✅ |
+| `PathProfiler` | class | 1878 | ✅ |
+| `PathProfiler.start` | method | 1913 | ✅ |
+| `PathProfiler.stop` | method | 1924 | ✅ |
+| `PathProfiler.join` | method | 1928 | ✅ |
+| `PathProfiler.should_stop` | method | 1943 | ✅ |
+| `PathProfiler.snapshot` | method | 1963 | ✅ |
 
 ### `ProbeKind`  (class)
 
@@ -3165,20 +3165,30 @@ def looks_like_tun(hops: Sequence[HopStat], target_ip: str='') -> bool
 ```text
 猜「本次逐跳走的是代理/TUN 的虚拟路径」。
 
-两个信号（任一命中即提示，措辞用「可能」）：
+**唯一可靠证据**是 ``198.18.0.0/15`` 出现在路径的关键位置。这段是 RFC 2544
+的基准测试网段，mihomo / Clash 等 TUN 代理默认拿它做 fake-ip：
 
-1. 目标解析到 ``198.18.0.0/15``（RFC 2544 基准测试网段，TUN 代理的 fake-ip
-   常用这段）；
-2. 有响应的跳最多只到 1~2 跳 —— 真实物理路径通常至少经过「网关 + 出口」两跳
-   以上，只看到 1~2 跳多半是本地 TUN 在代为应答。
+1. 目标解析到该网段（fake-ip 直接命中，逐跳探到的是代理的虚拟路径）；
+2. 任一**有响应**的跳的 IP 落在该网段（TUN 虚拟网关在代为应答）。
+
+**为什么不用跳数判断**：on-link 目标（同网段主机、本机物理网关）正常就只有
+1 跳；ICMP 被过滤时也可能只看到 1~2 跳响应。把「有响应的最大 TTL ≤ 2」当成
+代理证据，会把物理网关误报成 TUN（D+ 增量 2.5 的路测缺陷：对物理网关提示
+「当前流量可能走代理」）。漏报只是少一句建议，误报会诱导用户去关代理，
+所以**证据不足一律返回 False**（宁可不提示，不可误报）。
 
 Args:
     hops: 逐跳统计。
     target_ip: 本次探测的目标 IP 字面量；空串表示不知道。
 
 Returns:
-    bool: 疑似走 TUN/代理时为 True。``hops`` 完全没有响应时返回 ``False``
-        （那是「没数据」，不是「只探到 1~2 跳」）。
+    bool: 目标或任一有响应的跳落在 ``198.18.0.0/15`` 时为 True；其余情况
+        （hop ip 为空 / 解析失败 / 全部丢包 / on-link LAN 目标 / 物理网关 /
+        普通多跳公网）恒为 False。
+
+Example:
+    >>> looks_like_tun((), "198.18.0.2")
+    True
 ```
 
 ### `summarize_path`
