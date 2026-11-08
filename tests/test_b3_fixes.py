@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "core"))
 
 import passive  # noqa: E402
+import report  # noqa: E402
 import server  # noqa: E402
 import tshark  # noqa: E402
 import verdict  # noqa: E402
@@ -73,6 +75,24 @@ def _walk_strings(node):
             yield from _walk_strings(value)
     elif isinstance(node, str):
         yield node
+
+
+def js_function_body(signature: str) -> str:
+    """把 ``ui/index.html`` 里一个顶层函数的函数体切出来。
+
+    只做「签名 → 下一个顶层 ``function``」切片。整文件 ``assertIn`` 无法发现
+    「函数还在、调用点被删」（Lead 变异 #9/#10/#11），所以接线类断言必须
+    落在切出来的函数体上。
+
+    Args:
+        signature: 函数声明原文，例如 ``"function render(res, actions) {"``。
+
+    Returns:
+        str: 从签名之后到下一个顶层 ``function`` 之前的源码片段。
+    """
+    start = HTML.index(signature)
+    rest = HTML[start + len(signature):]
+    return rest[:rest.index("\nfunction ")]
 
 
 class NoBoilerplateLogTest(unittest.TestCase):
@@ -143,6 +163,49 @@ class NamingSweepTest(unittest.TestCase):
         text = (ROOT / "scaffold" / "core" / "copy" / "zh-CN.json").read_text(
             encoding="utf-8")
         self.assertNotIn("链路体检", text)
+
+
+class DegradedReportNamingTest(unittest.TestCase):
+    """B1：0 包降级报告的模式行只写新名，不允许再带括号旧名。"""
+
+    OLD_NAMES = ("全网扫描", "定向抓包")
+
+    @staticmethod
+    def _res(target: str) -> dict:
+        # 与 b3-REVIEW.md §1 的复现命令同一份最小降级结果。
+        return {
+            "ok": True,
+            "degraded": True,
+            "card_title": "本次采集没有数据",
+            "plain": "抓包窗口内没有 TCP/IP 会话。",
+            "capture": {"target": target, "interface": "-",
+                        "duration": 20, "bpf": ""},
+            "link": {"via": "gateway", "host": "198.18.0.2"},
+            "reasons": ["抓包窗口内没有会话"],
+            "next_steps": ["确认网卡后重试"],
+            "at": "-",
+        }
+
+    def test_render_degraded_mode_line_uses_new_name_only(self):
+        for target, new in (("", "全网体检"), ("10.255.255.1", "单目标诊断")):
+            with self.subTest(target=target):
+                text = report.render_degraded(self._res(target))
+                self.assertIn(new, text)
+                for old in self.OLD_NAMES:
+                    self.assertNotIn(old, text, f"降级报告仍含旧模式名：{old}")
+
+    def test_save_degraded_markdown_matches_render_and_has_no_old_name(self):
+        for target, new in (("", "全网体检"), ("10.255.255.1", "单目标诊断")):
+            with self.subTest(target=target):
+                res = self._res(target)
+                expected = report.render_degraded(res)
+                with tempfile.TemporaryDirectory() as tmp:
+                    paths = report.save_degraded(res, Path(tmp))
+                    md = Path(paths["markdown"]).read_text(encoding="utf-8")
+                self.assertEqual(md, expected)
+                self.assertIn(new, md)
+                for old in self.OLD_NAMES:
+                    self.assertNotIn(old, md, f"落盘报告仍含旧模式名：{old}")
 
 
 class PassiveSelectionTest(unittest.TestCase):
@@ -256,7 +319,7 @@ class LinkActionsTest(unittest.TestCase):
         "meta": {"streams_top": [
             {"server": "10.0.0.5", "dport": 8080, "flags": [], "retrans": 0,
              "packets": 6},
-            {"server": "43.159.7.66", "dport": 443, "flags": ["重传 2"],
+            {"server": "192.0.2.1", "dport": 443, "flags": ["重传 2"],
              "retrans": 2, "packets": 30},
         ]},
         "verdict": {"level": "严重", "next_steps": ["检查链路"]},
@@ -267,12 +330,12 @@ class LinkActionsTest(unittest.TestCase):
         self.assertEqual(len(actions), 1)
         live = actions[0]
         self.assertEqual(live["mode"], "live")
-        self.assertEqual(live["target"], "43.159.7.66")
+        self.assertEqual(live["target"], "192.0.2.1")
         self.assertEqual(live["port"], 443)
-        self.assertEqual(live["display"], "43.159.7.66:443")
+        self.assertEqual(live["display"], "192.0.2.1:443")
         self.assertEqual(live["label"], "用单目标诊断复测对端")
         self.assertEqual(live["confirm"],
-                         "将切换到『单目标诊断』并预填 43.159.7.66:443，是否继续？")
+                         "将切换到『单目标诊断』并预填 192.0.2.1:443，是否继续？")
 
     def test_gateway_action_uses_given_gateway(self):
         actions = server.link_actions(self.RESULT, gateway="192.168.31.1")
@@ -331,6 +394,22 @@ class LinkActionsTest(unittest.TestCase):
         degraded = HTML.split("function renderDegraded(res, actions)", 1)[1].split(
             "/* ---------- 链路体检", 1)[0]
         self.assertIn("linkActionsHtml(actions)", degraded)
+
+
+class UiWiringTest(unittest.TestCase):
+    """Lead 追加：UI 核心接线要钉在「调用点」，只断言函数存在会漏掉删除调用。"""
+
+    def test_render_passive_dispatches_zero_flows_to_empty_card(self):
+        body = js_function_body("function renderPassive(res){")
+        self.assertIn("if (!(s.flows || 0)) { renderPassiveEmpty(res); return; }", body)
+
+    def test_render_wires_link_actions(self):
+        body = js_function_body("function render(res, actions) {")
+        self.assertIn("wireLinkActions(actions);", body)
+
+    def test_render_degraded_wires_link_actions(self):
+        body = js_function_body("function renderDegraded(res, actions) {")
+        self.assertIn("wireLinkActions(actions);", body)
 
 
 class MutationAnchorsTest(unittest.TestCase):

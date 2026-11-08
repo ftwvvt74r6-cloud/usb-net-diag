@@ -409,8 +409,8 @@ def render_degraded(result: dict) -> str:
     lines = [
         _d("title"),
         "",
-        _d("meta_line", mode="单目标诊断（定向抓包）" if cap.get("target")
-           else "全网体检（全网扫描）", at=result.get("at") or "-"),
+        _d("meta_line", mode="单目标诊断" if cap.get("target")
+           else "全网体检", at=result.get("at") or "-"),
         "",
         _d("section_conclusion"),
         "",
