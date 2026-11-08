@@ -52,11 +52,17 @@
   .topbtn .st{width:7px;height:7px;border-radius:50%;background:#cbd5e1;flex:none}
   .topbtn .st.on{background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.16)}
   .topbtn.ghost:hover{background:#fef2f2;border-color:var(--crit-line);color:#b91c1c}
+  /* H5：设置从左侧一级菜单移到右上角齿轮；左侧只留 4 项业务菜单 */
+  .topbtn.gear{padding:5px 10px}
+  .topbtn.gear .gear-ic{font-size:14px;line-height:1;color:#64748b}
+  .topbtn.gear:hover .gear-ic{color:var(--accent-2)}
+  .topbtn.gear.on{background:var(--accent-soft);border-color:#dbeafe;color:var(--accent-2)}
+  .topbtn.gear.on .gear-ic{color:var(--accent-2)}
 
   /* ---------------- 主框架 ---------------- */
-  .shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:calc(100vh - 56px)}
+  .shell{display:grid;grid-template-columns:276px minmax(0,1fr);height:calc(100vh - 56px)}
   @media (max-width:1150px){
-    .shell{grid-template-columns:264px minmax(0,1fr)}
+    .shell{grid-template-columns:244px minmax(0,1fr)}
   }
   @media (max-width:900px){
     body{overflow:auto}
@@ -153,10 +159,12 @@
   @keyframes sp{to{transform:rotate(360deg)}}
   .hidden{display:none!important}
 
-  /* 新手引导 / 术语说明 */
+  /* 新手引导 / 术语说明（H5：卡片只在右侧内容区顶部随模式变化，不再常驻左栏） */
   .guide{font-size:11.5px;line-height:1.65;background:#f8fafc;border:1px solid var(--line);
     border-left:3px solid var(--accent);border-radius:8px;padding:8px 10px;
     margin-bottom:11px;color:var(--text-2)}
+  .guide.modetop{margin:0 0 12px;background:linear-gradient(135deg,#f8fbff,#fff 70%);
+    border-color:#dbeafe;border-left-color:var(--accent);padding:10px 14px;box-shadow:var(--sh)}
   .guide b{display:block;font-size:11.5px;color:var(--accent-2);margin-bottom:2px}
   .guide .term{display:block;margin-top:5px;font-size:10.8px;color:var(--muted)}
   .guide .steps-line{margin-top:5px;font-size:10.8px;color:var(--muted)}
@@ -213,9 +221,16 @@
   .infocard b.ok{color:#047857}
   .infocard b.bad{color:#b91c1c}
 
-  /* ---------------- 采集控制台（2.0：右侧主区下方） ---------------- */
-  .consolepanel{flex:none;border-top:1px solid var(--line);background:#fff;
-    padding:7px 18px 11px;min-width:0}
+  /* ---------------- H4：右侧统一工作面板（进度 + 运行日志 + 结果，同一背景） ---------------- */
+  .workpanel{background:#fff;border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--sh);overflow:hidden;margin-bottom:14px}
+  .workpanel>#result{padding:16px}
+  .workpanel>#result:empty{display:none}
+  .workpanel>#probe-panel{padding:16px}
+  .workpanel>#probe-panel .card{border:0;box-shadow:none;border-radius:0}
+  .workpanel>#probe-panel .card .body{padding:0}
+  .consolepanel{background:#fff;padding:12px 16px 14px;min-width:0;
+    border-top:1px solid #eef2f7;border-bottom:1px solid #eef2f7}
   .conhead{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--muted);
     margin-bottom:6px;min-width:0}
   .contoggle{border:0;background:transparent;padding:3px 5px;border-radius:6px;
@@ -225,29 +240,36 @@
   .contoggle .chev{color:#94a3b8;font-size:13px;line-height:1;transition:.15s;
     display:inline-block;transform:rotate(90deg)}
   .consolepanel.collapsed .contoggle .chev{transform:rotate(0)}
-  .contoggle .en{font-weight:400;color:#94a3b8;font-size:10px;letter-spacing:.3px}
+  .contoggle .cstate{font-weight:600;color:#94a3b8;font-size:10.5px}
+  .con-en{font-weight:400;color:#94a3b8;font-size:10px;letter-spacing:.3px;white-space:nowrap}
   .conlast{color:#94a3b8;font-size:10.5px;white-space:nowrap;overflow:hidden;
     text-overflow:ellipsis;max-width:min(42vw,420px)}
   .conbtn{border:1px solid var(--line-2);background:#fff;color:#475569;border-radius:6px;
     font:inherit;font-size:10.5px;padding:2px 8px;cursor:pointer;white-space:nowrap}
   .conbtn:hover{background:#f8fafc;border-color:#c3ccdb}
-  .console{background:#0b1220;color:#cbd5e1;border-radius:9px;padding:8px 10px;height:168px;
-    overflow:auto;font:11.5px/1.62 var(--mono);margin-top:2px;scrollbar-color:#334155 transparent}
+  /* 运行日志是浅灰中性面，不再用黑色块；颜色语义只有 4 种：info 灰白 / success 青绿 / warn 琥珀 / 真错误红 */
+  .console{background:#f8fafc;border:1px solid var(--line);color:#475569;border-radius:9px;
+    padding:8px 10px;height:168px;overflow:auto;font:11.5px/1.62 var(--mono);
+    margin-top:2px;scrollbar-color:#cbd5e1 transparent}
   .consolepanel.collapsed .console{display:none}
+  .consolepanel.collapsed{padding:9px 16px;border-top:0;border-bottom:1px solid #eef2f7}
+  .consolepanel.collapsed .conhead{margin-bottom:0}
+  .consolepanel.collapsed .conlast,
+  .consolepanel.collapsed .conbtn,
+  .consolepanel.collapsed .con-en{display:none}
   .console .l{display:flex;gap:8px;white-space:pre-wrap;word-break:break-word}
-  .console .l::before{content:"›";color:#475569;flex:none;line-height:1.62}
-  .console .l time{color:#64748b;flex:none;line-height:1.62}
-  .console .l.i span{color:#cbd5e1}
-  .console .l.s span{color:#67e8f9}
-  .console .l.w span{color:#fcd34d}
-  .console .l.e span{color:#fca5a5}
-  .console .l.e{background:rgba(248,113,113,.07);border-radius:4px}
+  .console .l::before{content:"›";color:#94a3b8;flex:none;line-height:1.62}
+  .console .l time{color:#94a3b8;flex:none;line-height:1.62}
+  .console .l.i span{color:#475569}
+  .console .l.s span{color:#0f766e}
+  .console .l.w span{color:#b45309}
+  .console .l.e span{color:#b91c1c}
+  .console .l.e{background:#fef2f2;border-radius:4px}
   .console .hintline{color:#64748b}
 
-  /* ---------------- 运行态：进度条 + 倒计时 ---------------- */
-  .runpanel{border:1px solid #dbeafe;border-radius:12px;
-    background:linear-gradient(180deg,#f8fbff,#fff);padding:12px 14px;margin-bottom:14px;
-    box-shadow:var(--sh)}
+  /* ---------------- 运行态：进度条 + 倒计时（统一面板的顶部段） ---------------- */
+  .runpanel{background:#fff;padding:14px 16px 12px;margin:0;
+    border-bottom:1px solid #eef2f7}
   .run-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
     flex-wrap:wrap}
   .run-phase{font-size:12.5px;font-weight:700;color:var(--text)}
@@ -516,8 +538,8 @@
   .capsec a{color:var(--accent-2);cursor:pointer}
   .capsec code{font-family:var(--mono);font-size:11px;background:#eef2f7;border-radius:4px;
     padding:1px 5px;word-break:break-all}
-  .json{background:#0b1220;color:#a7f3d0;border-radius:9px;padding:10px;font:11.5px/1.55 var(--mono);
-    overflow:auto;margin-top:9px;max-height:220px}
+  .json{background:#f8fafc;border:1px solid var(--line);color:#334155;border-radius:9px;
+    padding:10px;font:11.5px/1.55 var(--mono);overflow:auto;margin-top:9px;max-height:220px}
   .fname{font-family:var(--mono);font-size:11.5px}
   .drop{border:1.5px dashed #c8d3e2;border-radius:9px;padding:12px;text-align:center;
     color:var(--muted);font-size:11.5px;cursor:pointer;transition:.15s;background:#fcfdff}
@@ -597,6 +619,10 @@
   </div>
   <div class="appright">
     <div id="badges"><span class="badge">检测环境中…</span></div>
+    <button class="topbtn gear" id="settings-gear" data-view="sysinfo"
+            title="设置：网卡与运行信息 / AI 模型配置" aria-label="设置">
+      <span class="gear-ic" aria-hidden="true">⚙</span><span class="k">设置</span>
+    </button>
     <button class="topbtn" id="ai-open" title="配置用于生成结论的大模型接口，可随时修改">
       <span class="st" id="ai-dot"></span>AI 解读<span class="k" id="ai-badge">未配置</span>
     </button>
@@ -610,8 +636,8 @@
     <div class="side-scroll">
     <div class="sidehead">工作区</div>
     <nav class="nav" id="nav">
-      <div class="navgroup open" data-group="realtime">
-        <button class="navhead" data-group-toggle="realtime" aria-expanded="true">
+      <div class="navgroup" data-group="realtime">
+        <button class="navhead" data-group-toggle="realtime" aria-expanded="false">
           <span class="ic">①</span>
           <span><span class="t">实时诊断</span><span class="d">从网卡现抓现分析</span></span>
           <span class="chev">›</span>
@@ -660,34 +686,9 @@
           </button>
         </div>
       </div>
-
-      <div class="navgroup" data-group="settings">
-        <button class="navhead" data-group-toggle="settings" aria-expanded="false">
-          <span class="ic">⑤</span>
-          <span><span class="t">设置</span><span class="d">AI 模型 / 网卡与运行信息</span></span>
-          <span class="chev">›</span>
-        </button>
-        <div class="navsub">
-          <button class="navitem" data-view="ai" title="配置用于生成结论的大模型接口">
-            <span class="t">AI 模型配置</span><span class="d">Base URL / Key / 模型名</span>
-          </button>
-          <button class="navitem" data-view="sysinfo" title="查看网卡、tshark、Npcap、权限与端口">
-            <span class="t">网卡与运行信息</span><span class="d">网卡列表 / 版本 / 权限</span>
-          </button>
-        </div>
-      </div>
     </nav>
 
-    <div class="lockbanner hidden" id="lock-banner">
-      <span id="lock-banner-text"></span>
-      <a id="lock-elevate">以管理员身份重启</a>
-    </div>
-
-    <div class="msg wait hidden" id="selfcheck-note" role="status"></div>
-
     <div class="pane" id="pane-capture">
-      <div class="guide" id="mode-guide"></div>
-
       <div class="field" id="field-target">
         <label id="target-label">目标 IP / 网段 / 域名</label>
         <input type="text" id="target" spellcheck="false"
@@ -736,11 +737,6 @@
     </div>
 
     <div class="pane hidden" id="pane-probe">
-      <div class="guide">
-        <b>什么时候用这个</b>
-        想快速确认一个目标通不通、多快时用它：主动探测约 10 秒，会依次测 DNS → TCP → 协议首包。
-        <span class="term">术语：连通与速度测试（技术名：链路体检）= 主动发少量探测报文，不产生 pcap，不需要管理员权限。</span>
-      </div>
       <div class="field">
         <label>目标域名 / IP</label>
         <input type="text" id="probe-target" spellcheck="false"
@@ -817,6 +813,16 @@
       <div class="searchchip" id="result-chip">就绪</div>
     </div>
 
+    <div class="lockbanner hidden" id="lock-banner">
+      <span id="lock-banner-text"></span>
+      <a id="lock-elevate">以管理员身份重启</a>
+    </div>
+
+    <div class="msg wait hidden" id="selfcheck-note" role="status"></div>
+
+    <!-- H5：「什么时候用这个」从左侧移到右侧内容区顶部，随模式变化 -->
+    <div class="guide modetop" id="mode-guide"></div>
+
     <section class="qcard" id="qcard" aria-live="polite">
       <div class="qk">这个模式回答什么问题</div>
       <h2 id="q-question">这台电脑整体上网状况如何？问题出在哪一层？</h2>
@@ -824,6 +830,8 @@
       <div class="qex" id="q-example"></div>
     </section>
 
+    <!-- H4：运行进度 / 运行日志 / 结果卡在同一个面板里，共用白底与连续间距 -->
+    <section class="workpanel" id="workpanel">
     <section class="runpanel hidden" id="runpanel" aria-live="polite">
       <div class="run-top">
         <div class="run-phase"><span class="pill" id="run-phase">探测网卡</span><span
@@ -832,6 +840,25 @@
       </div>
       <div class="pbar" id="run-barwrap"><i id="run-bar"></i></div>
       <div class="run-stages" id="run-stages"></div>
+    </section>
+
+    <!-- 运行日志（原「采集控制台」）：浅灰中性面，运行中实时追加；结束后自动折叠为一行 -->
+    <section class="consolepanel collapsed" id="consolepanel" aria-label="采集控制台（Packet Console）">
+      <div class="conhead">
+        <button class="contoggle" id="console-toggle" aria-expanded="false"
+                title="展开 / 折叠运行日志（采集控制台 · Packet Console）">
+          <span class="chev">›</span>运行日志
+          <span class="cstate" id="console-state">（展开）</span>
+          <span class="con-en">采集控制台 · Packet Console</span>
+        </button>
+        <span class="conlast" id="loglast">就绪</span>
+        <span style="flex:1"></span>
+        <button class="conbtn" id="console-copy" title="复制全部运行日志">复制</button>
+        <button class="conbtn" id="console-clear" title="清空日志显示（不影响已落盘日志）">清空</button>
+      </div>
+      <div class="console" id="console" role="log" aria-live="polite">
+        <div class="l i"><time>--:--:--</time><span>等待任务…</span></div>
+      </div>
     </section>
 
     <div id="result">
@@ -859,6 +886,8 @@
         </div>
       </div>
     </div>
+
+    </section><!-- /workpanel -->
 
     <div id="view-reports" class="hidden">
       <div class="card"><div class="body">
@@ -896,6 +925,7 @@
         <div class="sectitle" style="margin-top:16px">网卡列表</div>
         <div id="sysinfo-ifaces"></div>
         <div class="toolbar" style="margin-top:12px">
+          <button class="btn ghost" id="settings-ai" data-view="ai">AI 模型配置</button>
           <button class="btn ghost" id="sysinfo-refresh">重新检测</button>
           <button class="btn ghost" id="sysinfo-startup" data-copy="startup_open">准备检查</button>
         </div>
@@ -924,23 +954,6 @@
       </div></div>
     </div>
     </div><!-- /main-scroll -->
-
-    <section class="consolepanel" id="consolepanel">
-      <div class="conhead">
-        <button class="contoggle" id="console-toggle" aria-expanded="true"
-                title="展开 / 折叠采集控制台">
-          <span class="chev">›</span>采集控制台
-          <span class="en">Packet Console</span>
-        </button>
-        <span class="conlast" id="loglast">就绪</span>
-        <span style="flex:1"></span>
-        <button class="conbtn" id="console-copy" title="复制全部控制台内容">复制</button>
-        <button class="conbtn" id="console-clear" title="清空控制台显示（不影响已落盘日志）">清空</button>
-      </div>
-      <div class="console" id="console" role="log" aria-live="polite">
-        <div class="l i"><time>--:--:--</time><span>等待任务…</span></div>
-      </div>
-    </section>
   </main>
 </div>
 
@@ -1268,6 +1281,8 @@ let APP_INFO = null;
 let IS_ADMIN = null;
 let SYS_IFACES = [];
 let RUN_DURATION = 0;
+/* H5：二级菜单默认收起；用户点过一级/二级后，选中项所在分组才展开。 */
+let NAV_USER_PICK = false;
 const LOCKED = new Set(UI.locked_modes || []);
 const FIELD_IDS = ["field-target", "field-duration", "field-iface", "field-engine", "field-offline"];
 /* 提权重启后要恢复的表单：sessionStorage 是「同一标签页」的临时存储，刷新/提权后都在。 */
@@ -1908,6 +1923,7 @@ function legacyCapMode(mode, lock) {
 $("#nav").addEventListener("click", (e) => {
   const toggle = e.target.closest("[data-group-toggle]");
   if (toggle) {
+    NAV_USER_PICK = true;
     const group = toggle.closest(".navgroup");
     const open = !group.classList.contains("open");
     group.classList.toggle("open", open);
@@ -1916,11 +1932,15 @@ $("#nav").addEventListener("click", (e) => {
   }
   const modeBtn = e.target.closest("[data-mode]");
   if (modeBtn) {
+    NAV_USER_PICK = true;
     switchMode(modeBtn.dataset.mode);   // 能力锁/管理员锁都由同一个闸门处理
     return;
   }
   const viewBtn = e.target.closest("[data-view]");
-  if (viewBtn) setView(viewBtn.dataset.view);
+  if (viewBtn) {
+    NAV_USER_PICK = true;
+    setView(viewBtn.dataset.view);
+  }
 });
 
 function markActive(mode, view) {
@@ -1932,7 +1952,8 @@ function markActive(mode, view) {
     const hit = (mode && g.querySelector(`[data-mode="${mode}"]`))
       || (view && g.querySelector(`[data-view="${view}"]`));
     g.classList.toggle("active", !!hit);
-    if (hit) {
+    /* 默认收起（boot 时不展开）；只有用户主动选过一级/二级，才展开所在分组。 */
+    if (hit && NAV_USER_PICK) {
       g.classList.add("open");
       const head = g.querySelector("[data-group-toggle]");
       if (head) head.setAttribute("aria-expanded", "true");
@@ -1980,6 +2001,7 @@ function setMode(mode) {
   $("#mode-guide").innerHTML = '<b>什么时候用这个</b>' + esc(cfg.guide || "")
     + '<span class="steps-line">三步：选模式 → 填参数 → 点「' + esc(cfg.btn) + '」；完成后结果自动出现在右侧。</span>'
     + (cfg.term ? '<span class="term">' + esc(cfg.term) + '</span>' : "");
+  $("#mode-guide").classList.remove("hidden");
   $("#result-title").textContent = cfg.title;
   $("#result-sub").textContent = cfg.sub;
   $("#result-chip").textContent = isProbe ? "待测试" : "就绪";
@@ -2006,8 +2028,11 @@ function paintQuestion(mode) {
 }
 
 function hideQuestion() {
-  const card = $("#qcard");
-  if (card) card.classList.add("hidden");
+  /* 结果出来后让结果占据主区：问题卡与「什么时候用这个」一起收起（切换模式会重新展开）。 */
+  ["#qcard", "#mode-guide"].forEach((sel) => {
+    const card = $(sel);
+    if (card) card.classList.add("hidden");
+  });
 }
 
 function showIdle(mode) {
@@ -2197,8 +2222,14 @@ function setView(view) {
   $("#side-actions").classList.add("hidden");
   $("#result").classList.add("hidden");
   $("#probe-panel").classList.add("hidden");
+  ["#qcard", "#mode-guide"].forEach((sel) => {
+    const card = $(sel);
+    if (card) card.classList.add("hidden");
+  });
   const box = document.getElementById("view-" + view);
   if (box) box.classList.remove("hidden");
+  const gear = $("#settings-gear");
+  if (gear) gear.classList.toggle("on", view === "sysinfo" || view === "ai");
   const meta = {
     reports: ["历史报告", "打开 reports/ 里已经生成的 Markdown / JSON 报告", "只读"],
     export: ["导出诊断包", "把本机日志脱敏后打包，方便发给维护者排障", "等你操作"],
@@ -2660,6 +2691,7 @@ function stopRun() {
   $("#run").textContent = (UI.modes[RUN_MODE] || {}).btn || "开始";
   $("#pstop").classList.add("hidden");
   $("#runpanel").classList.add("hidden");
+  collapseConsole();                   // H4：结束即折叠为一行「运行日志（展开）」
   paintLocks();
 }
 
@@ -2671,8 +2703,9 @@ function runningResult() {
   $("#result-chip").textContent = "运行中";
   $("#result").innerHTML = '<div class="empty"><div class="ic">◌</div><b>'
     + esc(cfg.label || "正在运行") + '</b><p>抓包结束后会自动给出分层结论；'
-    + '运行过程在下方「采集控制台」，进度和倒计时在上方。</p></div>';
+    + '运行过程在上方「运行日志」里实时追加。</p></div>';
   $("#runpanel").classList.remove("hidden");
+  expandConsole();                     // 运行中：日志展开并实时滚到底
   paintStages();
   updateProgress({ elapsed: 0, duration: RUN_DURATION,
                    phase: STAGE_SETS[RUN_MODE] ? STAGE_SETS[RUN_MODE][0] : "准备中" });
@@ -2725,8 +2758,7 @@ function failureKind(code, why) {
 function wireFailureActions(kind) {
   const logBtn = $("#err-log");
   if (logBtn) logBtn.onclick = () => {
-    $("#consolepanel").classList.remove("collapsed");
-    $("#console-toggle").setAttribute("aria-expanded", "true");
+    expandConsole();
     $("#console").scrollTop = $("#console").scrollHeight;
   };
   const retry = $("#err-retry");
@@ -2776,6 +2808,7 @@ async function loadIfacesForError() {
 }
 
 function renderFailureCard(kind, why) {
+  showResultArea();
   const spec = UI.cards[kind] || {};
   const title = spec.title || "诊断失败";
   const whyText = why || "未知错误";
@@ -2853,6 +2886,7 @@ function renderFailureCard(kind, why) {
 
 function failedResult(title, detail, code) {
   hideQuestion();
+  showResultArea();
   const why = detail || "未知错误";
   const kind = failureKind(code, why);
   if (kind) { renderFailureCard(kind, why); return; }
@@ -2868,6 +2902,35 @@ function failedResult(title, detail, code) {
   wireFailureActions("");
   wireConclusionActions(null);
   scrollMainTop();
+}
+
+/* ---------- 运行日志增量：纯函数（Node 单测直接跑这一段，不碰 DOM） ---------- */
+function newLogsSince(logs, count) {
+  /* 只取「上次之后新增」的行：count 超过当前长度（后端重置/清空）时从头来，
+     既不能丢新行，也不能把已显示过的行再显示一遍。 */
+  const all = Array.isArray(logs) ? logs : [];
+  const start = (Number(count) > all.length) ? 0 : Math.max(0, Number(count) || 0);
+  return all.slice(start);
+}
+/* ---------- 运行日志增量结束 ---------- */
+
+/* ---------- 运行日志折叠（H4）：结束后自动收成一行「运行日志（展开）」 ---------- */
+function setConsoleCollapsed(collapsed) {
+  const panel = $("#consolepanel");
+  if (!panel) return;
+  panel.classList.toggle("collapsed", !!collapsed);
+  const toggle = $("#console-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  const state = $("#console-state");
+  if (state) state.textContent = collapsed ? "（展开）" : "（收起）";
+}
+
+function collapseConsole() {
+  setConsoleCollapsed(true);
+}
+
+function expandConsole() {
+  setConsoleCollapsed(false);
 }
 
 function classifyLog(message) {
@@ -2910,16 +2973,14 @@ function appendLog(message, level) {
   const last = $("#loglast");
   if (last) last.textContent = text.slice(0, 48);
   if (cls === "e") {
-    $("#consolepanel").classList.remove("collapsed");
-    $("#console-toggle").setAttribute("aria-expanded", "true");
+    /* 只有真错误才临时展开日志；终态（成功/失败）仍会统一折叠成一行。 */
+    expandConsole();
   }
 }
 
 $("#console-toggle").onclick = () => {
   const panel = $("#consolepanel");
-  panel.classList.toggle("collapsed");
-  $("#console-toggle").setAttribute(
-    "aria-expanded", panel.classList.contains("collapsed") ? "false" : "true");
+  setConsoleCollapsed(!panel.classList.contains("collapsed"));
 };
 $("#console-copy").onclick = async () => {
   const btn = $("#console-copy");
@@ -2947,7 +3008,7 @@ async function poll() {
     /* 结论卡文案随状态下发（唯一来源 copy/zh-CN.json）；旧后端没有该字段时保持空表。 */
     if (s.ui_copy && s.ui_copy.conclusion) CONCLUSION_COPY = s.ui_copy.conclusion;
     if ((s.logs || []).length < lastLogCount) lastLogCount = 0;
-    (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
+    newLogsSince(s.logs, lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
     lastLogCount = (s.logs || []).length;
 
     if (s.state === "done") {
@@ -2957,6 +3018,7 @@ async function poll() {
       if (RUN_MODE) setMode(RUN_MODE);
       if (res.degraded) renderDegraded(res, s.link_actions || []);
       else render(res, s.link_actions || []);
+      collapseConsole();              // 结束态：结果占据主区，日志收成一行
     } else if (s.state === "error") {
       const why = s.error || "未知错误";
       RUN_MODE = s.mode || RUN_MODE;
@@ -2964,6 +3026,7 @@ async function poll() {
       appendLog("诊断失败：" + why, "e");
       if (RUN_MODE) setMode(RUN_MODE);
       failedResult("诊断失败", why, s.error_code);
+      collapseConsole();              // 真错误已进结果卡，日志仍可点开
     } else if (s.state === "running") {
       RUN_MODE = s.mode || RUN_MODE;
       RUN_DURATION = Number(s.duration || RUN_DURATION || 0);
@@ -3030,13 +3093,14 @@ function stopPassiveUI(){
   $("#run").textContent = (UI.modes.passive || {}).btn || "开始监听";
   $("#pstop").classList.add("hidden");
   $("#runpanel").classList.add("hidden");
+  collapseConsole();                   // H4：监听结束同样折叠为一行
 }
 
 async function pollPassive(){
   const s = await fetch("/api/status").then((x) => x.json()).catch(() => null);
   if (s) {
     if ((s.logs || []).length < lastLogCount) lastLogCount = 0;
-    (s.logs || []).slice(lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
+    newLogsSince(s.logs, lastLogCount).forEach((l) => appendLog(`[${l.t}] ${l.m}`));
     lastLogCount = (s.logs || []).length;
   }
   const p = await fetch("/api/passive").then((x) => x.json()).catch(() => null);
@@ -3071,6 +3135,7 @@ $("#pstop").onclick = async () => {
 
 function renderPassiveEmpty(res){
   hideQuestion();
+  showResultArea();
   const spec = UI.cards.empty_sessions || {};
   const title = spec.title || "未观察到任何 TCP/IP 会话";
   const tried = (res.tried || []).map((t) =>
@@ -3130,6 +3195,7 @@ function renderPassive(res){
   const s = res.summary || {};
   if (!(s.flows || 0)) { renderPassiveEmpty(res); return; }
   hideQuestion();
+  showResultArea();
   const st = (k, v) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`;
   const dist = (s.by_proto || []).slice(0, 8).map((p) => {
     const w = Math.max(3, Math.round(p.flows / Math.max(1, s.flows) * 100));
@@ -3652,9 +3718,18 @@ function wireConclusionActions(res) {
   };
 }
 
+/* H4：所有结果路径都回到统一面板的结果区（正常 / 降级 / 失败 / 被动监听）。 */
+function showResultArea() {
+  const box = $("#result");
+  if (box) box.classList.remove("hidden");
+  const probe = $("#probe-panel");
+  if (probe) probe.classList.add("hidden");
+}
+
 function render(res, actions) {
   if (!res || !res.ok) return;
   hideQuestion();
+  showResultArea();
   LAST_RESULT = res;
   $("#result-title").textContent = "诊断结果";
   const m = res.meta || {}, sum = res.summary || {}, vd = res.verdict || {};
@@ -3883,6 +3958,7 @@ function render(res, actions) {
 /* ---------- 0 包降级结果页（中性，不报红） ---------- */
 function renderDegraded(res, actions) {
   hideQuestion();
+  showResultArea();
   LAST_RESULT = res;
   const link = res.link || {};
   const cap = res.capture || {};
@@ -3997,6 +4073,11 @@ async function runProbe(){
   const btn = $("#probe-run"), out = $("#probe-out");
   hideLastRun();                       // 新任务开始：上次结果的提示条不再适用
   hideQuestion();
+  $("#runpanel").classList.add("hidden");   // 探针没有进度条，但仍在同一面板里
+  $("#probe-panel").classList.remove("hidden");
+  $("#result").classList.add("hidden");
+  expandConsole();
+  appendLog("开始连通与速度测试：" + target, "i");
   btn.disabled = true; btn.textContent = "测试中…";
   $("#result-chip").textContent = "测试中…";
   out.innerHTML = '<div class="msg wait" style="margin-top:12px">正在识别协议并分段探测'
@@ -4019,6 +4100,8 @@ async function runProbe(){
 
   if(!r.ok){
     out.innerHTML = '<div class="msg bad" style="margin-top:12px">' + esc(r.error || "测试失败") + '</div>';
+    appendLog("连通与速度测试失败：" + (r.error || "未知错误"), "e");
+    collapseConsole();
     return;
   }
   $("#result-chip").textContent = r.protocol || "已识别";
@@ -4046,6 +4129,8 @@ async function runProbe(){
     + (detail.length ? '<br>' + detail.map(esc).join('　·　') : "") + '</div>'
     // 逐跳路径（有数据才渲染；文案来自后端下发的 copy.path）
     + renderPathProfile(r.path_profile, (r.ui_copy || {}).path || null);
+  appendLog("连通与速度测试完成：" + (r.headline || r.target || target), "s");
+  collapseConsole();
   scrollMainTop();
 }
 
@@ -4368,6 +4453,9 @@ async function exportDiagPack() {
 
 $("#diagpack").onclick = exportDiagPack;
 $("#export-run").onclick = exportDiagPack;
+/* H5：设置移到右上角齿轮；设置页里再进 AI 模型配置（原左侧二级项） */
+$("#settings-gear").onclick = () => setView("sysinfo");
+$("#settings-ai").onclick = () => setView("ai");
 $("#ai-panel-open").onclick = openAI;
 $("#sysinfo-refresh").onclick = loadSysInfo;
 $("#sysinfo-startup").onclick = () => { initStartup({ manual: true, force: true }); };

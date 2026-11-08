@@ -1,4 +1,4 @@
-﻿# HANDOVER-AI —— NetDiag（网络矩阵）交接手册
+# HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
 > **对齐版本**：`VERSION` = `0.3.1`；写作基线 `main` = `d4b13dc`（v0.3.1 发布 commit，PR #32 合并后）。
@@ -559,8 +559,8 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `launcher/SplashForm.cs` | H3 启动等待窗口：6 项 ✓/⚠/✗、失败按钮（官网/提权重启/继续降级）、ESC 跳过、200~400ms 淡出、`AutoScaleMode.Dpi`；`--splash-test` 离屏渲染 4 PNG + `splash-states.json`；**不含任何能力判定**（只消费 `/api/preflight`） |
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
-| `ui/index.html` | 单文件控制台（4,000+ 行；无构建链、无前端框架；首屏自检/能力置灰/说明卡/权限卡/表单保留都在这一个文件里） |
-| `tests/` | 44 个 `test_*.py`（919 条）+ `tests/selftest.py` 人工自检脚本 |
+| `ui/index.html` | 单文件控制台（4,400+ 行；无构建链、无前端框架）。H4：`#workpanel` 一个白底面板装「进度 `#runpanel` → 运行日志 `#consolepanel`（浅灰、非黑底，结束折叠一行）→ 结果 `#result`」；H5：左侧一级菜单 4 项 + 右上角齿轮设置（`#settings-gear`），二级默认收起，说明卡 `#mode-guide` 在右侧顶部。首屏自检/能力置灰/权限卡/表单保留/G5 last-run 提示条都在这个文件里 |
+| `tests/` | 46 个 `test_*.py`（952 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
