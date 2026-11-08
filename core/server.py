@@ -43,7 +43,6 @@ import threading
 import time
 import traceback
 import urllib.parse
-import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -62,7 +61,9 @@ ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
 
 import ai  # noqa: E402
-import app  # noqa: E402  仅用 app.browser_disabled()：浏览器打开权的唯一判定（H1）
+# H1：浏览器打开权的唯一判定（browser_disabled）与唯一打开入口（open_browser）
+# 都在 app 里；server 不再直接碰 webbrowser，避免第二套逻辑。
+import app  # noqa: E402
 import bootstrap  # noqa: E402
 import conclusion  # noqa: E402
 import copytext  # noqa: E402
@@ -1162,8 +1163,8 @@ def preflight_payload() -> dict:
         dict: 键 ``ok``（六项是否全过）/ ``version`` / ``checks``（固定 6 项，字段与
             selfcheck 完全一致，含 ``fix_kind`` / ``fix_url`` / ``fix_command`` /
             ``impact``）/ ``capabilities``（能力矩阵）/ ``ui_copy``（``{"startup": {...}}``
-            文案）/ ``fix_urls``（有官网链接的项 → URL，启动器按钮直接取用）/
-            ``source``（固定 ``"selfcheck"``，明示同源）。
+            文案）/ ``fix_urls``（**仅未通过**且带官网链接的项 → URL，启动器按钮
+            直接取用；全绿时为空）/ ``source``（固定 ``"selfcheck"``，明示同源）。
 
     Example:
         >>> payload = preflight_payload()
@@ -1172,10 +1173,12 @@ def preflight_payload() -> dict:
     """
     snap = selfcheck.collect_cached()
     checks = snap.get("checks") or []
+    # S7：修复索引只收**未通过**的检查项。通过的项即使带 fix_url（历史数据/未来
+    # 增加「查看官网」等字段）也不该被启动器当成「需要修复」，否则全绿时按钮仍亮。
     fix_urls = {
         str(item.get("key")): str(item.get("fix_url"))
         for item in checks
-        if isinstance(item, dict) and item.get("fix_url")
+        if isinstance(item, dict) and item.get("fix_url") and not item.get("ok")
     }
     return {
         "ok": bool(snap.get("ok")),
@@ -2069,7 +2072,9 @@ def main() -> int:
         print("[错误] 端口被占用，无法启动本地服务", file=sys.stderr)
         return 1
     if cfg.get("auto_open_browser", True) and not app.browser_disabled():
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        # H1/S2：走 app.open_browser() 这一受控入口（内部再判一次 env），
+        # 不再直接调 webbrowser.open —— 否则「所有打开点都走这里」就有第二套逻辑。
+        threading.Timer(0.8, lambda: app.open_browser(url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

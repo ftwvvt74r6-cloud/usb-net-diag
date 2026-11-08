@@ -89,6 +89,14 @@ with open(os.path.join(ROOT, "env-marker.txt"), "a", encoding="utf-8") as fh:
     fh.write(os.environ.get("NETDIAG_NO_BROWSER", "<unset>") + "\n")
     fh.write(" ".join(sys.argv[1:]) + "\n")
 
+# 并发用例的闸门：让第一个 launcher 拉起假 app 后仍停在「等就绪」，从而确定性地
+# 让第二个 launcher 撞上互斥锁（不是靠 sleep 猜时间）。其它用例不设这个 env。
+HOLD = os.environ.get("NETDIAG_FAKE_HOLD", "")
+if HOLD:
+    deadline = time.time() + 30
+    while not os.path.exists(HOLD) and time.time() < deadline:
+        time.sleep(0.05)
+
 def free_port():
     for port in range(8787, 8797):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -235,6 +243,21 @@ class LauncherStartupSourceContract(unittest.TestCase):
                          "复用分支应跳过 Python 定位（不浪费时间）")
         self.assertNotIn("FindPython()", reuse)
 
+    def test_single_instance_mutex_and_measure_log_after_quit(self):
+        """S1/S3 源码锚点：去锁或把日志写回 quit 之前，都必须红。"""
+        self.assertIn('private const string MutexName = @"Global\\NetDiagLauncher-',
+                      self.source, "S1：必须有全局命名互斥锁")
+        self.assertIn("AbandonedMutexException", self.source,
+                      "S1：前一个实例异常退出留下的锁必须按已获取处理")
+        self.assertIn("WaitOne(0, false)", self.source)
+        self.assertIn("ReleaseSingleInstance()", self.source)
+        self.assertIn("if (!TryAcquireSingleInstance()) return ExitOk;", self.source,
+                      "S1：锁被占用的第二个实例必须立即 exit 0")
+        log = self.source[self.source.index("private static void LogAndReport"):
+                          self.source.index("private static long Now")]
+        self.assertLess(log.index("QuitAndWait(state)"), log.index("WriteStartupLog()"),
+                        "S3：--measure 必须先 quit 再写 startup.log（quit_* 才是真实值）")
+
     def test_port_scan_uses_listener_table_not_http_on_closed_ports(self):
         self.assertIn("GetActiveTcpListeners()", self.source,
                       "H2：不允许对 10 个关闭端口各等 700ms；先枚举监听端口")
@@ -310,18 +333,21 @@ class LauncherStartupBinaryTest(unittest.TestCase):
         shutil.copy2(self.exe, root / EXE_NAME)
         return root
 
-    def _launcher_env(self) -> dict:
+    def _launcher_env(self, **updates: str) -> dict:
         env = _env()
         python_dir = str(Path(sys.executable).parent)
         env["PATH"] = python_dir
         env.pop("NETDIAG_NO_BROWSER", None)
+        env.update(updates)
         return env
 
-    def _run_exe(self, root: Path, args: list[str], timeout: int = 90) -> subprocess.CompletedProcess:
+    def _run_exe(self, root: Path, args: list[str], timeout: int = 90,
+                 env: dict | None = None) -> subprocess.CompletedProcess:
         # stdout/stderr 直接丢弃：winexe + 子进程会继承管道句柄，capture_output 可能
         # 一直等到孙子进程退出；报告与 startup.log 才是断言依据。
         return subprocess.run(
-            [str(root / EXE_NAME)] + args, cwd=str(root), env=self._launcher_env(),
+            [str(root / EXE_NAME)] + args, cwd=str(root),
+            env=env or self._launcher_env(),
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=timeout,
         )
@@ -336,6 +362,24 @@ class LauncherStartupBinaryTest(unittest.TestCase):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if _http_ok(8787):
+                return True
+            time.sleep(0.1)
+        return False
+
+    def _quit_port(self, port: int) -> None:
+        """让假 app 优雅退出（POST /api/quit）；失败也不让测试挂住。"""
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/quit", data=b"{}", method="POST")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                resp.read()
+        except Exception:
+            pass
+
+    def _wait_port_closed(self, port: int, timeout: float = 10.0) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not _port_in_use(port):
                 return True
             time.sleep(0.1)
         return False
@@ -365,6 +409,16 @@ class LauncherStartupBinaryTest(unittest.TestCase):
         self.assertEqual(len(lines), 1, f"startup.log 应只有 1 行：{lines}")
         self.assertEqual(lines[0]["total_ms"], data["total_ms"])
         self.assertEqual(lines[0]["mode"], data["mode"])
+        # S3：measure 的日志必须包含真实退出结果（不能恒 false/0）。
+        self.assertTrue(lines[0]["quit_ok"],
+                        f"startup.log 的 quit_ok 必须是 POST /api/quit 的真实结果：{lines[0]}")
+        self.assertTrue(lines[0]["quit_exited"],
+                        f"startup.log 的 quit_exited 必须是子进程真实退出：{lines[0]}")
+        self.assertGreater(lines[0]["quit_ms"], 0,
+                           f"startup.log 的 quit_ms 必须记录真实耗时：{lines[0]}")
+        self.assertEqual(lines[0]["quit_ok"], data["quit_ok"])
+        self.assertEqual(lines[0]["quit_exited"], data["quit_exited"])
+        self.assertEqual(lines[0]["quit_ms"], data["quit_ms"])
 
         # 子进程真的收到 env（不是只查源码字符串）。
         marker = (root / "env-marker.txt").read_text(encoding="utf-8").splitlines()
@@ -483,6 +537,90 @@ class LauncherStartupBinaryTest(unittest.TestCase):
                 pass
             fake.wait(timeout=10)
             time.sleep(0.3)
+
+    def test_concurrent_double_click_starts_exactly_one_instance(self):
+        """S1：并发双击只允许一个启动编排（一个 app、一行 startup.log、第二个秒退 0）。
+
+        用 ``NETDIAG_FAKE_HOLD`` 把第一个 launcher 的假 app 卡在「等就绪」，
+        确定性制造「锁被占用」的窗口，而不是靠 sleep 猜。
+        """
+        root = self._make_root("concurrent")
+        gate = root / "hold-start"
+        env = self._launcher_env(NETDIAG_FAKE_HOLD=str(gate), NETDIAG_NO_BROWSER="1")
+        first_report = root / "first.json"
+        second_report = root / "second.json"
+        first = subprocess.Popen(
+            [str(root / EXE_NAME), "--measure", "--report", str(first_report)],
+            cwd=str(root), env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                marker = root / "env-marker.txt"
+                if marker.is_file() and len(marker.read_text(encoding="utf-8").splitlines()) >= 2:
+                    break
+                if first.poll() is not None:
+                    self.fail(f"第一个 launcher 提前退出：rc={first.returncode}")
+                time.sleep(0.05)
+            else:
+                self.fail("第一个 launcher 30s 内没有拉起假 app")
+
+            began = time.time()
+            second = self._run_exe(root, ["--measure", "--report", str(second_report)],
+                                   timeout=20, env=env)
+            second_s = time.time() - began
+            self.assertEqual(second.returncode, 0,
+                             "锁被占用的第二个实例必须 exit 0（静默退出）")
+            self.assertLess(second_s, 3.0,
+                            f"第二个实例必须在锁被占用时立即退出，实测 {second_s:.2f}s")
+            self.assertIsNone(first.poll(), "持锁实例不该被第二个实例终止")
+            self.assertFalse(second_report.exists(),
+                             "第二个实例不许产生 measure 报告（说明它根本没启动）")
+        finally:
+            gate.write_text("go", encoding="utf-8")
+            try:
+                first.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                first.kill()
+                first.wait(timeout=10)
+                raise
+
+        self.assertEqual(first.returncode, 0)
+        data = _read_json(first_report)
+        self.assertTrue(data["ok"], data)
+        # 假 app 每次被拉起写 2 行（env + argv）；并发双击只能有一份。
+        marker_lines = (root / "env-marker.txt").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(marker_lines), 2,
+                         f"并发双击拉起了不止一个 app：{marker_lines}")
+        self.assertEqual(len(_startup_log_lines(root)), 1,
+                         "并发启动只允许一行 startup.log（锁内写）")
+
+    def test_mutex_released_after_launch_reuses_running_service(self):
+        """S1：第一个 launcher 释放锁后，再次启动必须走复用路径、不新起进程/浏览器。"""
+        root = self._make_root("lock-release")
+        env = self._launcher_env(NETDIAG_NO_BROWSER="1")
+        before = _listening_ports()
+        first = self._run_exe(root, ["--no-splash"], timeout=90, env=env)
+        self.assertEqual(first.returncode, 0, "第一次正常启动失败")
+        port = _startup_log_lines(root)[-1]["port"]
+        try:
+            self.assertTrue(_port_in_use(port), "第一次启动后服务未就绪")
+            marker_before = (root / "env-marker.txt").read_text(encoding="utf-8")
+            code, data = self._measure(root, "reuse-after-release")
+            self.assertEqual(code, 0, data)
+            self.assertTrue(data["reused"],
+                            f"锁释放后再次启动必须复用已有服务：{data}")
+            self.assertEqual(data["mode"], "reuse", data)
+            self.assertEqual(data["port"], port)
+            marker_after = (root / "env-marker.txt").read_text(encoding="utf-8")
+            self.assertEqual(marker_before, marker_after,
+                             "复用路径又起了第二个 app（env-marker 变了）")
+        finally:
+            self._quit_port(port)
+            self.assertTrue(self._wait_port_closed(port),
+                            f"清理失败：{port} 仍在监听")
+        self.assertEqual(_listening_ports(), before)
 
     def test_splash_test_renders_four_png_and_state_contract(self):
         root = self._make_root("splash")

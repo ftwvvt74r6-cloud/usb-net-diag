@@ -4,7 +4,8 @@
 
 * 一级菜单 **4 项**：实时诊断 / 连通与速度测试 / 分析抓包文件 / 报告与导出；
   设置从左侧移除，改为右上角齿轮（仍能打开「网卡与运行信息」与「AI 模型配置」）；
-* 二级菜单默认收起，只有用户选中一级后展开（键盘/点击均可用）；
+* 二级菜单默认收起（标记不预置 open），但首屏会展开**当前选中**的一级组：
+  用户既能看到「全网体检」是当前项，又不会四个组全摊开（S6 复审建议）；
 * 「什么时候用这个」说明卡在右侧内容区顶部、随模式变化，不再常驻左栏；
 * 左侧只保留菜单 + 当前模式输入 + 主按钮，1024px 下无横向溢出（真实 headless
   尺寸断言在 ``D:\\utest\\review\\h-samples\\ui\\`` 的 DOM 摘要里）。
@@ -89,39 +90,36 @@ class FourTopLevelMenuTest(unittest.TestCase):
 
 
 class SubmenuCollapseTest(unittest.TestCase):
-    """二级菜单默认收起；用户选中一级/二级后展开，点击可用。"""
+    """二级菜单默认收起；选中一级/二级后（含首屏当前模式）展开所在分组。"""
 
     def test_markup_has_no_open_group_and_no_expanded_aria(self):
         nav = _slice('<nav class="nav" id="nav">', "</nav>", "nav")
         self.assertNotIn('class="navgroup open"', nav,
-                         "二级菜单默认必须收起（不能预置 open）")
+                         "标记里不能预置 open（展开由 JS 按当前模式决定）")
         self.assertNotIn('aria-expanded="true"', nav,
                          "默认不能有展开态")
         self.assertEqual(nav.count('aria-expanded="false"'), 2,
                          "两个可展开分组（实时诊断 / 报告与导出）默认收起")
 
-    def test_active_group_opens_only_after_user_pick(self):
+    def test_active_group_opens_on_selection_including_boot(self):
+        """S6：首屏也要展开当前选中一级菜单，否则看不到「全网体检」被选中。"""
         mark = _slice("function markActive", "function hideViews", "markActive")
-        self.assertIn("NAV_USER_PICK", mark)
-        self.assertIn("if (hit && NAV_USER_PICK)", mark)
+        self.assertNotIn("NAV_USER_PICK", mark,
+                         "展开不能再依赖「用户点过」：首屏 setMode 也必须展开")
+        self.assertIn("if (hit)", mark)
         self.assertIn('g.classList.add("open")', mark)
         self.assertIn('setAttribute("aria-expanded", "true")', mark)
-        self.assertIn("let NAV_USER_PICK = false;", HTML)
+        boot = _slice("async function boot()", "async function loadCaptures", "boot")
+        self.assertIn("setMode(MODE);", boot, "首屏必须走 setMode，由 markActive 展开 active 组")
 
-    def test_nav_clicks_set_user_pick_and_toggle(self):
+    def test_nav_clicks_toggle_group_and_switch_mode(self):
         nav = _slice('$("#nav").addEventListener("click"', "function markActive",
                      "nav handler")
-        self.assertIn("NAV_USER_PICK = true;", nav)
         self.assertIn("classList.toggle(\"open\", open)", nav)
         self.assertIn('setAttribute("aria-expanded", open ? "true" : "false")', nav)
         self.assertIn("switchMode(modeBtn.dataset.mode)", nav)
         self.assertIn("setView(viewBtn.dataset.view)", nav)
-
-    def test_boot_does_not_force_open(self):
-        boot = _slice("async function boot()", "async function loadCaptures", "boot")
-        self.assertIn("setMode(MODE);", boot)
-        self.assertNotIn("classList.add(\"open\")", boot,
-                         "首屏加载不能替用户展开二级菜单")
+        self.assertNotIn("NAV_USER_PICK", nav, "旧的用户点过标记已由「按当前命中展开」替代")
 
 
 class GuideCardPlacementTest(unittest.TestCase):

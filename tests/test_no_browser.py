@@ -201,7 +201,9 @@ class ServerMainBrowserTest(unittest.TestCase):
         fake = _FakeHTTPD()
         with ExitStack() as stack:
             stack.enter_context(browser_env(env))
-            stack.enter_context(mock.patch.object(server.webbrowser, "open", browser))
+            # S2：server.main 必须走 app.open_browser() 这一受控入口，
+            # 不再直接调 webbrowser.open（第二套逻辑）。
+            stack.enter_context(mock.patch.object(server.app, "open_browser", browser))
             stack.enter_context(mock.patch.object(server.logstore, "ensure_dirs"))
             stack.enter_context(mock.patch.object(server.logstore, "prune"))
             stack.enter_context(mock.patch.object(server.logstore, "write_env_snapshot"))
@@ -229,6 +231,14 @@ class ServerMainBrowserTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         browser.assert_called_once_with("http://127.0.0.1:8787/")
         self.assertTrue(fake.served)
+
+    def test_server_source_has_no_second_webbrowser_open_point(self):
+        """S2 变异锚点：server 直接调 webbrowser.open 必须红。"""
+        source = Path(server.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("webbrowser.open(", source,
+                         "server 不许有第二套打开逻辑，统一走 app.open_browser()")
+        self.assertIn("app.open_browser(url)", source,
+                      "server.main 的定时器必须调用 app.open_browser(url)")
 
 
 class RelaunchKeepsSingleTabTest(unittest.TestCase):

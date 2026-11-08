@@ -76,6 +76,10 @@ REQUIRED_SOURCE_MARKERS = (
     "ExitLaunchFailed = 4",
     "NETDIAG_NO_BROWSER",
     "EnvironmentVariables",
+    # S1：并发双击只放行一个启动编排（命名互斥锁 + 异常退出兜底）。
+    "Mutex",
+    "Global\\NetDiagLauncher",
+    "AbandonedMutexException",
     "startup.log",
     "launcher-cache.json",
     "/api/preflight",

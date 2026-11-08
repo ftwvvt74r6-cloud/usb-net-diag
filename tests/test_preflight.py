@@ -60,13 +60,18 @@ def _checks(tshark_ok: bool = True, npcap_ok: bool = True) -> list[dict]:
     out = []
     for key in EXPECTED_KEYS:
         ok = ok_map[key]
-        out.append({
+        item = {
             "key": key, "name": key, "ok": ok, "detail": f"{key} detail",
             "fix_kind": "url" if (not ok and key in fix_urls) else "none",
             "fix_url": "" if ok else fix_urls.get(key, ""),
             "fix_command": "", "impact": f"{key} impact",
             "doc_url": "docs/startup.md",
-        })
+        }
+        if key == "python":
+            # S7 变异锚点：**通过项也带非空 fix_url**。实现若不过滤 ok，
+            # 全绿时 fix_urls 就不再是空字典，下面的断言会直接红。
+            item["fix_url"] = fix_urls["python"]
+        out.append(item)
     return out
 
 

@@ -14,10 +14,13 @@
 //     app.py / server.py 就不会再各开一个标签页。
 //   * launcher 自己遵守 NETDIAG_NO_BROWSER=1（或 --no-browser）：测量/测试安全。
 //   * 已有实例 → 直接复用，**绝不**再起第二个 Python 进程。
+//   * 并发双击 → 命名互斥锁只放行一个启动编排；第二个立即退出（exit 0），
+//     不显示 splash、不新起进程、不开浏览器（S1）。
 //
 // H2 启动计时：t0 Main 进入 → t1 Python spawn → t2 /api/ping 首次成功 →
 //   t3 打开浏览器（env=1 时为跳过），单行 JSON 追加到 logs/startup.log；
-//   --measure 走真实启动、等就绪、写日志、POST /api/quit 后退出（不开浏览器/窗口）。
+//   --measure 走真实启动、等就绪、POST /api/quit 后写日志/报告再退出
+//   （S3：quit 结果必须在写 startup.log 之前拿到）。
 //
 // 只做：探测已有实例 → 定位 Python（带缓存）→ 隐藏启动 core\app.py → 等就绪 →
 //       （可选 splash）→ 打开浏览器一次。
@@ -63,6 +66,14 @@ namespace NetDiag
 
         //: 浏览器打开权归属的环境变量（与 core/app.py 的 NO_BROWSER_ENV 同一个名字）。
         private const string NoBrowserEnv = "NETDIAG_NO_BROWSER";
+
+        //: 启动编排期的单实例锁名（S1）。Global 命名空间：跨会话/跨用户也只放行一个，
+        //: 因为端口 8787~8796 是整机资源。产品名进锁名，避免和其它程序撞名。
+        private const string MutexName = @"Global\NetDiagLauncher-NetDiag";
+
+        /// <summary>持锁期间要防止 Mutex 被 GC 回收，所以放静态字段；未持有时为 null。</summary>
+        private static Mutex _instanceLock;
+        private static bool _instanceLockOwned;
 
         /// <summary>进程启动即开始走的单调时钟；t0 就是它第一次被读到的时刻。</summary>
         private static readonly Stopwatch Clock = Stopwatch.StartNew();
@@ -136,16 +147,27 @@ namespace NetDiag
                 _metrics.Measure = true;
             }
 
-            int code;
-            try { code = RunNormal(reportPath); }
-            catch (Exception ex)
+            // S1：并发双击只放行一个 launcher 做启动编排（探测/spawn/就绪/浏览器/日志）。
+            // 锁被占用 = 另一个 launcher 正在启动：立即退出 0，不显示 splash、不
+            // 启动 python、不开浏览器（服务与标签页都由持锁实例负责）。
+            if (!TryAcquireSingleInstance()) return ExitOk;
+            try
             {
-                _metrics.Error = ex.GetType().Name + ": " + ex.Message;
-                WriteStartupLog();
-                ShowError("启动器内部错误：" + ex.GetType().Name + ": " + ex.Message);
-                code = ExitLaunchFailed;
+                int code;
+                try { code = RunNormal(reportPath); }
+                catch (Exception ex)
+                {
+                    _metrics.Error = ex.GetType().Name + ": " + ex.Message;
+                    WriteStartupLog();
+                    ShowError("启动器内部错误：" + ex.GetType().Name + ": " + ex.Message);
+                    code = ExitLaunchFailed;
+                }
+                return code;
             }
-            return code;
+            finally
+            {
+                ReleaseSingleInstance();
+            }
         }
 
         // ------------------------------------------------------------ 主流程
@@ -169,6 +191,66 @@ namespace NetDiag
                 return raw == "1" || raw == "true" || raw == "yes" || raw == "on";
             }
             catch (Exception) { return false; }
+        }
+
+        // --------------------------------------------------- 单实例准入（S1）
+        /// <summary>
+        /// 尝试取启动器单实例锁；false = 另一个 launcher 正在启动，调用方应立即 exit 0。
+        ///
+        /// 为什么需要：两个 launcher 同时启动会各自 spawn 一个 pythonw，抢到 8787/8788，
+        /// 各开一次浏览器（两个标签页），并并发追加 startup.log（丢行）。锁覆盖整个
+        /// **启动编排**（探测→spawn→就绪→浏览器→写日志），不覆盖服务运行期：服务活着
+        /// 时靠 /api/ping 复用，本来就不会起第二个进程。
+        ///
+        /// Returns:
+        /// bool: true = 已持锁（含上一个实例异常退出留下的 AbandonedMutex）；
+        ///       false = 锁被另一个存活实例持有，本次必须静默退出。
+        /// </summary>
+        private static bool TryAcquireSingleInstance()
+        {
+            try
+            {
+                Mutex mutex = new Mutex(false, MutexName);
+                try
+                {
+                    if (!mutex.WaitOne(0, false))
+                    {
+                        mutex.Dispose();
+                        return false;
+                    }
+                }
+                catch (AbandonedMutexException)
+                {
+                    // 上一个实例在持锁期间崩溃/被强杀：WaitOne 已把所有权交给本进程，
+                    // 按成功处理；否则一次崩溃会永久挡住后续双击。
+                }
+                _instanceLock = mutex;
+                _instanceLockOwned = true;
+                return true;
+            }
+            catch (Exception)
+            {
+                // 极老系统 / 受限会话创建命名互斥锁失败：退化为不互斥。
+                // 宁可极端情况下重复启动，也不能让用户双击没反应。
+                return true;
+            }
+        }
+
+        /// <summary>释放启动编排锁；未持有时是空操作（含创建失败退化的路径）。</summary>
+        private static void ReleaseSingleInstance()
+        {
+            try
+            {
+                if (_instanceLockOwned && _instanceLock != null) _instanceLock.ReleaseMutex();
+            }
+            catch (Exception) { }
+            finally
+            {
+                _instanceLockOwned = false;
+                try { if (_instanceLock != null) _instanceLock.Dispose(); }
+                catch (Exception) { }
+                _instanceLock = null;
+            }
         }
 
         private static int RunNormal(string reportPath)
@@ -504,13 +586,16 @@ namespace NetDiag
         // ------------------------------------------------------------ 日志/报告
         private static void LogAndReport(string reportPath, LaunchState state)
         {
-            // 先写 startup.log（H2 要求就绪即记录；--measure 的 quit 发生在日志之后）。
-            WriteStartupLog();
+            // S3：--measure 的 quit 结果必须写进 startup.log，所以先 quit 再写日志。
+            // 非 measure 行没有退出动作，quit_* 保持 false/0（字段存在只为同一 schema）。
             if (_measureMode)
             {
                 if (!_metrics.Reused) QuitAndWait(state);
+                WriteStartupLog();
                 WriteMeasureReport(reportPath);
+                return;
             }
+            WriteStartupLog();
         }
 
         private static long Now()

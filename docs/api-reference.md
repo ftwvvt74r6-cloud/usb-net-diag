@@ -5351,32 +5351,32 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 151 | ✅ |
-| `request_quit` | function | 156 | ✅ |
-| `cleanup_pid` | function | 204 | ✅ |
-| `BodyTooLarge` | class | 214 | ✅ |
-| `doctor_cached` | function | 293 | ✅ |
-| `log` | function | 410 | ✅ |
-| `evidence_payload` | function | 506 | ✅ |
-| `conclusion_report_id` | function | 630 | ✅ |
-| `build_status_conclusion` | function | 661 | ✅ |
-| `start_job` | function | 1017 | ✅ |
-| `report_index` | function | 1078 | ✅ |
-| `request_elevation` | function | 1112 | ✅ |
-| `preflight_payload` | function | 1150 | ✅ |
-| `engine_info` | function | 1192 | ✅ |
-| `passive_start` | function | 1235 | ✅ |
-| `passive_status` | function | 1270 | ✅ |
-| `link_actions` | function | 1344 | ✅ |
-| `Handler` | class | 1425 | ✅ |
-| `Handler.handle_one_request` | method | 1451 | ✅ |
-| `Handler.log_message` | method | 1496 | ✅ |
-| `Handler.do_GET` | method | 1634 | ✅ |
-| `Handler.do_POST` | method | 1656 | ✅ |
-| `DiagServer` | class | 1967 | ✅ |
-| `DiagServer.handle_error` | method | 1978 | ✅ |
-| `create_server` | function | 2006 | ✅ |
-| `main` | function | 2053 | ✅ |
+| `touch` | function | 152 | ✅ |
+| `request_quit` | function | 157 | ✅ |
+| `cleanup_pid` | function | 205 | ✅ |
+| `BodyTooLarge` | class | 215 | ✅ |
+| `doctor_cached` | function | 294 | ✅ |
+| `log` | function | 411 | ✅ |
+| `evidence_payload` | function | 507 | ✅ |
+| `conclusion_report_id` | function | 631 | ✅ |
+| `build_status_conclusion` | function | 662 | ✅ |
+| `start_job` | function | 1018 | ✅ |
+| `report_index` | function | 1079 | ✅ |
+| `request_elevation` | function | 1113 | ✅ |
+| `preflight_payload` | function | 1151 | ✅ |
+| `engine_info` | function | 1195 | ✅ |
+| `passive_start` | function | 1238 | ✅ |
+| `passive_status` | function | 1273 | ✅ |
+| `link_actions` | function | 1347 | ✅ |
+| `Handler` | class | 1428 | ✅ |
+| `Handler.handle_one_request` | method | 1454 | ✅ |
+| `Handler.log_message` | method | 1499 | ✅ |
+| `Handler.do_GET` | method | 1637 | ✅ |
+| `Handler.do_POST` | method | 1659 | ✅ |
+| `DiagServer` | class | 1970 | ✅ |
+| `DiagServer.handle_error` | method | 1981 | ✅ |
+| `create_server` | function | 2009 | ✅ |
+| `main` | function | 2056 | ✅ |
 
 ### `touch`
 
@@ -5621,8 +5621,8 @@ Returns:
     dict: 键 ``ok``（六项是否全过）/ ``version`` / ``checks``（固定 6 项，字段与
         selfcheck 完全一致，含 ``fix_kind`` / ``fix_url`` / ``fix_command`` /
         ``impact``）/ ``capabilities``（能力矩阵）/ ``ui_copy``（``{"startup": {...}}``
-        文案）/ ``fix_urls``（有官网链接的项 → URL，启动器按钮直接取用）/
-        ``source``（固定 ``"selfcheck"``，明示同源）。
+        文案）/ ``fix_urls``（**仅未通过**且带官网链接的项 → URL，启动器按钮
+        直接取用；全绿时为空）/ ``source``（固定 ``"selfcheck"``，明示同源）。
 
 Example:
     >>> payload = preflight_payload()

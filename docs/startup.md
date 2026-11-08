@@ -52,6 +52,13 @@
    `webbrowser.open` 在 `NETDIAG_NO_BROWSER=1` 下一律不执行（连打开线程都不启动）。
 8. 计时写入 `logs\startup.log`（t0~t3，见 §3.5）。
 
+**并发双击（S1）**：进入上述流程前，启动器先取命名互斥锁
+`Global\NetDiagLauncher-NetDiag`（`AbandonedMutexException` 按「已获取」处理）。
+锁被占用说明另一个启动器正在启动，第二个实例**立即退出（退出码 0）**：不显示
+splash、不启动 Python、不开浏览器。持锁实例完成启动编排（写日志；`--measure`
+还要 POST `/api/quit`）后释放；之后再次双击正常走「复用已运行服务」路径，
+只开一次浏览器。`logs\startup.log` 的写入也在锁内，不会因并发追加丢行。
+
 失败时用 splash 展示安装指引（无 splash 的路径用系统 MessageBox）给出可操作提示
 （查看 `<root>\logs\app-*.log`、检查 Python/Npcap、端口是否被占），退出码见 §3.3。
 启动器不检测、不请求管理员权限；用户自己右键「以管理员身份运行」时它也不会二次提权。
@@ -93,7 +100,7 @@ NetDiag.exe --dry-run --report "<临时目录>\launcher.json"
 
 | 退出码 | 含义 | 下一步 |
 |---|---|---|
-| `0` | 成功（服务就绪并已开浏览器；或已有实例直接开窗） | — |
+| `0` | 成功（服务就绪并已开浏览器；或已有实例直接开窗；或另一个实例正在启动，本次静默让位） | — |
 | `2` | 找不到可用的 Python（需要 3.11+） | 安装 Python 并勾选 Add python.exe to PATH，或使用带 `tools\python` 的离线包 |
 | `3` | 等待就绪超时（30 秒） | 看 `logs\app-*.log`；查端口 8787~8796 是否全被占、Npcap/安全软件是否拦截 |
 | `4` | 启动失败（Python 进程提前退出 / `core\app.py` 缺失 / 浏览器打不开 / 报告写失败） | 看日志与提示中的具体路径 |
@@ -135,7 +142,10 @@ NetDiag.exe --dry-run --report "<临时目录>\launcher.json"
 - `browser`：`opened` / `skipped` / `failed`；
 - `python_cache`：`miss` / `hit` / `invalid:<原因>`（缓存校验失败会全扫并重写）；
 - `first_run`：本次启动前既没有 Python 缓存也没有 `startup.log`（splash 据此显示
-  「正在加载组件（首次可能较慢）」）。
+  「正在加载组件（首次可能较慢）」）；
+- `quit_ok` / `quit_exited` / `quit_ms`：只对 `--measure` 有意义 —— 启动器先
+  POST `/api/quit`、等子进程退出，**之后**才写这一行（S3），所以日志里的退出结果
+  与 `--report` 一致；普通启动没有退出动作，这三个键保持 `false/false/0`。
 
 splash 上的「已用时 X.Xs」即 t3 之前的实时耗时；`--measure` 不显示 splash，
 只写日志与报告。
@@ -163,7 +173,9 @@ NetDiag.exe --measure --report "<临时目录>\measure.json"
 ```
 
 - 完整走真实启动（隐藏窗口 + 子进程 `NETDIAG_NO_BROWSER=1`），等 `/api/ping` 成功；
-- 写 `logs\startup.log` 后 **POST `/api/quit`** 优雅退出自己拉起的子进程（8 秒超时才强杀）；
+- **POST `/api/quit`** 优雅退出自己拉起的子进程（8 秒超时才强杀），**然后**写
+  `logs\startup.log` / `--report`，所以 `quit_ok` / `quit_exited` / `quit_ms`
+  记录的是真实退出结果（不再恒 `false/0`，S3）；
 - **不开浏览器、不显示 splash**；已有实例时走复用路径，只记录、**不退出别人的服务**；
 - `--report` 写一行 JSON（同 `startup.log` 的字段，另含 `quit_ok` / `quit_exited` /
   `quit_ms`）。没有 `--report` 时尝试输出到父控制台。
@@ -462,7 +474,8 @@ tshark/Npcap/scapy 判定，只做 `ok → ✓ / 降级 → ⚠ / 缺失 → ✗
   （保留 G5 的 `#settings-service-title` / `#idle-exit-info` / `#settings-idle-label` /
   `#quit-background` 与「立即退出后台」`POST /api/quit`），页内「AI 模型配置」按钮进入 `view-ai`；
   顶栏 AI 按钮仍直接打开配置弹窗。
-- 二级菜单**默认收起**（首屏不预置 `open`）；用户点击一级或选中二级后才展开所在分组。
+- 二级菜单默认收起（标记不预置 `open`），但**首屏会展开当前选中一级所在的组**，
+  让用户看得到「当前是全网体检」；点击其他一级或选中二级后展开对应分组（S6）。
 - 「什么时候用这个」`#mode-guide` 从左侧移到右侧内容区顶部（`resultbar` 之后、`#qcard` 之前），
   随模式更新；结果出来后与问题卡一起收起，切换模式重新展开。
 - 左栏只保留菜单 + 当前模式输入 + 主按钮（`#run`）；`#side-scroll` 纵向滚动、`overflow:hidden`

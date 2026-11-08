@@ -1281,8 +1281,6 @@ let APP_INFO = null;
 let IS_ADMIN = null;
 let SYS_IFACES = [];
 let RUN_DURATION = 0;
-/* H5：二级菜单默认收起；用户点过一级/二级后，选中项所在分组才展开。 */
-let NAV_USER_PICK = false;
 const LOCKED = new Set(UI.locked_modes || []);
 const FIELD_IDS = ["field-target", "field-duration", "field-iface", "field-engine", "field-offline"];
 /* 提权重启后要恢复的表单：sessionStorage 是「同一标签页」的临时存储，刷新/提权后都在。 */
@@ -1923,7 +1921,6 @@ function legacyCapMode(mode, lock) {
 $("#nav").addEventListener("click", (e) => {
   const toggle = e.target.closest("[data-group-toggle]");
   if (toggle) {
-    NAV_USER_PICK = true;
     const group = toggle.closest(".navgroup");
     const open = !group.classList.contains("open");
     group.classList.toggle("open", open);
@@ -1932,13 +1929,11 @@ $("#nav").addEventListener("click", (e) => {
   }
   const modeBtn = e.target.closest("[data-mode]");
   if (modeBtn) {
-    NAV_USER_PICK = true;
     switchMode(modeBtn.dataset.mode);   // 能力锁/管理员锁都由同一个闸门处理
     return;
   }
   const viewBtn = e.target.closest("[data-view]");
   if (viewBtn) {
-    NAV_USER_PICK = true;
     setView(viewBtn.dataset.view);
   }
 });
@@ -1952,8 +1947,10 @@ function markActive(mode, view) {
     const hit = (mode && g.querySelector(`[data-mode="${mode}"]`))
       || (view && g.querySelector(`[data-view="${view}"]`));
     g.classList.toggle("active", !!hit);
-    /* 默认收起（boot 时不展开）；只有用户主动选过一级/二级，才展开所在分组。 */
-    if (hit && NAV_USER_PICK) {
+    /* S6：首屏也要能看见「现在在哪个二级菜单」。初始 markActive 命中的组直接
+       展开（只展开命中组，其它组保持收起/用户原有选择）——之前要等用户点过
+       才展开，首屏四个组全收起，用户看不到当前是「全网体检」。 */
+    if (hit) {
       g.classList.add("open");
       const head = g.querySelector("[data-group-toggle]");
       if (head) head.setAttribute("aria-expanded", "true");
