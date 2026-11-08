@@ -241,6 +241,7 @@
     display:inline-block;transform:rotate(90deg)}
   .consolepanel.collapsed .contoggle .chev{transform:rotate(0)}
   .contoggle .cstate{font-weight:600;color:#94a3b8;font-size:10.5px}
+  .contoggle #console-state{font-weight:700;color:#475569;white-space:nowrap}
   .con-en{font-weight:400;color:#94a3b8;font-size:10px;letter-spacing:.3px;white-space:nowrap}
   .conlast{color:#94a3b8;font-size:10.5px;white-space:nowrap;overflow:hidden;
     text-overflow:ellipsis;max-width:min(42vw,420px)}
@@ -847,8 +848,7 @@
       <div class="conhead">
         <button class="contoggle" id="console-toggle" aria-expanded="false"
                 title="展开 / 折叠运行日志（采集控制台 · Packet Console）">
-          <span class="chev">›</span>运行日志
-          <span class="cstate" id="console-state">（展开）</span>
+          <span class="chev">›</span><span id="console-state">运行日志（展开）</span>
           <span class="con-en">采集控制台 · Packet Console</span>
         </button>
         <span class="conlast" id="loglast">就绪</span>
@@ -2922,7 +2922,10 @@ function setConsoleCollapsed(collapsed) {
   const toggle = $("#console-toggle");
   if (toggle) toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
   const state = $("#console-state");
-  if (state) state.textContent = collapsed ? "（展开）" : "（收起）";
+  if (state) {
+    /* 整块文案连续，折叠态严格是「运行日志（展开）」 */
+    state.textContent = collapsed ? "运行日志（展开）" : "运行日志（收起）";
+  }
 }
 
 function collapseConsole() {

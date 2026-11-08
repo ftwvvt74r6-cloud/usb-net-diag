@@ -130,6 +130,8 @@ class ConsoleFoldStaticTest(unittest.TestCase):
         self.assertIn('aria-expanded="false"', block)
         self.assertIn("运行日志", block)
         self.assertIn("（展开）", block)
+        self.assertIn('<span id="console-state">运行日志（展开）</span>', block,
+                      "折叠态文案必须是连续的「运行日志（展开）」")
         self.assertIn('id="console-state"', block)
         self.assertIn("采集控制台", block, "旧名保留，便于老用户/测试定位")
         self.assertIn("Packet Console", block)
@@ -139,8 +141,8 @@ class ConsoleFoldStaticTest(unittest.TestCase):
                       "setConsoleCollapsed")
         self.assertIn('classList.toggle("collapsed"', fold)
         self.assertIn('setAttribute("aria-expanded"', fold)
-        self.assertIn("（展开）", fold)
-        self.assertIn("（收起）", fold)
+        self.assertIn("运行日志（展开）", fold)
+        self.assertIn("运行日志（收起）", fold)
         toggle = _slice('$("#console-toggle").onclick', 'async function pollPassive',
                         "console-toggle")
         self.assertIn("setConsoleCollapsed(!panel.classList.contains(\"collapsed\"))",
