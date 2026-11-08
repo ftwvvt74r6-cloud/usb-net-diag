@@ -23,6 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+#: P1 起样式在 ``ui/app.css``；样式类断言改读这个文件（内容与严格程度不变）。
+CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
 COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
 STARTUP = COPY["startup"]
 
@@ -730,7 +732,7 @@ class CapabilityCardStaticTest(unittest.TestCase):
         self.assertIn('$("#cap-mask").addEventListener("mousedown"', HTML)
 
     def test_nav_badge_uses_dynamic_data_lock(self):
-        self.assertEqual(HTML.count("content:attr(data-lock)"), 2,
+        self.assertEqual(CSS.count("content:attr(data-lock)"), 2,
                          "导航角标必须按锁定原因动态渲染")
         locks = _slice("function paintLocks", "function legacyCapMode", "paintLocks")
         self.assertIn('b.setAttribute("data-lock", tag)', locks)

@@ -30,6 +30,8 @@ import server  # noqa: E402
 import verdict  # noqa: E402
 
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+#: P1 起样式在 ``ui/app.css``；样式切片与断言改读这个文件。
+CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
 COPY = json.loads(
     (ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
 CONCL_COPY = COPY["conclusion"]
@@ -182,7 +184,7 @@ class UiCardStructureTest(unittest.TestCase):
                 self.assertIn(element_id, card)
 
     def test_card_has_no_collapsible_css(self):
-        css = HTML[HTML.index("/* ---------------- 结论与边界卡"):HTML.index("/* ---------------- 分层条")]
+        css = CSS[CSS.index("/* ---------------- 结论与边界卡"):CSS.index("/* ---------------- 分层条")]
         self.assertNotIn("display:none", css)
         self.assertNotIn("visibility:hidden", css)
 
