@@ -8,13 +8,15 @@
 * 退而求其次是查注册表/文件系统（``npcap_installed``）；
 * 实在要用命令行时，**只判断返回码**，不判断文本。
 
-本文件只放骨架：``is_admin`` / ``npcap_installed`` 可直接用，网络配置查询给了签名
-与实现要点（结构体较长，建议真机调通后再落地）。
+本文件只放骨架：``is_admin`` / ``npcap_installed`` / ``default_gateway`` /
+``icmp_stats`` / ``dns_servers`` 已可用；``adapters`` 现在借 ``tshark -D`` 的网卡名，
+``interface_index_map`` 仍是签名占位（建议真机调通后再落地）。
 """
 
 from __future__ import annotations
 
 import ctypes
+import ipaddress
 import os
 import socket
 import struct
@@ -323,19 +325,111 @@ def icmp_stats(host: str, count: int = 4, timeout_ms: int = 800) -> dict:
     }
 
 
-def dns_servers() -> tuple[str, ...]:
-    """当前生效的 DNS 服务器列表。
+def _registry_dns_values() -> list[str]:
+    """从注册表读出「配置过的 DNS 服务器」原始字符串（内部函数）。
 
-    注意 DNS 可能来自 DHCP / 组策略 / 每网卡独立配置，开了 DoH 之后
-    注册表里的地址与真正发查询的地址还可能不一致 —— 报告里必须标注这一不确定性。
+    只读两条来源，**不解析任何本地化 CLI 文本**：
+
+    1. 每块网卡的 ``Tcpip\\Parameters\\Interfaces\\{GUID}`` 下的
+       ``NameServer``（静态配置）与 ``DhcpNameServer``（DHCP 下发）；
+    2. 全局 ``Tcpip\\Parameters`` 下的同名值（组策略/旧配置可能只写这里）。
+
+    网络适配器键名是 GUID（与语言无关），所以这条路在中文/英文系统上行为一致。
 
     Returns:
-        tuple[str, ...]: DNS 服务器地址。
-
-    Raises:
-        NotImplementedError: 本阶段未实现（随 ``adapters()`` 一起落地）。
+        list[str]: 原始值（可能含空格/逗号分隔的多个地址、``0.0.0.0`` 与 IPv6）；
+            非 Windows、注册表不可读时返回空列表（不抛异常）。
     """
-    raise NotImplementedError("dns_servers(): 见 adapters() 的 FirstDnsServerAddress")
+    if not IS_WINDOWS:
+        return []
+    try:
+        import winreg  # noqa: PLC0415  仅 Windows 可用
+    except ImportError:
+        return []
+    base = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"
+    values: list[str] = []
+
+    def _read(handle) -> None:
+        for name in ("NameServer", "DhcpNameServer"):
+            try:
+                value, _kind = winreg.QueryValueEx(handle, name)
+            except OSError:
+                continue
+            if isinstance(value, str) and value.strip():
+                values.append(value)
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as root:
+            _read(root)
+            try:
+                interfaces = winreg.OpenKey(root, "Interfaces")
+            except OSError:
+                interfaces = None
+            if interfaces is not None:
+                with interfaces:
+                    index = 0
+                    while True:
+                        try:
+                            guid = winreg.EnumKey(interfaces, index)
+                        except OSError:
+                            break
+                        index += 1
+                        try:
+                            with winreg.OpenKey(interfaces, guid) as card:
+                                _read(card)
+                        except OSError:
+                            continue
+    except OSError:
+        return values
+    return values
+
+
+def _parse_dns_list(values) -> tuple[str, ...]:
+    """把注册表原始值拆成「有效 IPv4 列表」（纯函数，去重保序）。
+
+    Args:
+        values: 原始字符串集合（单个值里可能有空格/逗号/分号分隔的多个地址）。
+
+    Returns:
+        tuple[str, ...]: 规范化后的 IPv4 地址；跳过空串、``0.0.0.0``、组播、
+            IPv6（带 ``%`` 的链路本地地址也跳过）。顺序按出现顺序。
+    """
+    out: list[str] = []
+    for raw in values or ():
+        text = str(raw or "").replace(";", " ").replace(",", " ")
+        for part in text.split():
+            try:
+                address = ipaddress.ip_address(part.strip())
+            except ValueError:
+                continue
+            if address.version != 4 or address.is_unspecified or address.is_multicast:
+                continue
+            normalized = str(address)
+            if normalized not in out:
+                out.append(normalized)
+    return tuple(out)
+
+
+def dns_servers() -> tuple[str, ...]:
+    """当前生效的 DNS 服务器列表（只读注册表，不解析本地化 CLI 文本）。
+
+    注意 DNS 可能来自 DHCP / 组策略 / 每网卡独立配置，开了 DoH（DNS over HTTPS）
+    之后注册表里的地址与真正发查询的地址还可能不一致 —— 报告里必须标注这一
+    不确定性：探 DNS 服务器只能证明「这台机器到该地址的 UDP/53 通不通」。
+
+    Returns:
+        tuple[str, ...]: 去重后的 IPv4 地址（静态配置优先于 DHCP 下发，网卡顺序按
+        注册表枚举顺序）；非 Windows、注册表不可读、没有任何有效地址时返回
+        ``()`` —— **不抛异常**（探针拿不到 DNS 角色只会少一行，不该拖垮诊断）。
+
+    Example:
+        >>> dns_servers()  # doctest: +SKIP
+        ('192.0.2.53',)
+    """
+    try:
+        return _parse_dns_list(_registry_dns_values())
+    except Exception:  # noqa: BLE001  注册表读取失败只按「没有 DNS 角色」降级
+        return ()
 
 
 def interface_index_map() -> dict[str, int]:

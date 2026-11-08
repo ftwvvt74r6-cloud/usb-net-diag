@@ -66,6 +66,144 @@ def _p(key: str, **args) -> str:
     return _copy_text("probe", key, default="", **args)
 
 
+def _pa(key: str, **args) -> str:
+    """取路径剖面（MTR）的静态文案（``copy.path`` section）。
+
+    Args:
+        key: ``path`` section 内的键。
+        **args: ``{name}`` 占位符实参。
+
+    Returns:
+        str: 可直接展示的文案；缺 key 时回退成 key 本身或空串。
+    """
+    return _copy_text("path", key, default="", **args)
+
+
+def _path_verdict_text(profile: dict) -> str:
+    """把路径结论机器码翻成一句中文（``copy.path.verdict_*``）。
+
+    Args:
+        profile: ``meta["path_profile"]``；读 ``verdict_key`` 与 ``unreachable``。
+
+    Returns:
+        str: 结论句；未知机器码返回空串（渲染层不猜）。
+    """
+    code = str(profile.get("verdict_key") or "")
+    keys = {
+        "PATH.OK": "verdict_ok",
+        "PATH.LOCAL_SIDE": "verdict_local_side",
+        "PATH.TRANSPORT_NET": "verdict_transport_net",
+        "PATH.SERVER_EDGE": "verdict_server_edge",
+        "PATH.ICMP_FILTERED": "verdict_icmp_filtered",
+        "PATH.NO_DATA": ("verdict_unreachable" if profile.get("unreachable")
+                         else "verdict_no_data"),
+    }
+    key = keys.get(code)
+    return _pa(key) if key else ""
+
+
+def _path_method_text(profile: dict) -> str:
+    """探测方式标注：ICMP / TCP（TCP 文案里写明「ICMP 被过滤，改用 TCP 探测」）。
+
+    Args:
+        profile: ``meta["path_profile"]``；读 ``method`` / ``icmp_filtered``。
+
+    Returns:
+        str: 可直接展示的一行。
+    """
+    if str(profile.get("method") or "icmp") == "tcp" or profile.get("icmp_filtered"):
+        return _pa("method_tcp")
+    return _pa("method_icmp")
+
+
+def _path_status_text(status: str) -> str:
+    """单跳状态机器码（ok/loss/filtered/...）→ 中文文案。
+
+    Args:
+        status: ``HopStatus`` 的机器码。
+
+    Returns:
+        str: 可直接展示的状态名；未知值原样返回。
+    """
+    key = "status_" + str(status or "")
+    text = _pa(key)
+    return text or str(status or "-")
+
+
+def _render_path_profile(profile: dict) -> list[str]:
+    """渲染「路径剖面」区块（只在 ``meta.path_profile`` 有逐跳数据时调用）。
+
+    区块放在「探针基线」之后：先看探针的两侧对照，再看「路径上第几跳开始坏」。
+    没有 RTT 样本的跳写「未探到」，**不写 0ms**；``completed=False``（时间预算
+    用完/被抓包取消）必须明说「探测未完成」，不能让人把残缺路径当完整结论。
+
+    Args:
+        profile: ``meta["path_profile"]``。
+
+    Returns:
+        list[str]: 报告行（已含结尾空行）；没有逐跳数据时返回空列表（不输出空区块）。
+    """
+    hops = profile.get("hops") or []
+    if not hops:
+        return []
+    lines = [_pa("section_title"), ""]
+    rows = []
+    template = _pa("rtt_value")
+    if "{" not in template:
+        template = "{min}/{avg}/{max} ms"
+    for hop in hops:
+        n = int(hop.get("rtt_n") or 0)
+        if n > 0:
+            try:
+                rtt = template.format(min=hop.get("rtt_min_ms"),
+                                      avg=hop.get("rtt_avg_ms"),
+                                      max=hop.get("rtt_max_ms"))
+            except (KeyError, IndexError, ValueError):
+                rtt = template
+            jitter = f"{hop.get('jitter_ms')}ms"
+        else:
+            rtt = _pa("no_sample")
+            jitter = _pa("no_sample")
+        loss = hop.get("loss_pct")
+        rows.append([
+            hop.get("ttl", "-"),
+            hop.get("ip") or _pa("ip_unknown"),
+            hop.get("sent", 0),
+            hop.get("lost", 0),
+            "-" if loss is None else f"{loss:g}%",
+            rtt,
+            jitter,
+            _path_status_text(str(hop.get("status") or "")),
+        ])
+    lines.append(_table(
+        [_pa("th_ttl"), _pa("th_ip"), _pa("th_sent"), _pa("th_lost"),
+         _pa("th_loss"), _pa("th_rtt"), _pa("th_jitter"), _pa("th_status")],
+        rows))
+    lines.append("")
+    lines.append(_pa("target_line", target=profile.get("target", "-"),
+                     ip=profile.get("target_ip", "-"),
+                     probes=profile.get("probes_sent", 0)))
+    lines.append(_path_method_text(profile))
+    verdict = _path_verdict_text(profile)
+    if verdict:
+        lines.append(verdict)
+    if profile.get("degraded_ttl") is not None:
+        lines.append(_pa("degraded_line", ttl=profile.get("degraded_ttl")))
+        if profile.get("baseline_ms") is not None:
+            lines.append(_pa("baseline_line", ms=profile.get("baseline_ms")))
+    if profile.get("reached_target"):
+        reached_ttl = next((hop.get("ttl") for hop in hops
+                            if hop.get("ip") == profile.get("target_ip")), "-")
+        lines.append(_pa("reached_line", ttl=reached_ttl))
+    if not profile.get("completed", True):
+        lines.append(_pa("not_completed_line"))
+    lines.append(_pa("excluded_icmp", count=profile.get("excluded_icmp", 0)))
+    if profile.get("tun_suspected"):
+        lines.append(_pa("tun_hint"))
+    lines.append("")
+    return lines
+
+
 def _state_text(status: str) -> str:
     """层状态机器码（ok/warn/bad/na/insufficient）→ 中文文案。"""
     return _copy_text("state", status, default=status)
@@ -296,6 +434,12 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     baseline = meta.get("probe_baseline")
     if isinstance(baseline, dict):
         L += _render_probe_baseline(baseline, vd)
+
+    # ---------------- 路径剖面（只有实时 + 有目标 + MTR 有数据才出现） ----------------
+    # 与「探针基线」同一口径：没有 meta.path_profile 就一行不加（离线 20 产物红线）。
+    path_profile = meta.get("path_profile")
+    if isinstance(path_profile, dict):
+        L += _render_path_profile(path_profile)
 
     # ---------------- 二、问题详解 ----------------
     L += [_t("section_points"), ""]

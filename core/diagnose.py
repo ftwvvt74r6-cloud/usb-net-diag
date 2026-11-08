@@ -509,6 +509,11 @@ def _shadow_prober_for(target: str, duration: int, logger) -> "pathprobe.ShadowP
         if not specs:
             logger("[提示] 影子探测：没有可用目标（网关与业务目标都没拿到），本次跳过")
             return None
+        if targets.get("dns_skip") == "loopback":
+            logger("[提示] 影子探测：DNS 服务器是本机回环地址，跳过 DNS 角色"
+                   "（探它等于探自己，测不出路径好坏）")
+        elif targets.get("dns_skip"):
+            logger("[提示] 影子探测：DNS 服务器地址不可用于探测，跳过 DNS 角色")
         prober = pathprobe.ShadowProber(
             specs, interval_s=pathprobe.PROBE_INTERVAL_S,
             max_rounds=pathprobe.rounds_for(duration))
@@ -522,22 +527,77 @@ def _shadow_prober_for(target: str, duration: int, logger) -> "pathprobe.ShadowP
         return None
 
 
-def _merge_probe_filter(bpf: str, prober) -> str:
+def _path_profiler_for(target: str, duration: int, logger) -> "pathprobe.PathProfiler | None":
+    """构造路径探测（MTR）后台任务（任何失败都只降级为「路径不可用」）。
+
+    只有**有目标**才跑：全网体检（``target`` 为空）没有对端，逐跳没有意义。
+    时间预算 = 抓包时长 + 5 秒（SPEC V9）；超时后 :func:`pathprobe.run` 返回已
+    完成的跳，绝不把抓包主流程拖住。
+
+    Args:
+        target: 抓包目标（IP / 域名 / CIDR）；空表示全网体检 → 不跑 MTR。
+        duration: 抓包秒数，用于算时间预算。
+        logger: 日志回调。
+
+    Returns:
+        pathprobe.PathProfiler | None: 已构造但**未启动**的后台任务；无目标或
+            构造失败时返回 ``None``（本次不做路径探测）。
+    """
+    if not str(target or "").strip():
+        return None
+    try:
+        budget = max(8.0, float(duration or 0) + 5.0)
+        profiler = pathprobe.PathProfiler(
+            target, port=None, max_hops=pathprobe.PATH_DEFAULT_MAX_HOPS,
+            samples=3, timeout_s=0.8, budget_s=budget)
+        logger(f"[提示] 路径探测（MTR）已启用：最多 {profiler.max_hops} 跳 × "
+               f"{profiler.samples} 样本，时间预算 {profiler.budget_s:g}s"
+               f"（抓包时长 + 5s）")
+        return profiler
+    except Exception as exc:                       # noqa: BLE001  路径探测失败只降级
+        logger(f"[提示] 路径探测不可用，已跳过（不影响诊断）："
+               f"{type(exc).__name__}: {exc}")
+        return None
+
+
+def _merge_probe_filter(bpf: str, prober, path_kinds=()) -> str:
     """把探针排除式合并进用户抓包过滤器（``AND`` 语义，用户串必须加括号）。
+
+    MTR 与影子探测共用同一套标记（ICMP id / TCP 源端口段），但**即使影子探测
+    没有任何目标**，只要有诊断目标就会发 MTR 包 —— 所以排除式的协议集合必须把
+    ``path_kinds`` 并进去，否则「没有网关目标」那一次会把 MTR 包抓进业务统计。
 
     Args:
         bpf: 用户过滤器；空串表示抓全网。
-        prober: 已构造的影子探针；``None`` 时原样返回。
+        prober: 已构造的影子探针；``None`` 时只按 ``path_kinds`` 合并。
+        path_kinds: MTR 可能发出的探针协议机器码（``icmp`` / ``tcp_syn``）。
 
     Returns:
         str: 合并后的 BPF；没有探针/排除式时与入参相同。
     """
-    if prober is None:
+    kinds = {str(kind) for kind in (path_kinds or ())}
+    if prober is not None:
+        kinds |= ({kind.value for kind in prober.ledger.kinds()}
+                  or {spec.kind.value for spec in prober.specs})
+    if not kinds:
         return bpf
-    exclusion = prober.exclusion_bpf()
+    exclusion = pathprobe.exclusion_bpf(kinds)
     if not exclusion:
         return bpf
     return f"({bpf}) and ({exclusion})" if bpf else exclusion
+
+
+def _merge_display_filters(*filters: str) -> str:
+    """把多个 tshark ``-Y`` 显示过滤用 ``AND`` 连起来（空串自动跳过）。
+
+    Args:
+        *filters: 显示过滤串；空串代表「这一项不需要过滤」。
+
+    Returns:
+        str: 合并后的过滤串；全部为空时返回空串（调用方传 ``None`` 表示不过滤）。
+    """
+    parts = [str(item).strip() for item in filters if str(item or "").strip()]
+    return " and ".join(parts)
 
 
 def capture_live(target: str = "", duration: int = 30, interface: str | None = None,
@@ -555,14 +615,17 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             抓到 0 包/0 字节也不换卡（尊重用户选择，避免「指定 Meta 却静默换到 WLAN」
             给出错误结论），直接返回带候选网卡与自助命令的错误。
         logger: 日志回调。
-        shadow: 是否在抓包同时启动影子探测（默认 ``False``；``run_scan``/UI 传
-            ``True``）。探针的抓包排除式会**合并进 BPF**（第一道隔离），账本随
-            成功结果以 ``probe`` 键返回（``run_scan`` 据此注入基线）。
+        shadow: 是否在抓包同时启动影子探测与路径探测（MTR）。默认 ``False``；
+            ``run_scan``/UI 传 ``True``。两类探针的抓包排除式都会**合并进 BPF**
+            （第一道隔离），账本/路径结果随成功结果分别以 ``probe`` / ``path``
+            键返回（``run_scan`` 据此注入基线/路径剖面）。**MTR 只在有目标时启动**：
+            全网体检没有对端，逐跳没有意义。
 
     Returns:
         dict: 成功 ``{"ok": True, "pcap": str, "interface": str, "interface_index": int,
             "bpf": str, "duration": int}``（``shadow=True`` 且确实发出探针时再加
-            ``"probe"``：账本 + 聚合基线 + 三种过滤串）；失败 ``{"ok": False,
+            ``"probe"``：账本 + 聚合基线 + 三种过滤串；MTR 产出了逐跳数据时再加
+            ``"path"``：路径剖面 + 两种过滤串）；失败 ``{"ok": False,
             "error": str, "degraded": bool, "empty": bool, "interface": str,
             "bpf": str}``。
             **所有**返回路径都带 ``interface`` / ``bpf``（没有可用值时为 ``""``），
@@ -582,7 +645,8 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
 
         影子探测的线程收尾放在 ``finally``：抓包成功/失败/抛异常都会
         ``stop()`` + ``join(3)``；探针自身异常只写进账本 ``error``，不影响
-        本函数返回值与主诊断退出码。
+        本函数返回值与主诊断退出码。路径探测同理：线程异常只写进 ``path.error``，
+        时间预算（抓包时长 + 5s）用完就返回已完成的跳，绝不阻塞抓包。
     """
     ts = tshark.find_tshark()
     if not ts:
@@ -638,15 +702,27 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     # 影子探测必须在 tshark 启动**之前**构造：排除式要合并进 capture filter，
     # 而 filter 一旦交给 tshark 就不能再改（账本随抓包增长，BPF 不能）。
     prober = _shadow_prober_for(target, duration, logger) if shadow else None
-    if prober is not None:
-        bpf = _merge_probe_filter(bpf, prober)
-        if prober.exclusion_bpf():
-            logger("[提示] 影子探测：抓包过滤器已 AND 合并探针排除式（第一道隔离）")
+    # 路径探测（MTR）与抓包并存：有目标才跑（全网体检没有对端，逐跳无意义）。
+    profiler = _path_profiler_for(target, duration, logger) if shadow else None
+    if prober is not None or profiler is not None:
+        path_kinds = (tuple(profiler.snapshot()["planned_kinds"])
+                      if profiler is not None else ())
+        merged = _merge_probe_filter(bpf, prober, path_kinds)
+        if merged != bpf:
+            bpf = merged
+            logger("[提示] 影子探测/路径探测：抓包过滤器已 AND 合并探针排除式"
+                   "（第一道隔离）")
+    for worker, name in ((prober, "影子探测"), (profiler, "路径探测")):
+        if worker is None:
+            continue
         try:
-            prober.start()
+            worker.start()
         except Exception as exc:                   # noqa: BLE001  探针起不来不拦诊断
-            logger(f"[提示] 影子探测线程启动失败，已跳过：{type(exc).__name__}: {exc}")
-            prober = None
+            logger(f"[提示] {name}线程启动失败，已跳过：{type(exc).__name__}: {exc}")
+            if worker is prober:
+                prober = None
+            else:
+                profiler = None
 
     # 显式指定只抓这一块；自动模式才允许「0 包换下一块」重试（最多 3 块）。
     plan = [iface] if explicit else _capture_candidates(iface, ordered, limit=3)
@@ -738,16 +814,28 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
     try:
         result = _attempts()
     finally:
-        if prober is not None:
-            prober.stop()
-            if not prober.join(3.0):
-                logger("[提示] 影子探测线程 3 秒内未退出；它是 daemon 线程，不阻塞进程退出")
+        for worker, name in ((prober, "影子探测"), (profiler, "路径探测")):
+            if worker is None:
+                continue
+            worker.stop()
+            if not worker.join(3.0):
+                logger(f"[提示] {name}线程 3 秒内未退出；它是 daemon 线程，不阻塞进程退出")
     if prober is not None:
         if prober.sent_count:
             result["probe"] = prober.snapshot()
             logger(f"影子探测结束：共发 {prober.sent_count} 个探针包")
         else:
             logger("[提示] 影子探测没有发出任何探针，本次不注入探针基线")
+    if profiler is not None:
+        profile = profiler.result
+        if profile is not None and profile.hops:
+            result["path"] = profiler.snapshot()
+            logger(f"路径探测结束：{len(profile.hops)} 跳，结论 {profile.verdict_key}，"
+                   f"第 {profile.degraded_ttl or '—'} 跳开始劣化")
+        else:
+            reason = profiler.error or (profile.error if profile is not None else "")
+            logger("[提示] 路径探测没有产生可用数据，本次不注入路径剖面"
+                   f"（不影响诊断）{('：' + reason) if reason else ''}")
     return result
 
 
@@ -973,16 +1061,17 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
         report_dir: 报告输出目录；``None``（默认）写 ``reports/``，与历史行为一致。
             给定时只写该目录（目录不存在会自动创建），文件名清洗仍由
             :func:`report.save` 负责。
-        shadow: 实时抓包时是否同时做影子探测。**产品入口默认开**（CLI 不传
-            ``--no-shadow`` 即开、UI 默认勾选、``/api/scan`` 缺省 ``true``）；
-            本函数作为库入口默认 ``False``，保证旧调用方行为不变。**离线路径
-            （``pcap`` 非空）恒不启动探针**——用户可能只是在分析别人给的抓包
-            文件。
+        shadow: 实时抓包时是否同时做影子探测**与路径探测（MTR）**。**产品入口默认开**
+            （CLI 不传 ``--no-shadow`` 即开、UI 默认勾选、``/api/scan`` 缺省
+            ``true``）；本函数作为库入口默认 ``False``，保证旧调用方行为不变。
+            **离线路径（``pcap`` 非空）恒不启动探针**——用户可能只是在分析别人
+            给的抓包文件。MTR 只在有目标时启动（全网体检没有对端）。
 
     Returns:
         dict: ``analyzer.analyze()`` 的结果，另加 ``report``（``.md``/``.json`` 落盘路径）
             与 ``capture``（本次采集参数）；有探针数据时 ``meta["probe_baseline"]``
-            里带「探针基线」（无数据时该键不存在，输出与 main 逐字节一致）。
+            里带「探针基线」、有逐跳数据时 ``meta["path_profile"]`` 里带「路径剖面」
+            （无数据时这两个键都不存在，输出与 main 逐字节一致）。
             失败时 ``{"ok": False, "error": "..."}``。
 
     Note:
@@ -992,7 +1081,8 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
 
         影子探测的三层隔离都在本函数/``capture_live`` 内完成：抓包 BPF 合并、
         分析阶段 ``-Y`` 显示过滤、报告里写「已排除 N 个探针包」；任何一步失败
-        都只降级为「探针不可用」，不改变主诊断结论与退出码。
+        都只降级为「探针不可用」，不改变主诊断结论与退出码。路径探测同理，并且
+        多一条：ICMP type 11（TTL 超时）整类从**显示过滤**排除，排除数量写进报告。
     """
     started = time.monotonic()
     mode = "offline" if pcap else "live"
@@ -1110,7 +1200,12 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
                     "interface": cap.get("interface", "")}
 
     probe = cap.get("probe") or {}
-    display_filter = str(probe.get("exclusion_display_filter") or "")
+    path = cap.get("path") or {}
+    # 两道防御层合并：影子探针（按标记）+ 路径探测（按标记 + 整类 ICMP type 11）。
+    # 用 AND 连接：任意一项为空就等价于另一项。
+    display_filter = _merge_display_filters(
+        str(probe.get("exclusion_display_filter") or ""),
+        str(path.get("exclusion_display_filter") or ""))
     logger("开始分析报文 ...")
     result = analyzer.analyze(cap["pcap"], target=target,
                               ti_key=cfg.get("threat_intel_key", ""), log=logger,
@@ -1152,6 +1247,24 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         result["meta"]["probe_baseline"] = baseline
         logger(f"探针基线：发出 {baseline.get('sent', 0)} 个、收到 "
                f"{baseline.get('recv', 0)} 个；已从业务统计排除 {excluded} 个探针包")
+
+    # 路径剖面同样只「有数据才注入」：离线路径没有 cap["path"]，一个键都不加。
+    profile = path.get("profile")
+    if isinstance(profile, dict) and profile.get("hops"):
+        excluded_icmp = 0
+        try:
+            ts = tshark.find_tshark()
+            if ts:
+                excluded_icmp = pathprobe.count_time_exceeded_packets(ts, cap["pcap"])
+        except Exception as exc:                   # noqa: BLE001  统计失败只影响说明数字
+            logger(f"[提示] 统计 ICMP 超时包数失败（不影响结论）："
+                   f"{type(exc).__name__}: {exc}")
+        profile = dict(profile)
+        profile["excluded_icmp"] = excluded_icmp
+        result["meta"]["path_profile"] = profile
+        logger(f"路径剖面：{len(profile.get('hops') or [])} 跳（方式 {profile.get('method')}），"
+               f"第 {profile.get('degraded_ttl') or '—'} 跳开始劣化；"
+               f"已从业务统计排除 {excluded_icmp} 个 ICMP 超时包")
 
     if result["meta"]["packets"] == 0:
         result["rows"].insert(0, {

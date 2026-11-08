@@ -84,6 +84,17 @@ def _tshark_ready() -> bool:
         return False
 
 
+def _fake_path_result():
+    """一个假的路径探测结果（MTR 接线用例用，不真发包）。"""
+    return pathprobe.PathProbeResult(
+        target="93.184.216.34", target_ip="93.184.216.34",
+        hops=(pathprobe.HopStat(ttl=1, ip="192.0.2.1", sent=3, lost=0,
+                                rtt_min_ms=1.0, rtt_avg_ms=1.5,
+                                rtt_max_ms=2.0, jitter_ms=0.5, rtt_n=3),),
+        verdict_key=pathprobe.PATH_OK, method="icmp", reached_target=True,
+        max_hops=16, samples=3, timeout_s=0.8, probes_sent=3)
+
+
 HAVE_SCAPY = importlib.util.find_spec("scapy") is not None
 HAVE_TSHARK = _tshark_ready()
 
@@ -386,14 +397,18 @@ class CaptureLiveShadowWiringTest(unittest.TestCase):
                 mock.patch.object(diagnose.pathprobe, "discover_targets",
                                   return_value={"gateway": GW}), \
                 mock.patch.object(diagnose.pathprobe, "send_probe",
-                                  return_value=(True, 1.0, GW, "")):
+                                  return_value=(True, 1.0, GW, "")), \
+                mock.patch.object(diagnose.pathprobe, "run",
+                                  return_value=_fake_path_result()):
             result = diagnose.capture_live(target="93.184.216.34", duration=3,
                                            interface="5", shadow=True,
                                            logger=logs.append)
 
         self.assertTrue(result.get("ok"), result)
+        # MTR 与影子探针共用标记，但 ICMP + TCP 两种排除式都必须进 BPF：
+        # 有目标时 MTR 会发 ICMP 探测，ICMP 被过滤时还会降级发 TCP SYN。
         expected = (f"(host 93.184.216.34) and "
-                    f"({pathprobe.exclusion_bpf([pathprobe.ProbeKind.ICMP])})")
+                    f"({pathprobe.exclusion_bpf([pathprobe.ProbeKind.ICMP, pathprobe.ProbeKind.TCP_SYN])})")
         self.assertEqual(filters, [expected],
                          "用户 BPF 必须与探针排除式 AND 合并（只加排除式或只加用户式都不对）")
         self.assertIn("合并探针排除式", "\n".join(logs))
@@ -401,9 +416,16 @@ class CaptureLiveShadowWiringTest(unittest.TestCase):
         self.assertGreaterEqual(probe["baseline"]["probe_count"], 1,
                                 "抓包期间必须真的跑过至少一轮探针")
         self.assertEqual(probe["baseline"]["roles"][0]["role"], "gateway")
+        self.assertGreaterEqual(len(result["path"]["profile"]["hops"]), 1,
+                                "MTR 有逐跳数据时必须随抓包结果返回 path 快照")
 
     def test_shadow_true_does_not_merge_when_no_targets(self):
-        """拿不到网关/目标时：不合并过滤、不注入 probe，抓包照常。"""
+        """全网体检（无目标）+ 拿不到探针目标：不合并过滤、不注入区块，抓包照常。
+
+        注：有目标时 MTR 一定会发探测包，BPF 必须合并它的标记（见
+        ``test_mtr.py::CaptureLivePathWiringTest``）—— 所以「不改过滤器」的可测
+        场景是无目标的全网体检，这里钉的就是它。
+        """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         captures = Path(tmp.name) / "captures"
@@ -430,14 +452,17 @@ class CaptureLiveShadowWiringTest(unittest.TestCase):
                                   return_value=list(self.IFACES)), \
                 mock.patch.object(tshark, "run", side_effect=fake_run), \
                 mock.patch.object(diagnose.pathprobe, "discover_targets",
-                                  return_value={}):
-            result = diagnose.capture_live(target="93.184.216.34", duration=3,
+                                  return_value={}), \
+                mock.patch.object(diagnose.pathprobe, "run") as mtr:
+            result = diagnose.capture_live(target="", duration=3,
                                            interface="5", shadow=True,
                                            logger=lambda _m: None)
 
         self.assertTrue(result.get("ok"), result)
-        self.assertEqual(filters, ["host 93.184.216.34"], "没有探针目标时不许改用户过滤器")
+        self.assertEqual(filters, [], "全网体检没有探针目标时不许凭空造过滤器")
         self.assertNotIn("probe", result)
+        self.assertNotIn("path", result)
+        self.assertEqual(mtr.call_count, 0, "全网体检（无目标）不跑 MTR")
 
 
 # ---------------------------------------------------------------- V4 隔离

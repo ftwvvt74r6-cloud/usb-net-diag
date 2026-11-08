@@ -645,11 +645,11 @@
       <div class="field hidden" id="field-shadow">
         <label class="checkline" for="shadow-toggle">
           <input type="checkbox" id="shadow-toggle" checked />
-          抓包同时做探针基线（每 5 秒，少量探测包）
+          抓包同时做路径剖面与探针基线（每 5 秒，少量探测包）
         </label>
-        <div class="hint">探针只发 1 个 ICMP / TCP SYN / DNS 查询，已从业务统计里排除，
-          用来给「本次结论」一个 RTT / 丢包对照基线；关闭后不发探针、报告也没有该区块。
-          被动监听 / 分析抓包文件恒不发探针。</div>
+        <div class="hint">探针只发少量 ICMP / TCP SYN / DNS 查询，并做一次 TTL 递增的逐跳探测（有目标时），
+          都已从业务统计里排除；用来给「本次结论」一个 RTT / 丢包对照基线与逐跳路径。
+          关闭后不发探针、也不做逐跳，报告没有这两个区块。被动监听 / 分析抓包文件恒不发探针。</div>
       </div>
 
       <div class="field" id="field-iface">
@@ -691,6 +691,14 @@
       <div class="field">
         <label>端口（留空自动）</label>
         <input type="number" id="probe-port" min="1" max="65535" placeholder="例：443" />
+      </div>
+      <div class="field">
+        <label class="checkline" for="probe-path-toggle">
+          <input type="checkbox" id="probe-path-toggle" checked />
+          逐跳路径（MTR）
+        </label>
+        <div class="hint">体检成功后做一次 TTL 递增的逐跳探测（最多 16 跳），给出每跳 RTT / 丢包与
+          「第几跳开始劣化」；ICMP 被过滤时自动改用 TCP 探测并标注。关闭后不发任何逐跳探测包。</div>
       </div>
       <details class="adv">
         <summary>高级选项（探测次数 / 协议）</summary>
@@ -2270,6 +2278,76 @@ function renderProbeBaseline(pb, copy, contrast) {
     + direction;
 }
 
+/* ---------- 路径剖面（MTR 逐跳）区块 ----------
+   文案与探针基线同一套做法：随结果下发 copy.path（res.ui_copy.path），
+   页面只做排版与数字拼接；缺文案时不渲染该区块。 */
+function copyFill(tpl, map) {
+  let out = String(tpl || "");
+  Object.keys(map || {}).forEach((key) => {
+    const value = (map[key] === null || map[key] === undefined) ? "-" : map[key];
+    out = out.split("{" + key + "}").join(String(value));
+  });
+  return out;
+}
+
+function renderPathProfile(pp, copy) {
+  if (!pp || !(pp.hops || []).length || !copy) return "";
+  const noSample = copy.no_sample || "";
+  const rttTpl = String(copy.rtt_value || "{min}/{avg}/{max} ms");
+  const verdictKeys = {
+    "PATH.OK": "verdict_ok",
+    "PATH.LOCAL_SIDE": "verdict_local_side",
+    "PATH.TRANSPORT_NET": "verdict_transport_net",
+    "PATH.SERVER_EDGE": "verdict_server_edge",
+    "PATH.ICMP_FILTERED": "verdict_icmp_filtered",
+    "PATH.NO_DATA": pp.unreachable ? "verdict_unreachable" : "verdict_no_data",
+  };
+  const rows = (pp.hops || []).map((h) => {
+    const n = Number(h.rtt_n || 0);
+    const rtt = n > 0
+      ? copyFill(rttTpl, { min: h.rtt_min_ms, avg: h.rtt_avg_ms, max: h.rtt_max_ms })
+      : noSample;
+    const jitter = n > 0 ? (h.jitter_ms + "ms") : noSample;
+    const loss = (h.loss_pct === null || h.loss_pct === undefined) ? "-" : (h.loss_pct + "%");
+    const status = copy["status_" + (h.status || "")] || h.status || "-";
+    return '<tr><td class="mono">' + esc(h.ttl) + '</td><td class="mono">'
+      + esc(h.ip || copy.ip_unknown || "-") + '</td>'
+      + '<td class="mono">' + esc(h.sent || 0) + '</td><td class="mono">' + esc(h.lost || 0) + '</td>'
+      + '<td class="mono">' + esc(loss) + '</td><td class="mono">' + esc(rtt) + '</td>'
+      + '<td class="mono">' + esc(jitter) + '</td><td class="mono">' + esc(status) + '</td></tr>';
+  }).join("");
+  const lines = [];
+  lines.push(copyFill(copy.target_line,
+    { target: pp.target, ip: pp.target_ip, probes: pp.probes_sent }));
+  lines.push(pp.method === "tcp" || pp.icmp_filtered ? copy.method_tcp : copy.method_icmp);
+  const verdictKey = verdictKeys[pp.verdict_key];
+  if (verdictKey && copy[verdictKey]) lines.push(copy[verdictKey]);
+  if (pp.degraded_ttl !== null && pp.degraded_ttl !== undefined) {
+    lines.push(copyFill(copy.degraded_line, { ttl: pp.degraded_ttl }));
+    if (pp.baseline_ms !== null && pp.baseline_ms !== undefined) {
+      lines.push(copyFill(copy.baseline_line, { ms: pp.baseline_ms }));
+    }
+  }
+  if (pp.reached_target) {
+    const reached = (pp.hops || []).find((h) => h.ip === pp.target_ip);
+    lines.push(copyFill(copy.reached_line, { ttl: reached ? reached.ttl : "-" }));
+  }
+  if (pp.completed === false) lines.push(copy.not_completed_line);
+  lines.push(copyFill(copy.excluded_icmp,
+    { count: pp.excluded_icmp === null || pp.excluded_icmp === undefined ? 0 : pp.excluded_icmp }));
+  if (pp.tun_suspected) lines.push(copy.tun_hint);
+  return '<div class="sectitle">' + esc(copy.ui_title || "") + '</div>'
+    + '<div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table>'
+    + '<thead><tr><th>' + esc(copy.th_ttl || "") + '</th><th>' + esc(copy.th_ip || "") + '</th>'
+    + '<th>' + esc(copy.th_sent || "") + '</th><th>' + esc(copy.th_lost || "") + '</th>'
+    + '<th>' + esc(copy.th_loss || "") + '</th><th>' + esc(copy.th_rtt || "") + '</th>'
+    + '<th>' + esc(copy.th_jitter || "") + '</th><th>' + esc(copy.th_status || "") + '</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>'
+    + '<div class="hint" style="font-size:12px;color:var(--text-2)">'
+    + lines.filter(Boolean).map(esc).join('<br>') + '</div>'
+    + (copy.ui_hint ? '<div class="hint">' + esc(copy.ui_hint) + '</div>' : "");
+}
+
 function render(res, actions) {
   if (!res || !res.ok) return;
   hideQuestion();
@@ -2409,6 +2487,9 @@ function render(res, actions) {
   /* 影子探测基线：只有实时抓包 + 开了探针 + 真发出过探针时后端才下发。 */
   const probeBlock = renderProbeBaseline(
     m.probe_baseline, (res.ui_copy || {}).probe || null, vd.probe_contrast);
+  /* 路径剖面：只有实时抓包 + 有目标 + MTR 真拿到逐跳数据时后端才下发。 */
+  const pathBlock = renderPathProfile(
+    m.path_profile, (res.ui_copy || {}).path || null);
 
   const html = `
     <div class="vcard ${esc(lv)}" data-card="${isNormal ? "normal" : "fault"}">
@@ -2424,6 +2505,7 @@ function render(res, actions) {
     <div class="statgrid">${statGrid}</div>
 
     ${probeBlock}
+    ${pathBlock}
 
     <div class="sectitle">分层定位（自下而上，哪一层红了就先查哪一层）</div>
     <div class="layerbar">${layerbar}</div>
@@ -2590,7 +2672,8 @@ async function runProbe(){
   hideQuestion();
   btn.disabled = true; btn.textContent = "测试中…";
   $("#result-chip").textContent = "测试中…";
-  out.innerHTML = '<div class="msg wait" style="margin-top:12px">正在识别协议并分段探测，最长约 25 秒…</div>';
+  out.innerHTML = '<div class="msg wait" style="margin-top:12px">正在识别协议并分段探测'
+    + '（勾选逐跳路径时还会跑一次 MTR），最长约 40 秒…</div>';
   let r;
   try{
     r = await fetch("/api/probe", {
@@ -2600,6 +2683,8 @@ async function runProbe(){
         port: $("#probe-port").value || null,
         count: parseInt($("#probe-count").value || "4", 10),
         proto: $("#probe-proto").value || null,
+        // 旧后端不认这个字段（加法字段）；关闭时不发任何逐跳探测包。
+        path: !!($("#probe-path-toggle") || {}).checked,
       }),
     }).then(x => x.json());
   }catch(e){ r = { ok:false, error:String(e) }; }
@@ -2631,7 +2716,9 @@ async function runProbe(){
     + '</span> → <span class="mono">' + esc(r.ip || "-") + '</span>　合计 ' + ms(r.total_ms)
     + (r.tcp && r.tcp.ok ? '<br>建连 ' + r.tcp.tried + ' 次，失败 ' + r.tcp.fail + ' 次，抖动 '
        + ms(r.tcp.stats.jitter) : "")
-    + (detail.length ? '<br>' + detail.map(esc).join('　·　') : "") + '</div>';
+    + (detail.length ? '<br>' + detail.map(esc).join('　·　') : "") + '</div>'
+    // 逐跳路径（有数据才渲染；文案来自后端下发的 copy.path）
+    + renderPathProfile(r.path_profile, (r.ui_copy || {}).path || null);
   scrollMainTop();
 }
 
