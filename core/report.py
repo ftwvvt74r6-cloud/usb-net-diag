@@ -85,7 +85,9 @@ def _path_verdict_text(profile: dict) -> str:
     """把路径结论机器码翻成一句中文（``copy.path.verdict_*``）。
 
     Args:
-        profile: ``meta["path_profile"]``；读 ``verdict_key`` 与 ``unreachable``。
+        profile: ``meta["path_profile"]``；读 ``verdict_key``、``unreachable`` 与
+            ``method``。tracert 降级时没有 TCP 重扫，``PATH.ICMP_FILTERED`` 要用
+            单独的文案，不能写「本次已改用 TCP 探测」。
 
     Returns:
         str: 结论句；未知机器码返回空串（渲染层不猜）。
@@ -101,19 +103,26 @@ def _path_verdict_text(profile: dict) -> str:
                          else "verdict_no_data"),
     }
     key = keys.get(code)
+    if key == "verdict_icmp_filtered" and str(profile.get("method") or "icmp") == "tracert":
+        key = "verdict_icmp_filtered_tracert"
     return _pa(key) if key else ""
 
 
 def _path_method_text(profile: dict) -> str:
-    """探测方式标注：ICMP / TCP（TCP 文案里写明「ICMP 被过滤，改用 TCP 探测」）。
+    """探测方式标注：scapy ICMP / TCP 降级 / 系统 tracert。
 
     Args:
         profile: ``meta["path_profile"]``；读 ``method`` / ``icmp_filtered``。
 
     Returns:
-        str: 可直接展示的一行。
+        str: 可直接展示的一行。``method == "tracert"`` 时优先写「基于系统 tracert，
+            样本数 3」——即使同时判定 ICMP 被过滤，数据源仍是 tracert，不能写成
+            「改用 TCP 探测」（tracert 降级下没有 TCP 重扫）。
     """
-    if str(profile.get("method") or "icmp") == "tcp" or profile.get("icmp_filtered"):
+    method = str(profile.get("method") or "icmp")
+    if method == "tracert":
+        return _pa("method_tracert")
+    if method == "tcp" or profile.get("icmp_filtered"):
         return _pa("method_tcp")
     return _pa("method_icmp")
 
@@ -308,8 +317,9 @@ def _render_probe_baseline(baseline: dict, vd: dict) -> list[str]:
     """渲染「探针基线」区块（只在 ``meta.probe_baseline`` 存在时调用）。
 
     区块头在报告「关键指标」之后：先看业务指标，再看「探针自己的对照基线」。
-    0 个 RTT 样本的角色写「未探到」，绝不写 0ms / 正常；排除包数无论 0 还是 N
-    都如实写出 —— 「已排除 0 包」正是 BPF 生效的证据。
+    0 个 RTT 样本的角色写「未探到」，绝不写 0ms / 正常。收发计数是**模块自记**：
+    固定写「发出 / 收到 / 超时」三值；「已从业务统计排除 N 个标记探针包」只在
+    N>0 时出现 —— 抓包过滤器正常生效时 N 恒为 0，打印「排除 0」没有信息量。
 
     Args:
         baseline: ``meta["probe_baseline"]``。
@@ -341,7 +351,17 @@ def _render_probe_baseline(baseline: dict, vd: dict) -> list[str]:
          _p("th_loss"), _p("th_rtt"), _p("th_jitter")],
         rows))
     lines.append("")
-    lines.append(_p("excluded", count=baseline.get("excluded_packets", 0)))
+    sent = int(baseline.get("sent") or 0)
+    recv = int(baseline.get("recv") or 0)
+    try:
+        timeout = int(baseline.get("timeout"))
+    except (TypeError, ValueError):
+        # 旧载荷没有 timeout 键：用模块自记的同一口径推出来（sent - recv）。
+        timeout = max(0, sent - recv)
+    lines.append(_p("summary_line", sent=sent, recv=recv, timeout=timeout))
+    excluded = int(baseline.get("excluded_packets") or 0)
+    if excluded > 0:
+        lines.append(_p("excluded", count=excluded))
     contrast = vd.get("probe_contrast") if isinstance(vd, dict) else None
     if isinstance(contrast, dict):
         text = _probe_contrast_text(contrast)

@@ -1,7 +1,9 @@
 # 路径剖面（MTR 逐跳）
 
-> 对应批次：**D+ 增量 2**（`feat/d-shadow-probe`，PR #26）。目标：回答「问题出在
-> **路径上的哪一跳**」——本地出口 / 承载网 / 对端侧 / ICMP 被过滤。
+> 对应批次：**D+ 增量 2**（`feat/d-shadow-probe`，PR #26）+ **G2 降级**（G 批次，
+> `feat/g-generalize`）。目标：回答「问题出在**路径上的哪一跳**」——本地出口 /
+> 承载网 / 对端侧 / ICMP 被过滤。有 scapy 用 MTR；没有 scapy 自动降级系统
+> `tracert`（见第 4 节），不再把「没装 scapy」变成「路径探测不可用」。
 >
 > 一句话：**逐跳 RTT 与丢包不是地图，而是「从第几跳开始变坏」的坐标。**
 
@@ -37,8 +39,10 @@ ICMP 全丢/TCP 可达                     → ICMP 被策略过滤（不是故�
 ### 2.1 连通与速度测试页（手动）
 
 1. 左侧切到「连通与速度测试」，填目标与端口；
-2. 「逐跳路径（MTR）」默认勾选；取消勾选则完全不发逐跳探测包；
-3. 结果区在体检结论下方出现逐跳表格 + 结论。
+2. 「逐跳路径（MTR / tracert）」默认勾选；取消勾选则完全不发逐跳探测包；
+   有 scapy 时用 MTR，没有 scapy 时自动改用系统 `tracert`（每跳 3 次探测），
+   界面上会提示「已降级」；
+3. 结果区在体检结论下方出现逐跳表格 + 结论（探测方式行会写明 scapy / tracert）。
 
 请求体是加法字段 `path: true|false`；旧版前端不传时后端按 **开** 处理。
 
@@ -73,7 +77,7 @@ python core\diagnose.py --pcap x.pcap                         REM 离线分析�
 |---|---|---|
 | TTL | 第几跳（TTL 从 1 递增） | 第 1 跳是网关，往后是运营商/中间设备 |
 | 地址 | 该跳响应方 IP | 空 = 这一跳没回（超时或过滤），不代表断 |
-| 发出 / 丢失 | 该跳发出的采样数 / 超时数 | 每跳默认 3 个样本（手动体检 5 个） |
+| 发出 / 丢失 | 该跳发出的采样数 / 超时数 | 每跳默认 3 个样本（手动体检 5 个；tracert 降级固定 3 个） |
 | 丢包 | `丢失/发出` 的百分比 | ≥ 20% 且异常**持续到目标/最后响应跳**才算劣化；被后续跳打断时只提示疑似限速 |
 | RTT 最小/平均/最大 | 该跳**成功样本**的往返时延 | 没有样本显示「未探到」，**不显示 0ms** |
 | 抖动 | RTT 总体标准差 | 突增往往比平均值更早暴露拥塞 |
@@ -126,10 +130,53 @@ python core\diagnose.py --pcap x.pcap                         REM 离线分析�
 
 ---
 
-## 4. ICMP 被过滤 → TCP 降级
+## 4. 两条实现路径：scapy / 系统 tracert（G2）
+
+lite 包与系统 Python **不带 scapy**。旧实现直接 `import scapy`，路径探测会报
+`ModuleNotFoundError`，逐跳与路径剖面整块消失。现在按可用性自动选引擎：
+**没有 scapy 不等于路径探测不可用**。
+
+| 引擎 | 何时使用 | 命令 / 实现 | 每跳样本 | 精度 |
+|---|---|---|---|---|
+| `scapy`（首选） | `import scapy.all` 成功 | TTL 递增 + 批量 `sr()`；ICMP 全丢且目标端口 TCP 可达时改用 TCP SYN 重扫 | 手填 1..10（实时 3 / 手动 5） | 高：精确 RTT、TCP 回退、逐跳状态 |
+| `tracert`（降级） | scapy 不可导入，且系统有 `tracert` | `tracert -d -h <max_hops≤16> -w <timeout_ms> <目标>`（列表参数，`CREATE_NO_WINDOW`） | **固定 3** | 中：系统命令每跳 3 次探测；只能按输出结构解析 RTT / `*` |
+
+行为约定：
+
+* 目标先解析成 IPv4 再交给 tracert（`-d` 不做反向解析，也不让命令行解析域名）；
+* `-h` 固定夹到 16，`-w` 复用 `PATH_TIMEOUT_RANGE`（200~3000ms），整体等待有
+  60s 硬上限；到点 kill 命令并保留已解析的跳（`completed=false`），不会卡死抓包；
+* 解析**只认结构**：行首跳号 + 1~3 个 `*` / `<1` / 数字 + 行尾 IPv4；超时行看
+  「前 3 个字段全 `*`」。不依赖「请求超时 / Request timed out」等本地化关键词；
+  `<1` 记为 0.5ms（只影响显示，不影响判定）；有 RTT 但没有响应方 IP 的行按结构
+  不完整跳过；
+* 行结构不完整（命令被杀、最后一行没写完）不伪造数据；**整条输出没有可识别跳行
+  或命令不可用**时明确返回 `error="tracert 解析失败/不可用：…"`，结论仍是
+  `PATH.NO_DATA`，绝不静默返回「全是 0」；
+* R5 判定完全复用 `build_hop_stats()` / `summarize_path()` / `degraded_hops()`：
+  tracert 中途丢包但目标正常 → 仍 `PATH.OK + middle_loss_suspected`；只有持续
+  到目标 / 最后响应跳的异常才判劣化；
+* 日志由 `run(logger=...)` 写一行：`路径剖面：使用 scapy 逐跳` 或
+  `路径剖面：scapy 不可用，使用系统 tracert 降级（每跳 3 次探测）`；
+* 报告 / 结果区的「探测方式」：`icmp` / `tcp` / `tracert` 三种各自有文案；
+  tracert 会标注「基于系统 tracert，样本数 3（每跳 3 次探测）」，**不**写成
+  「ICMP 被过滤，改用 TCP 探测」；
+* 引擎选择与 `capabilities.path_probe` / `mtr_engine` 同源：有 scapy →
+  `scapy`；无 scapy 有 tracert → `tracert`（逐跳**不置灰**）；两者都无 →
+  `path_probe=false`（UI 才置灰并说明）。
+
+**AGENTS.md §3-11 声明例外**：该条款禁止「用本地化 CLI 文本做平台判断」。
+本处的 tracert **仅作无 scapy 时的逐跳数据源**：`-d` 只解析数字 / IP 结构，
+不依赖任何本地化关键词做平台 / 版本判断；解析失败明确报「tracert 解析失败 /
+不可用」，绝不静默伪造数据。此为本批次**声明例外**（PR 描述与本文件同步记录）。
+
+---
+
+## 5. ICMP 被过滤 → TCP 降级
 
 企业网/防火墙经常只放行业务端口、丢弃 ICMP。这时**不能**把「16 跳全丢」判成故障。
-探测流程因此是两段的：
+探测流程因此是两段的（**仅 scapy 引擎**；tracert 降级只能给 ICMP 逐跳，不会假装
+做过 TCP 重扫）：
 
 ```
 ICMP 逐跳（TTL 1..16，每批 4 跳一次 sr()）
@@ -156,7 +203,7 @@ TCP 重扫失败（例如 scapy 发送异常）时**保留** ICMP 的逐跳数�
 
 ---
 
-## 5. TUN / 代理的限制（必须如实说明）
+## 6. TUN / 代理的限制（必须如实说明）
 
 本机可能跑着代理 / TUN（例如把默认路由劫持到 `198.18.0.0/15` 的 fake-ip 网段）。
 这时逐跳看到的是**代理的虚拟路径**，不是物理链路。
@@ -181,7 +228,7 @@ on-link 本来就只有 1 跳，结果所有物理网关/同网段主机都被�
 
 ---
 
-## 6. 探针隔离与残余风险
+## 7. 探针隔离与残余风险
 
 MTR 的探测包与它诱发的 ICMP 都会进入自己的抓包，必须隔离，否则会伪造出
 「TTL 耗尽 / 额外 TCP 会话」的假故障。
@@ -212,7 +259,11 @@ type 11 计入 `icmp_timeout`，不排就会凭空多出「TTL 耗尽」故障�
 2. 抓在 TUN 网卡上时，探针可能根本不出物理网卡，BPF 看不到也排不掉；分析阶段
    的显示过滤仍会兜住，但计数会偏小；
 3. 我们没有排除 ICMP unreachable（type 3）—— TCP 探针正常会收到 RST/SYN-ACK，
-   极少诱发 type 3；若真出现，会被当成业务 ICMP 计入（已知边界）。
+   极少诱发 type 3；若真出现，会被当成业务 ICMP 计入（已知边界）；
+4. **tracert 降级的探测包不在本模块标记体系里**：系统命令的 ICMP echo 使用 OS
+   自己的标识，BPF/显示过滤无法按 `PROBE_ID` 认领；仍能整类排除 ICMP type 11
+   （TTL 超时），echo 请求/回复只会让抓包报文计数略增，不会伪造 `icmp_timeout`
+   或链路故障。这是 lite 降级路径的已知边界，报告只影响本次抓包的统计口径。
 
 合成 pcap 回归：`tests/test_mtr.py::PathIsolationSyntheticTest`
 ——「业务 + MTR 探针 + time-exceeded + 旁路 TTL 超时」pcap 带完整过滤分析与纯净业务
@@ -220,7 +271,7 @@ pcap **逐字段相同**；只排标记不排 type 11 时统计不同（证明�
 
 ---
 
-## 7. DNS 角色（W1 遗留补全）
+## 8. DNS 角色（W1 遗留补全）
 
 影子探针的角色从两个变三个：**网关（ICMP）→ DNS（UDP/53）→ 业务目标（TCP SYN）**。
 
@@ -244,27 +295,30 @@ HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters
 
 ---
 
-## 8. 明确不做 / 已知边界
+## 9. 明确不做 / 已知边界
 
 * **IPv6 逐跳**：本批只做 IPv4；IPv6 目标返回 `error`（不抛异常），不做半成品；
-* **tracert / 本地化 CLI 文本**：禁止；所有探测包自建；
+* **有 scapy 时不调用 tracert**：tracert 只是 lite 环境（无 scapy）的降级数据源，
+  且只解析数字 / IP 结构；声明例外与失败形态见第 4 节；
 * **被动监听期间的路径探测**：「只听不发」是产品承诺，`core/passive.py` 不引用本模块；
 * **离线分析的路径探测**：`--pcap` 路径恒不启动（用户可能只在分析别人的抓包）；
 * **服务端探针 / 双侧抓包**：规划第 7 步，本批不实现；
 * **探针结果联网上报**：本工具不联网，逐跳数据只进本地报告；
-* **探测包上限**：单次最多 32 跳 × 10 样本（夹取），实时抓包用 16 跳 × 3 样本、
-  预算 = 抓包时长 + 5 秒；不做持续 MTR。
+* **探测包上限**：单次最多 32 跳 × 10 样本（scapy 路径夹取），实时抓包用 16 跳 ×
+  3 样本、预算 = 抓包时长 + 5 秒；tracert 固定 `-h 16`、每跳 3 次、整体 60s 上限；
+  不做持续 MTR。
 
 ---
 
-## 9. 相关文件
+## 10. 相关文件
 
 | 文件 | 作用 |
 |---|---|
 | `core/pathprobe.py` | 全部实现：`run()`、`clamp_path_options`、`build_hop_stats`、`first_degraded_hop`、`summarize_path`、`PathProfiler`、隔离过滤串、`count_time_exceeded_packets` |
 | `core/diagnose.py` | `capture_live()` 起停 MTR、BPF/显示过滤合并、`meta.path_profile` 注入 |
-| `core/report.py` | 报告「路径剖面」区块（文案在 `core/copy/zh-CN.json` 的 `path` section） |
-| `core/server.py` | `/api/probe` 的 `path` 开关；`/api/status` 下发 `ui_copy.path` |
-| `ui/index.html` | 连通与速度测试页「逐跳路径」开关 + 逐跳表格；结果页路径剖面区块 |
-| `tests/test_mtr.py` | V6~V10 + 隔离合成 pcap + DNS 角色 |
+| `core/selfcheck.py` | 首屏第 4 项 `scapy` + `capabilities.path_probe` / `mtr_engine`（逐跳是否置灰的唯一依据） |
+| `core/report.py` | 报告「路径剖面」区块（文案在 `core/copy/zh-CN.json` 的 `path` section；`method=tracert` 有独立文案） |
+| `core/server.py` | `/api/probe` 的 `path` 开关；`/api/status` 下发 `ui_copy.path`；引擎日志 |
+| `ui/index.html` | 连通与速度测试页「逐跳路径」开关 + 降级提示；结果页路径剖面区块 |
+| `tests/test_mtr.py` | V6~V10 + tracert 解析/降级 + 隔离合成 pcap + DNS 角色 |
 | `core/platform/winapi.py` | `dns_servers()` 注册表实现（`_registry_dns_values` / `_parse_dns_list`） |

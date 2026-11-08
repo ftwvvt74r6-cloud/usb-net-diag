@@ -579,11 +579,14 @@ def _baseline(gateway_loss=0.0, gateway_recv=2, gateway_n=2,
         "probe_count": gateway_sent + target_sent,
         "sent": gateway_sent + target_sent,
         "recv": gateway_recv + target_recv,
+        "timeout": max(0, (gateway_sent - gateway_recv)
+                       + (target_sent - target_recv)),
         "window": {"started_epoch": 1.0, "finished_epoch": 2.0},
         "excluded_packets": excluded,
         "roles": [
             {"role": "gateway", "kind": "icmp", "target": GW,
              "sent": gateway_sent, "recv": gateway_recv,
+             "timeout": max(0, gateway_sent - gateway_recv),
              "loss_pct": gateway_loss if gateway_sent else None, "n": gateway_n,
              "rtt_min_ms": 1.0 if gateway_n else None,
              "rtt_avg_ms": 1.5 if gateway_n else None,
@@ -591,6 +594,7 @@ def _baseline(gateway_loss=0.0, gateway_recv=2, gateway_n=2,
              "jitter_ms": 0.5 if gateway_n else None, "errors": []},
             {"role": "target", "kind": "tcp_syn", "target": TARGET,
              "sent": target_sent, "recv": target_recv,
+             "timeout": max(0, target_sent - target_recv),
              "loss_pct": target_loss if target_sent else None, "n": target_n,
              "rtt_min_ms": 9.0 if target_n else None,
              "rtt_avg_ms": 9.0 if target_n else None,
@@ -908,6 +912,157 @@ class ShadowUiTest(unittest.TestCase):
         for hardcoded in ("未探到", "已从业务统计排除", "疑似"):
             self.assertNotIn(hardcoded, body,
                              "探针区块的文案必须来自 copy 表，不能在页面里写死")
+
+
+class ProbeCountTest(unittest.TestCase):
+    """G3：探针收发由模块自记，baseline 显式给出 sent / recv / timeout（含每角色）。"""
+
+    @staticmethod
+    def _ledger_9_7() -> pathprobe.ProbeLedger:
+        gateway = _spec(pathprobe.ProbeKind.ICMP, GW, role="gateway")
+        target = _spec(pathprobe.ProbeKind.TCP_SYN, TARGET, role="target", port=443)
+        records = []
+        for index in range(5):                     # 网关 5 发 4 收
+            ok = index < 4
+            records.append(_record(gateway, seq=index + 1,
+                                   rtt=1.0 if ok else None, responded=ok,
+                                   error="" if ok else "timeout"))
+        for index in range(4):                     # 对端 4 发 3 收
+            ok = index < 3
+            records.append(_record(target, seq=10 + index,
+                                   rtt=2.0 if ok else None, responded=ok,
+                                   error="" if ok else "timeout"))
+        return _ledger(*records)
+
+    def test_baseline_has_explicit_timeout_total_and_roles(self):
+        baseline = self._ledger_9_7().baseline()
+        self.assertEqual((baseline["sent"], baseline["recv"], baseline["timeout"]),
+                         (9, 7, 2))
+        by_role = {item["role"]: item for item in baseline["roles"]}
+        self.assertEqual((by_role["gateway"]["sent"], by_role["gateway"]["recv"],
+                          by_role["gateway"]["timeout"]), (5, 4, 1))
+        self.assertEqual((by_role["target"]["sent"], by_role["target"]["recv"],
+                          by_role["target"]["timeout"]), (4, 3, 1))
+
+    def test_aggregate_records_adds_timeout(self):
+        roles = pathprobe.aggregate_records(self._ledger_9_7().records)
+        for item in roles:
+            self.assertIn("timeout", item)
+            self.assertEqual(item["timeout"], item["sent"] - item["recv"])
+        self.assertEqual(sum(item["timeout"] for item in roles), 2)
+
+    def test_empty_ledger_timeout_is_zero_not_missing(self):
+        baseline = pathprobe.ProbeLedger().baseline()
+        self.assertEqual((baseline["sent"], baseline["recv"], baseline["timeout"]),
+                         (0, 0, 0))
+
+
+class ProbeCountReportTest(unittest.TestCase):
+    """G3：报告写三值；「排除 N 包」只在 N>0 时出现。"""
+
+    def test_report_prints_three_values_without_excluded_zero(self):
+        result = _result(_baseline(excluded=0))
+        md = report.render_markdown(result, verdict.build(result))
+        self.assertIn("探针：发出 3 / 收到 2 / 超时 1（模块自记）", md)
+        self.assertNotIn("已从业务统计排除", md,
+                         "N=0 时排除句没有信息量，不能打印")
+
+    def test_report_prints_excluded_once_when_positive(self):
+        result = _result(_baseline(excluded=3))
+        md = report.render_markdown(result, verdict.build(result))
+        self.assertEqual(md.count("已从业务统计排除"), 1)
+        self.assertIn("（3 包）", md)
+
+
+class ProbeCountLogTest(unittest.TestCase):
+    """G3：诊断日志用「发出 / 收到 / 超时（模块自记）」；排除句只在 N>0 出现。"""
+
+    @staticmethod
+    def _ok_result() -> dict:
+        return {
+            "ok": True, "meta": {"packets": 10, "bytes": 100, "duration": 5.0,
+                                 "streams_total": 1},
+            "rows": [], "metrics": {},
+            "summary": {"target": "全网", "critical_count": 0, "warning_count": 0,
+                        "pcap_file": "x.pcap"},
+        }
+
+    def _run(self, baseline: dict, excluded: int) -> tuple[dict, list[str]]:
+        cap = {"ok": True, "pcap": "x.pcap", "interface": "WLAN", "bpf": "",
+               "duration": 5,
+               "probe": {"baseline": baseline,
+                         "planned": [{"kind": "icmp"}, {"kind": "tcp_syn"}],
+                         "exclusion_display_filter": ""}}
+        logs: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(diagnose, "capture_live", return_value=cap), \
+                mock.patch.object(diagnose.analyzer, "analyze",
+                                  side_effect=lambda *_a, **_k: copy.deepcopy(
+                                      self._ok_result())), \
+                mock.patch.object(diagnose.report, "save",
+                                  return_value={"markdown": "m", "json": "j"}), \
+                mock.patch.object(diagnose.logstore, "record_run"), \
+                mock.patch.object(diagnose.tshark, "find_tshark",
+                                  return_value=Path("tshark.exe")), \
+                mock.patch.object(diagnose.pathprobe, "count_marked_packets",
+                                  return_value=excluded), \
+                mock.patch.object(diagnose, "REPORTS", Path(tmp)):
+            result = diagnose.run_scan(target=TARGET, duration=5, shadow=True,
+                                       logger=logs.append)
+        return result, logs
+
+    def test_log_has_three_values_and_no_exclusion_when_zero(self):
+        result, logs = self._run(
+            _baseline(gateway_sent=5, gateway_recv=4, gateway_n=4,
+                      target_sent=4, target_recv=3, target_n=3, excluded=0), 0)
+        text = "\n".join(logs)
+        self.assertIn("探针：发出 9 / 收到 7 / 超时 2（模块自记）", text)
+        self.assertNotIn("已从业务统计排除", text)
+        self.assertEqual(result["meta"]["probe_baseline"]["excluded_packets"], 0)
+
+    def test_log_has_one_exclusion_line_when_positive(self):
+        result, logs = self._run(
+            _baseline(gateway_sent=5, gateway_recv=4, gateway_n=4,
+                      target_sent=4, target_recv=3, target_n=3, excluded=3), 3)
+        text = "\n".join(logs)
+        self.assertIn("探针：发出 9 / 收到 7 / 超时 2（模块自记）", text)
+        self.assertEqual(text.count("已从业务统计排除"), 1)
+        self.assertIn("已从业务统计排除 3 个标记探针包", text)
+        self.assertEqual(result["meta"]["probe_baseline"]["excluded_packets"], 3)
+
+
+class PathEngineUiTest(unittest.TestCase):
+    """G2 UI：逐跳入口按 path_probe 置灰；缺 scapy 只提示降级 tracert。"""
+
+    def test_path_toggle_note_and_capability_branch(self):
+        self.assertIn('id="probe-path-note"', HTML)
+        start = HTML.index("function paintPathEngine()")
+        body = HTML[start:HTML.index("\nfunction ", start)]
+        self.assertIn("caps.path_probe === false", body,
+                      "只有两引擎都不可用才置灰")
+        self.assertIn('caps.mtr_engine === "tracert"', body,
+                      "缺 scapy 时提示降级 tracert")
+        self.assertIn("toggle.disabled = unavailable", body)
+
+    def test_path_note_copy_keys_exist(self):
+        for key in ("path_tracert_hint", "path_unavailable"):
+            with self.subTest(key=key):
+                self.assertIn(key, COPY["startup"])
+                self.assertTrue(COPY["startup"][key].strip())
+
+    def test_startup_panel_uses_six_checks(self):
+        self.assertIn("checks.length === 6", HTML,
+                      "自检从五项扩为六项（+scapy），全绿判定必须同步")
+        self.assertNotIn("checks.length === 5 && checks.every", HTML)
+        self.assertIn('id="probe-path-toggle"', HTML)
+        self.assertIn("逐跳路径（MTR / tracert）", HTML)
+
+    def test_probe_count_ui_shows_summary_and_hides_zero_excluded(self):
+        start = HTML.index("function renderProbeBaseline(pb, copy, contrast)")
+        body = HTML[start:HTML.index("\nfunction ", start)]
+        self.assertIn("copy.summary_line", body)
+        self.assertIn("excludedCount > 0", body,
+                      "排除句只在 N>0 时拼接")
 
 
 if __name__ == "__main__":

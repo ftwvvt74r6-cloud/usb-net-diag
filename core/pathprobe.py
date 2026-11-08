@@ -12,6 +12,11 @@
   再判定「第几跳开始劣化」与「本地出口 / 承载网 / 对端侧 / ICMP 被过滤 / 证据不足」；
   ICMP 被策略过滤（全丢但目标端口 TCP 可达）时自动降级为 **TCP SYN 逐跳**并在
   结果里标 ``icmp_filtered=True`` / ``method="tcp"``。
+* **scapy 不可用时的 tracert 降级**（G2）：lite 包 / 系统 Python 没有 scapy 时，
+  改用系统 ``tracert -d -h 16 -w <毫秒>`` 取逐跳数据，``method="tracert"``、
+  每跳固定 3 次探测。**只解析「跳号 + 数字/``*`` + IPv4」结构**，不依赖任何
+  本地化关键词；解析失败/命令不可用都明确报 ``tracert 解析失败/不可用``，绝不
+  静默伪造数据（AGENTS.md §3-11 的声明例外，见 ``docs/path-probe.md``）。
 
 **谁调用它**：:mod:`core.diagnose` 的实时抓包路径（``capture_live`` / ``run_scan``）
 构造 :class:`ShadowProber` / :class:`PathProfiler` 并按抓包时长启停；
@@ -23,7 +28,8 @@
 
 * 不发「业务请求」：探针只发 1 个 ICMP / TCP SYN / 最小 DNS 查询，不建连、不传数据；
 * 不做 IPv6 逐跳（本批只做 IPv4，遇到 IPv6 目标返回 ``error`` 不抛异常）；
-* 不调用 ``tracert`` / 不解析任何本地化 CLI 文本（AGENTS.md 硬约束）；
+* 不在有 scapy 时调用 ``tracert``：系统命令只是 lite 环境（无 scapy）的降级数据源，
+  且只解析数字/IP 结构（不依赖本地化关键词做平台判断，声明例外见 G2）；
 * 不联网上报：探测结果只进本地报告；
 * 离线分析 / 被动监听路径**绝不**构造本模块的探针（见 tests/test_shadow_probe.py）。
 
@@ -55,8 +61,13 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import ipaddress
+import locale
+import re
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -118,6 +129,74 @@ PATH_ICMP_FILTERED = "PATH.ICMP_FILTERED"
 PATH_NO_DATA = "PATH.NO_DATA"
 #: MTR 期间要排除的 ICMP 类型：11 = time-exceeded（TTL 耗尽）。
 ICMP_TIME_EXCEEDED = 11
+
+# ---------------------------------------------------------------- 路径探测引擎
+
+#: scapy 引擎（本机有 scapy 时的首选实现，逐跳样本更准）。
+PATH_ENGINE_SCAPY = "scapy"
+#: 系统 tracert 降级引擎（lite 包/系统 Python 没有 scapy 时的数据源）。
+PATH_ENGINE_TRACERT = "tracert"
+#: 系统 tracert 固定每跳 3 次探测（Windows 命令自身的行为，不可配置）。
+TRACERT_SAMPLES = 3
+#: tracert 的最大跳数上限：固定 16 跳，避免一个命令把抓包窗口拖长。
+TRACERT_MAX_HOPS = 16
+#: tracert 命令的整体等待余量（秒）：进程启动 + 输出解析 + 收尾。
+TRACERT_OVERHEAD_S = 8.0
+#: tracert 命令的整体超时上限（秒）：到点 kill，保留已解析的跳并标「未完成」。
+TRACERT_TIMEOUT_S = 60.0
+#: Windows 下隐藏控制台窗口（Linux 上为 0，subprocess 会忽略 0）。
+TRACERT_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+#: tracert 输出的跳行：行首跳号 + 其余字段（本地化文本按结构跳过，不认关键词）。
+_TRACERT_HOP_RE = re.compile(r"^\s*(\d{1,3})\s+(.+)$")
+#: 行尾 IPv4：`-d` 不做反解，正常每行只可能是数字地址。
+_TRACERT_IPV4_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3})\s*$")
+#: 一次探测的字段：`*`（超时）/ `<1`（小于 1ms）/ `12` 或 `12.5`（小数逗号也认）。
+_TRACERT_MEASURE_RE = re.compile(r"\*|<\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
+
+
+def scapy_available() -> bool:
+    """探测 scapy 是否真的可导入（不引入新依赖，不抛异常）。
+
+    先 ``importlib.util.find_spec`` 判模块是否存在，再真正 ``import scapy.all``：
+    只看 spec 不够 —— 模块目录可能在、但依赖的二进制/扩展加载失败（半残安装）。
+    这条探测只回答「能不能用」，不会替用户安装任何东西。
+
+    Returns:
+        bool: scapy 可导入为 True；模块缺失、半残安装、探测异常一律 False。
+
+    Example:
+        >>> isinstance(scapy_available(), bool)
+        True
+    """
+    try:
+        if importlib.util.find_spec("scapy") is None:
+            return False
+    except (ImportError, AttributeError, ValueError):
+        # 父包缺失时 find_spec 在部分 Python 版本上会抛 ModuleNotFoundError。
+        return False
+    try:
+        import scapy.all  # noqa: F401, PLC0415  scapy 是可选依赖，不能进模块导入
+    except Exception:                              # noqa: BLE001  半残安装也只算不可用
+        return False
+    return True
+
+
+def tracert_available() -> bool:
+    """系统是否自带 ``tracert``（Windows 命令，用 ``shutil.which`` 查，不解析文本）。
+
+    Returns:
+        bool: PATH 上能找到 ``tracert`` 为 True；非 Windows / 被裁剪为 False。
+
+    Example:
+        >>> isinstance(tracert_available(), bool)
+        True
+    """
+    try:
+        return shutil.which("tracert") is not None
+    except (OSError, ValueError):
+        return False
+
 
 class ProbeKind(str, Enum):
     """探针协议类型（同时是账本 / 统计里的机器码）。"""
@@ -332,8 +411,13 @@ class ProbeLedger:
     def baseline(self) -> dict:
         """按角色聚合出「探针基线」（报告 / 方向对照消费的数据）。
 
+        收发计数**由探针模块自己记**（:class:`ProbeRecord` 的 ``responded``），
+        不从抓包反推 —— 抓包过滤器本来就把探针排除了，反推永远是 0。超时 =
+        ``sent - recv`` 是显式键，调用方不用自己推。
+
         Returns:
-            dict: 键 ``probe_count``（记录总数）/``sent``/``recv``/``window``/
+            dict: 键 ``probe_count``（记录总数）/``sent``/``recv``/``timeout``
+                （= sent - recv，含每角色三值见 ``roles``）/``window``/
                 ``roles``（:func:`aggregate_records` 的结果）；``excluded_packets``
                 固定 0，由调用方在分析前用 ``count_marked_packets`` 回填。
                 没有 RTT 样本的角色 ``n=0`` 且 ``rtt_*`` 为 ``None`` —— 不是 0.0。
@@ -346,6 +430,7 @@ class ProbeLedger:
             "probe_count": len(self.records),
             "sent": sent,
             "recv": recv,
+            "timeout": max(0, sent - recv),
             "window": {"started_epoch": started, "finished_epoch": finished},
             "roles": roles,
             "excluded_packets": 0,
@@ -436,6 +521,10 @@ class PathProbeResult:
     ``middle_loss_suspected`` / ``middle_loss_ttls`` 记录「中间跳有丢包/RTT 异常、
     但劣化没有持续到目标或最后响应跳」的跳（R5）：这类跳不能算作劣化，只在报告里
     提示可能是 ICMP 限速/策略过滤。
+
+    ``method`` 取值：``icmp``（scapy ICMP 逐跳）/ ``tcp``（ICMP 被过滤后的 TCP SYN
+    重扫）/ ``tracert``（没有 scapy，系统 tracert 降级，固定每跳 3 次探测）。
+    ``samples`` 因此可能是 3（tracert 固定）而不是调用方请求的样本数。
     """
 
     target: str = ""
@@ -1501,8 +1590,9 @@ def aggregate_records(records: Iterable[ProbeRecord]) -> list[dict]:
 
     Returns:
         list[dict]: 每个角色/目标一组，键 ``role``/``kind``/``target``/``sent``/
-            ``recv``/``loss_pct``/``n``/``rtt_min_ms``/``rtt_avg_ms``/
-            ``rtt_max_ms``/``jitter_ms``/``errors``。**没有 RTT 样本时**
+            ``recv``/``timeout``/``loss_pct``/``n``/``rtt_min_ms``/``rtt_avg_ms``/
+            ``rtt_max_ms``/``jitter_ms``/``errors``。``timeout = sent - recv`` 是
+            **模块自记**的超时数（与 ``loss_pct`` 同源）。**没有 RTT 样本时**
             ``n=0`` 且 ``rtt_*`` 为 ``None``（不是 0.0）；``loss_pct`` 只在
             ``sent=0`` 时为 ``None``。分组按网关 → DNS → 业务目标排序。
     """
@@ -1515,7 +1605,7 @@ def aggregate_records(records: Iterable[ProbeRecord]) -> list[dict]:
         if item is None:
             item = groups[key] = {
                 "role": role, "kind": kind, "target": str(record.spec.target),
-                "sent": 0, "recv": 0, "loss_pct": None, "n": 0,
+                "sent": 0, "recv": 0, "timeout": 0, "loss_pct": None, "n": 0,
                 "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
                 "jitter_ms": None, "_rtts": [], "errors": [],
             }
@@ -1545,6 +1635,7 @@ def aggregate_records(records: Iterable[ProbeRecord]) -> list[dict]:
         item["loss_pct"] = (round((item["sent"] - item["recv"])
                                   / item["sent"] * 100.0, 1)
                             if item["sent"] else None)
+        item["timeout"] = max(0, int(item["sent"]) - int(item["recv"]))
         out.append(item)
     return out
 
@@ -1911,52 +2002,308 @@ def _scan_hops(ip: str, method: str, max_hops: int, samples: int,
     return rows, completed, "", probes_sent
 
 
+# ---------------------------------------------------------------- tracert 降级
+
+def _decode_console(raw: bytes) -> str:
+    """把系统命令的原始输出解码成文本（控制台是 OEM 编码，不能假定 UTF-8）。
+
+    tracert 输出里只有 ``*`` / 数字 / IPv4 参与解析，中文「请求超时」等本地化文字
+    会被结构解析器忽略；解码失败也只损失这些文字，不影响逐跳数据。
+
+    Args:
+        raw: 子进程 stdout/stderr 的原始字节。
+
+    Returns:
+        str: 按控制台编码解码后的文本；所有候选编码都失败时用 UTF-8 替换字符。
+    """
+    encodings: list[str] = []
+    try:
+        encodings.append(locale.getpreferredencoding(False))
+    except Exception:                              # noqa: BLE001  拿不到偏好编码就只用后备
+        pass
+    encodings.extend(["oem", "mbcs", "utf-8"])
+    for encoding in encodings:
+        if not encoding:
+            continue
+        try:
+            return raw.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def _tracert_command(target: str, max_hops: int, timeout_s: float) -> list[str]:
+    """生成系统 tracert 命令（列表参数，不经 shell）。
+
+    ``-d`` 不做反向解析（只拿数字/IP，避免依赖本地化主机名）；``-h`` 夹到
+    :data:`TRACERT_MAX_HOPS`；``-w`` 是**每次**探测的毫秒超时，夹到
+    :data:`PATH_TIMEOUT_RANGE`。
+
+    Args:
+        target: 目标 IPv4 字面量（域名已在 :func:`run` 里解析过）。
+        max_hops: 请求的最大跳数；夹到 1..:data:`TRACERT_MAX_HOPS`。
+        timeout_s: 每次探测的等待上限（秒）；夹到 :data:`PATH_TIMEOUT_RANGE`。
+
+    Returns:
+        list[str]: ``[tracert, -d, -h, N, -w, 毫秒, 目标]``；找不到命令时首项退回
+            ``"tracert"``（让 :class:`FileNotFoundError` 在 Popen 里变成明确错误）。
+    """
+    low, high = PATH_TIMEOUT_RANGE
+    try:
+        hops = int(max_hops)
+    except (TypeError, ValueError):
+        hops = TRACERT_MAX_HOPS
+    hops = max(1, min(hops, TRACERT_MAX_HOPS))
+    try:
+        wait_s = float(timeout_s)
+    except (TypeError, ValueError):
+        wait_s = 1.0
+    wait_ms = int(round(max(low, min(wait_s, high)) * 1000.0))
+    exe = shutil.which("tracert") or "tracert"
+    return [exe, "-d", "-h", str(hops), "-w", str(wait_ms), str(target)]
+
+
+def _parse_tracert_output(text: str) -> tuple[list[dict], int]:
+    """按**结构**解析 tracert 输出（不依赖「请求超时」等本地化关键词）。
+
+    识别规则：行首跳号 + 1~3 个探测字段（``*`` / ``<1`` / 数字）+ 行尾 IPv4。
+    超时行用「前 3 个字段全 ``*``」判定；本地化文字（``Request timed out.`` /
+    ``请求超时。`` / ``Zeitüberschreitung``）一律跳过。``<1`` 取 0.5ms 作为代表值
+    （只在 RTT 显示上体现，不会触发劣化阈值）。
+
+    Args:
+        text: tracert 的完整输出文本（编码已解码）。
+
+    Returns:
+        tuple[list[dict], int]: ``(rows, malformed)``。``rows`` 是原始采样记录，
+        键与 scapy 发送器同构（``ttl``/``seq``/``responded``/``rtt_ms``/
+        ``responder``/``error``）；``malformed`` 是结构不完整、被跳过的候选跳行数。
+        没有可识别行时 ``rows`` 为空 —— 调用方必须显式报错，不许伪造 0 数据。
+    """
+    rows: list[dict] = []
+    malformed = 0
+    seq = 0
+    for raw_line in str(text or "").splitlines():
+        match = _TRACERT_HOP_RE.match(raw_line)
+        if not match:
+            continue
+        try:
+            ttl = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= ttl <= 255:
+            continue
+        rest = match.group(2).strip()
+        ip = ""
+        ip_match = _TRACERT_IPV4_RE.search(rest)
+        if ip_match:
+            try:
+                ip = str(ipaddress.IPv4Address(ip_match.group(1)))
+            except ValueError:
+                ip = ""
+            rest = rest[:ip_match.start()].strip()
+        values = [item.group(0) for item in _TRACERT_MEASURE_RE.finditer(rest)]
+        values = values[:TRACERT_SAMPLES]
+        if len(values) < TRACERT_SAMPLES:
+            # 输出被截断（命令被杀 / 最后一行没写完）：不拿半行编数据。
+            malformed += 1
+            continue
+        if any(not value.startswith("*") for value in values) and not ip:
+            # 有 RTT 却认不出响应方：结构不完整，不伪造逐跳数据。
+            malformed += 1
+            continue
+        for value in values:
+            seq += 1
+            if value.startswith("*"):
+                rows.append({"ttl": ttl, "seq": seq, "responded": False,
+                             "rtt_ms": None, "responder": "", "error": "timeout"})
+                continue
+            try:
+                rtt = 0.5 if value.startswith("<") else float(value.replace(",", "."))
+            except ValueError:
+                rtt = None
+            rows.append({"ttl": ttl, "seq": seq, "responded": rtt is not None,
+                         "rtt_ms": round(rtt, 1) if rtt is not None else None,
+                         "responder": ip,
+                         "error": "" if rtt is not None else "rtt_unparsed"})
+    return rows, malformed
+
+
+def _tracert_rows(target: str, max_hops: int, timeout_s: float,
+                  should_stop: Callable[[], bool] | None = None,
+                  ) -> tuple[list[dict], int, bool, str]:
+    """跑一次系统 tracert 并解析成逐跳采样（无 scapy 时的降级数据源）。
+
+    命令固定为 :func:`_tracert_command` 的形状（``-d -h -w``），整体等待有硬上限
+    :data:`TRACERT_TIMEOUT_S`；超时/取消就 kill，保留已经解析出来的跳，并把
+    ``completed`` 置 False。**不抛异常**：命令不存在、非零返回、输出无法解析都
+    转成 ``error``，绝不静默返回空数据。
+
+    Args:
+        target: 目标 IPv4 字面量。
+        max_hops: 最大跳数；夹到 :data:`TRACERT_MAX_HOPS`。
+        timeout_s: 每次探测等待上限（秒）；夹到 :data:`PATH_TIMEOUT_RANGE`。
+        should_stop: 可选取消判定；每 100ms 轮询一次，返回 True 就 kill 命令。
+
+    Returns:
+        tuple[list[dict], int, bool, str]: ``(rows, probes_sent, completed, error)``。
+        ``probes_sent`` 是 tracert 实际发出并出现在输出里的探测数（每跳 3 个）；
+        ``error`` 非空表示部分降级或整条不可用 —— 无 ``rows`` 时一定是后者。
+    """
+    try:
+        hops = int(max_hops)
+    except (TypeError, ValueError):
+        hops = TRACERT_MAX_HOPS
+    hops = max(1, min(hops, TRACERT_MAX_HOPS))
+    try:
+        wait_s = float(timeout_s)
+    except (TypeError, ValueError):
+        wait_s = 1.0
+    wait_s = max(PATH_TIMEOUT_RANGE[0], min(wait_s, PATH_TIMEOUT_RANGE[1]))
+    command = _tracert_command(target, hops, wait_s)
+    budget = min(TRACERT_TIMEOUT_S,
+                 hops * TRACERT_SAMPLES * wait_s + TRACERT_OVERHEAD_S)
+    try:
+        proc = subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, creationflags=TRACERT_CREATE_NO_WINDOW)
+    except (OSError, ValueError) as exc:
+        return [], 0, False, f"tracert 不可用：{type(exc).__name__}: {exc}"
+
+    timed_out = False
+    cancelled = False
+    deadline = time.monotonic() + budget
+    while proc.poll() is None:
+        if should_stop is not None:
+            try:
+                if should_stop():
+                    cancelled = True
+                    proc.kill()
+                    break
+            except Exception:                      # noqa: BLE001  取消判定异常不阻塞命令
+                pass
+        if time.monotonic() >= deadline:
+            timed_out = True
+            proc.kill()
+            break
+        time.sleep(0.1)
+    try:
+        out_raw, err_raw = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out_raw, err_raw = proc.communicate()
+    except OSError:
+        out_raw, err_raw = b"", b""
+    text = _decode_console(out_raw)
+    stderr_text = _decode_console(err_raw).strip()
+    rows, malformed = _parse_tracert_output(text)
+    probes_sent = len(rows)
+    rows = _truncate_at_target(rows, str(target))
+
+    notes: list[str] = []
+    if timed_out:
+        notes.append(f"tracert 超过 {budget:g}s 时间上限，已保留部分跳")
+    if cancelled:
+        notes.append("tracert 被取消，已保留部分跳")
+    if proc.returncode:
+        notes.append(f"tracert 返回码 {proc.returncode}")
+    if malformed:
+        notes.append(f"{malformed} 行输出结构不完整已跳过")
+    if not rows:
+        detail = stderr_text or text.strip() or "命令没有输出"
+        return [], 0, False, f"tracert 解析失败/不可用：{detail[:300]}"
+    completed = not (timed_out or cancelled or malformed or bool(proc.returncode))
+    return rows, probes_sent, completed, "；".join(notes)
+
+
+def path_engine_log_line(engine: str) -> str:
+    """引擎日志文案（报告/日志共用，避免调用方各写一份中文）。
+
+    Args:
+        engine: :data:`PATH_ENGINE_SCAPY` / :data:`PATH_ENGINE_TRACERT` 或任意串。
+
+    Returns:
+        str: ``tracert`` 时是「scapy 不可用，使用系统 tracert 降级（每跳 3 次探测）」，
+        其余一律按 scapy 写。**只用于日志**，不参与判定。
+
+    Example:
+        >>> "tracert" in path_engine_log_line("tracert")
+        True
+    """
+    if str(engine or "") == PATH_ENGINE_TRACERT:
+        return ("路径剖面：scapy 不可用，使用系统 tracert 降级"
+                "（每跳 3 次探测）")
+    return "路径剖面：使用 scapy 逐跳"
+
+
+def _log_path_engine(logger: Callable[[str], None] | None, engine: str) -> None:
+    """把「用了哪个引擎」写进调用方日志（内部函数，日志失败不影响探测）。"""
+    if logger is None:
+        return
+    try:
+        logger(path_engine_log_line(engine))
+    except Exception:                              # noqa: BLE001  日志失败不阻塞探测
+        pass
+
+
 def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_HOPS,
         samples: int = PATH_DEFAULT_SAMPLES, timeout_s: float = 1.0, *,
         should_stop: Callable[[], bool] | None = None,
         sender: PathSender | None = None,
-        tcp_checker: Callable[..., bool] | None = None) -> PathProbeResult:
-    """TTL 递增路径探测（MTR）：逐跳 RTT/丢包/抖动 + 劣化判定 + ICMP→TCP 降级。
+        tcp_checker: Callable[..., bool] | None = None,
+        logger: Callable[[str], None] | None = None) -> PathProbeResult:
+    """TTL 递增路径探测：逐跳 RTT/丢包/抖动 + 劣化判定 + 引擎降级。
 
     流程（全部在 IPv4 上）：
 
     1. 目标解析（域名先解析；IPv6 明确拒绝）；
     2. 先测一次目标端口 TCP 可达性（``port`` 未给时试 443/80），留作「ICMP 被过滤」
        的判据；
-    3. **ICMP 逐跳**：TTL 1..max_hops 按 :data:`PATH_BATCH_HOPS` 分批，每批一次
-       ``sr()``；收到目标自己的回复即停；
-    4. 若 ICMP **一个响应都没有**而目标端口 TCP 可达 → 判定 ICMP 被策略过滤，
-       改用 **TCP SYN 逐跳**重扫（样本减半），结果带 ``icmp_filtered=True`` /
-       ``method="tcp"``，且 ``verdict_key`` 固定为 ``PATH.ICMP_FILTERED``
-       （TCP 有响应只证明端口可达，不能反推「ICMP 路径正常」）；TCP 也不可达 →
-       ``PATH.NO_DATA`` + ``unreachable=True``；
-    5. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
+    3. **选引擎**：注入 ``sender``（单测）或 scapy 可导入 → 原有 MTR 批量
+       ``sr()`` 实现；scapy 不可用 → 系统 ``tracert -d -h 16 -w <毫秒>`` 逐跳
+       降级（每跳 3 次探测，``method="tracert"``）——「没有 scapy」不会变成
+       路径探测不可用；
+    4. **ICMP 逐跳（scapy）**：TTL 1..max_hops 按 :data:`PATH_BATCH_HOPS` 分批，
+       每批一次 ``sr()``；收到目标自己的回复即停；
+    5. 若 ICMP **一个响应都没有**而目标端口 TCP 可达 → 判定 ICMP 被策略过滤，
+       改用 **TCP SYN 逐跳**重扫（样本减半；仅 scapy 引擎），结果带
+       ``icmp_filtered=True`` / ``method="tcp"``，且 ``verdict_key`` 固定为
+       ``PATH.ICMP_FILTERED``（TCP 有响应只证明端口可达，不能反推「ICMP 路径正常」）；
+       TCP 也不可达 → ``PATH.NO_DATA`` + ``unreachable=True``；
+    6. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
        劣化按 R5 的持久性约束：单跳异常必须持续到目标或最后响应跳；中间跳限速
        只记进 ``middle_loss_suspected`` / ``middle_loss_ttls``，不判承载网。
 
     Args:
         target: 目标 IP / 域名。
         port: 目标端口；``None`` 时用 443/80 做可达性判断，TCP 降级时也用它。
-        max_hops: 最大跳数，夹到 :data:`PATH_MAX_HOPS_RANGE`。
-        samples: 每跳采样数，夹到 :data:`PATH_SAMPLES_RANGE`。
-        timeout_s: 单批等待上限（秒），夹到 :data:`PATH_TIMEOUT_RANGE`。
-        should_stop: 可选的取消判定；每批发包前调用一次，返回 True 就收尾并把
-            ``completed`` 置 False（实时抓包取消/时间预算用）。
-        sender: 可注入的批量发送器（单测用；省略时走 scapy）。
+        max_hops: 最大跳数，夹到 :data:`PATH_MAX_HOPS_RANGE`；tracert 降级再夹到
+            :data:`TRACERT_MAX_HOPS`（16）。
+        samples: 每跳采样数，夹到 :data:`PATH_SAMPLES_RANGE`；tracert 降级固定 3。
+        timeout_s: 单批等待上限（秒），夹到 :data:`PATH_TIMEOUT_RANGE`；tracert
+            降级时换算成 ``-w`` 毫秒。
+        should_stop: 可选的取消判定；每批发包前（tracert 为每 100ms）调用一次，
+            返回 True 就收尾并把 ``completed`` 置 False（实时抓包取消/时间预算用）。
+        sender: 可注入的批量发送器（单测用；省略时按 scapy 可用性选引擎）。
         tcp_checker: 可注入的可达性判定 ``(ip, port, timeout) -> bool``；省略时
             等价于 :func:`probe_tcp_reachable`（单测用，避免真连网）。
+        logger: 可选日志回调；给出时写一行「使用哪个引擎」（scapy / tracert），
+            不抛异常。单测 / 库调用可以不传。
 
     Returns:
         :class:`PathProbeResult`: 逐跳统计 + ``verdict_key`` / ``degraded_ttl`` /
-        ``method`` / ``icmp_filtered`` / ``tun_suspected`` /
-        ``middle_loss_suspected`` / ``middle_loss_ttls`` 等；参数非法 / 解析失败 /
-        scapy 不可用时也返回结果（``hops`` 为空、``error`` 写明原因），**不抛异常**
-        —— 调用方（实时抓包 / 体检）绝不允许被路径探测拖垮。
+        ``method``（``icmp`` / ``tcp`` / ``tracert``）/ ``icmp_filtered`` /
+        ``tun_suspected`` / ``middle_loss_suspected`` / ``middle_loss_ttls`` 等；
+        参数非法 / 解析失败 / 两个引擎都不可用时也返回结果（``hops`` 为空、
+        ``error`` 写明原因），**不抛异常** —— 调用方（实时抓包 / 体检）绝不允许
+        被路径探测拖垮。
 
     Note:
-        本函数**不写文件、不读配置**；发出的每个包都带固定标记（ICMP id =
+        本函数**不写文件、不读配置**；scapy 路径发出的每个包都带固定标记（ICMP id =
         :data:`PROBE_ID`、TCP 源端口 ∈ :data:`PROBE_SRC_PORT_RANGE`），抓包侧
         必须同时生效 :func:`exclusion_bpf` 与 :func:`path_exclusion_display_filter`。
+        tracert 路径的探测包由系统命令发出，**不在**本模块的标记体系里；抓包时
+        仍按 ICMP type 11 整类排除（见 ``docs/path-probe.md`` 的声明例外）。
         TCP 降级重扫失败时**保留** ICMP 的逐跳数据（「ICMP 全丢」本身已是结论），
         只把原因写进 ``error``，不会因此返回空路径。
     """
@@ -1987,7 +2334,59 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
         except Exception:                          # noqa: BLE001  同上
             reachable, used_port = None, None
 
-    send = sender or _scapy_send_batch
+    if sender is not None or scapy_available():
+        engine = PATH_ENGINE_SCAPY
+        send = sender or _scapy_send_batch
+    else:
+        engine = PATH_ENGINE_TRACERT
+        send = None
+    if sender is None:
+        _log_path_engine(logger, engine)
+
+    if engine == PATH_ENGINE_TRACERT:
+        # tracert 降级：系统命令每跳发 3 次探测。解析失败 / 命令不可用都必须明确
+        # 报错，不能把「没有数据」伪装成「全部丢包」或「路径正常」。
+        tracert_hops = min(max_hops, TRACERT_MAX_HOPS)
+        try:
+            rows, probes_sent, completed, tracert_note = _tracert_rows(
+                ip, tracert_hops, timeout_s, should_stop=should_stop)
+        except Exception as exc:                   # noqa: BLE001  子进程异常也只降级
+            rows, probes_sent, completed = [], 0, False
+            tracert_note = f"tracert 不可用：{type(exc).__name__}: {exc}"
+        samples = TRACERT_SAMPLES
+        max_hops = tracert_hops
+        ledger["method"] = PATH_ENGINE_TRACERT
+        if not rows:
+            return PathProbeResult(
+                target=original, target_ip=ip, verdict_key=PATH_NO_DATA,
+                target_port_reachable=reachable, method=PATH_ENGINE_TRACERT,
+                completed=False, max_hops=max_hops, samples=samples,
+                timeout_s=timeout_s, probes_sent=probes_sent,
+                ledger=dict(ledger, probes_sent=probes_sent),
+                error=tracert_note or "tracert 解析失败/不可用：没有可识别的逐跳行")
+        hops = build_hop_stats(rows, target_ip=ip)
+        # tracert 的探测包是 ICMP：判「ICMP 被过滤」时仍按 ICMP 口径走
+        # summarize_path；但结果的 method 保留 tracert，报告据此标注
+        # 「基于系统 tracert，样本数 3（每跳 3 次探测）」。
+        summary = summarize_path(hops, reachable, method="icmp", target_ip=ip)
+        return PathProbeResult(
+            target=original, target_ip=ip, hops=hops,
+            verdict_key=str(summary["verdict_key"]),
+            icmp_filtered=bool(summary["icmp_filtered"]),
+            target_port_reachable=reachable,
+            ledger=dict(ledger, probes_sent=probes_sent),
+            method=PATH_ENGINE_TRACERT,
+            degraded_ttl=summary["degraded_ttl"],
+            baseline_ms=summary["baseline_ms"],
+            reached_target=bool(summary["reached_target"]),
+            completed=completed,
+            tun_suspected=bool(summary["tun_suspected"]),
+            unreachable=bool(summary["unreachable"]),
+            middle_loss_suspected=bool(summary.get("middle_loss_suspected")),
+            middle_loss_ttls=tuple(summary.get("middle_loss_ttls") or ()),
+            max_hops=max_hops, samples=samples, timeout_s=timeout_s,
+            probes_sent=probes_sent, error=tracert_note)
+
     rows, completed, scan_error, probes_sent = _scan_hops(
         ip, "icmp", max_hops, samples, timeout_s, None, should_stop, send)
     rows = _truncate_at_target(rows, ip)
@@ -2075,7 +2474,8 @@ class PathProfiler:
                  max_hops: int = PATH_DEFAULT_MAX_HOPS,
                  samples: int = 3, timeout_s: float = 0.8,
                  budget_s: float = 35.0,
-                 runner: Callable[..., PathProbeResult] | None = None) -> None:
+                 runner: Callable[..., PathProbeResult] | None = None,
+                 logger: Callable[[str], None] | None = None) -> None:
         self.target = str(target or "").strip()
         self.port = port
         self.max_hops, self.samples, self.timeout_s = clamp_path_options(
@@ -2086,6 +2486,7 @@ class PathProfiler:
         self.started_epoch = 0.0
         self.finished_epoch = 0.0
         self._runner = runner or run
+        self._logger = logger
         self._stop = threading.Event()
         self._deadline = 0.0
         self._thread: threading.Thread | None = None
@@ -2131,10 +2532,15 @@ class PathProfiler:
     def _loop(self) -> None:
         """线程主体：跑一次 :func:`run`，任何异常都只记进 ``error``。"""
         try:
-            self.result = self._runner(
-                self.target, port=self.port, max_hops=self.max_hops,
-                samples=self.samples, timeout_s=self.timeout_s,
-                should_stop=self.should_stop)
+            kwargs: dict = {
+                "port": self.port, "max_hops": self.max_hops,
+                "samples": self.samples, "timeout_s": self.timeout_s,
+                "should_stop": self.should_stop,
+            }
+            # 只有显式传了 logger 才向下传：测试注入的 runner 可能没有该参数。
+            if self._logger is not None:
+                kwargs["logger"] = self._logger
+            self.result = self._runner(self.target, **kwargs)
         except Exception as exc:                   # noqa: BLE001  路径探测失败只降级
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
@@ -2178,6 +2584,9 @@ __all__ = [
     "PATH_TCP_CHECK_TIMEOUT_S", "ICMP_TIME_EXCEEDED",
     "PATH_OK", "PATH_LOCAL_SIDE", "PATH_TRANSPORT_NET", "PATH_SERVER_EDGE",
     "PATH_ICMP_FILTERED", "PATH_NO_DATA",
+    "PATH_ENGINE_SCAPY", "PATH_ENGINE_TRACERT", "TRACERT_SAMPLES",
+    "TRACERT_MAX_HOPS", "TRACERT_TIMEOUT_S",
+    "scapy_available", "tracert_available", "path_engine_log_line",
     "ProbeKind", "HopStatus", "ProbeSpec", "ProbeRecord", "ProbeLedger",
     "HopStat", "PathProbeResult",
     "classify", "clamp_path_options", "build_hop_stats", "degraded_hops",

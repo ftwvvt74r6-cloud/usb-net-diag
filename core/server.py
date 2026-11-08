@@ -12,7 +12,7 @@ API:
   GET  /api/report?path=    读取报告文件
   GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
-  GET  /api/selfcheck       首屏准备检查（五项只读环境检查 + 首次运行标记）
+  GET  /api/selfcheck       首屏准备检查（六项只读环境检查 + 首次运行标记）
   POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
@@ -352,7 +352,7 @@ def _probe_path_profile(target: str, port) -> dict | None:
             探测不可用 / 零跳时返回 ``None``（界面上不显示该区块）。
     """
     try:
-        result = pathprobe.run(target, port=port)
+        result = pathprobe.run(target, port=port, logger=log)
     except Exception as exc:                       # noqa: BLE001  路径探测失败只降级
         log(f"[提示] 逐跳路径探测不可用（不影响体检结论）："
             f"{type(exc).__name__}: {exc}")
@@ -1094,6 +1094,29 @@ def link_actions(result: dict | None, gateway: str = "") -> list[dict]:
     return actions
 
 
+#: 客户端提前断开（关标签页 / 取消请求 / 浏览器 RST）时抛的异常类型。
+#: 这些不是服务故障：浏览器不再需要响应，打印整段 traceback 只会污染日志。
+CONNECTION_NOISE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+
+
+def _log_connection_noise(exc: BaseException, where: str = "请求处理") -> None:
+    """把「客户端提前断开」降级为**一行** debug 日志（不写 traceback、不显示给用户）。
+
+    Args:
+        exc: 捕获到的连接异常。
+        where: 发生位置（``请求处理`` / ``服务端``），便于排障时区分。
+
+    Returns:
+        None: 日志写盘失败也不抛异常（连接噪音处理本身不许再制造噪音）。
+    """
+    try:
+        logstore.diag_log(
+            f"[debug] {where}：客户端提前断开（{type(exc).__name__}）；"
+            "不写 traceback，服务继续")
+    except Exception:                              # noqa: BLE001  日志失败不阻塞服务
+        pass
+
+
 class Handler(BaseHTTPRequestHandler):
     """本地 Web UI 与 API 的请求处理器。
 
@@ -1120,6 +1143,21 @@ class Handler(BaseHTTPRequestHandler):
     )
 
     # ---------- helpers ----------
+    def handle_one_request(self) -> None:
+        """包住基类：客户端提前断开只记一行 debug，绝不打印 traceback。
+
+        浏览器关标签页 / 取消请求时，服务端可能正在读请求行、读 body 或写响应，
+        对应 ``ConnectionResetError``（WinError 10054）/ ``ConnectionAbortedError`` /
+        ``BrokenPipeError``。这些是正常的客户端行为，不是服务故障；不拦就会由
+        ``socketserver`` 打印整段 traceback（G4 真机噪音）。
+        """
+        try:
+            super().handle_one_request()
+        except CONNECTION_NOISE as exc:
+            # 连接已经不可复用：置位让 handle() 循环退出，不再读下一条请求。
+            self.close_connection = True
+            _log_connection_noise(exc)
+
     def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8") -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -1134,7 +1172,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except CONNECTION_NOISE:
+            # 客户端已经走了：响应没人收是正常现象，不往上抛（G4）。
             pass
 
     def _json(self, data, code: int = 200) -> None:
@@ -1328,7 +1367,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/app":
             cfg = diagnose.load_config()
             # 首屏会先要 /api/app：这里复用 selfcheck 的短 TTL 结果，别把
-            # 五项检查（tshark 版本 / 端口 / scapy 导入）再跑一遍。
+            # 六项检查（tshark 版本 / 端口 / scapy 导入）再跑一遍。
             snap = selfcheck.collect_cached()
             return self._json({"ok": True, "app": APP_NAME, "version": APP_VERSION,
                                "pid": os.getpid(), "port": SERVER.get("port", 0),
@@ -1563,6 +1602,33 @@ class DiagServer(ThreadingHTTPServer):
 
     daemon_threads = True
     allow_reuse_address = False
+
+    def handle_error(self, request, client_address) -> None:
+        """兜底：连接类异常只写一行 debug；其他异常保留「类型 + 原因」一行可诊断信息。
+
+        ``Handler.handle_one_request`` 已经拦住绝大多数连接重置；这里覆盖
+        ``socketserver`` 的默认实现，避免漏网的 ``BrokenPipeError`` 又打印整段
+        traceback。**不吞所有异常**：非连接异常仍写一行 error（类型 + 原因），
+        只是不再把栈直接刷到 stderr。
+
+        Args:
+            request: 触发异常的套接字（``socketserver`` 传入，这里不使用）。
+            client_address: 客户端地址（这里不使用；日志不含敏感信息）。
+
+        Returns:
+            None: 只写日志，不向客户端发送任何内容（连接可能已断开）。
+        """
+        exc = sys.exc_info()[1]
+        if exc is not None and isinstance(exc, CONNECTION_NOISE):
+            _log_connection_noise(exc, "服务端")
+            return
+        try:
+            name = type(exc).__name__ if exc is not None else "UnknownError"
+            reason = str(exc or "")[:300]
+            logstore.diag_log(f"[错误] 请求处理异常：{name}: {reason}"
+                              if reason else f"[错误] 请求处理异常：{name}")
+        except Exception:                          # noqa: BLE001  日志失败不阻塞服务
+            pass
 
 
 def create_server(port: int = 8787, idle_exit_min: int = 0,

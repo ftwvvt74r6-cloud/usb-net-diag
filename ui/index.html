@@ -744,10 +744,12 @@
       <div class="field">
         <label class="checkline" for="probe-path-toggle">
           <input type="checkbox" id="probe-path-toggle" checked />
-          逐跳路径（MTR）
+          逐跳路径（MTR / tracert）
         </label>
         <div class="hint">体检成功后做一次 TTL 递增的逐跳探测（最多 16 跳），给出每跳 RTT / 丢包与
-          「第几跳开始劣化」；ICMP 被过滤时自动改用 TCP 探测并标注。关闭后不发任何逐跳探测包。</div>
+          「第几跳开始劣化」；有 scapy 时用 MTR，没有 scapy 时自动降级为系统 tracert（每跳 3 次探测），
+          ICMP 被过滤时自动改用 TCP 探测并标注。关闭后不发任何逐跳探测包。</div>
+        <div class="hint hidden" id="probe-path-note"></div>
       </div>
       <details class="adv">
         <summary>高级选项（探测次数 / 协议）</summary>
@@ -1251,7 +1253,7 @@ let CONCLUSION_COPY = {};  // copy/zh-CN.json 的 conclusion section（由 /api/
 let STARTUP_DATA = null;   // 最近一次 /api/selfcheck 结果（重新检测时复用）
 let BOOT_STARTUP = null;   // /api/app 已下发的同一份检查结果（boot 只跑一次全套自检）
 let CAPS = null;           // 能力矩阵（/api/selfcheck 或 /api/app）；null = 旧后端，退回仅管理员锁
-let CHECKS = [];           // 最近一次五项检查（能力说明卡按 key 取 impact/fix_url）
+let CHECKS = [];           // 最近一次六项检查（能力说明卡按 key 取 impact/fix_url）
 let FORM_CACHE = null;     // 最近一次读/写的表单快照
 
 /* ---------- 文案 / 首次运行 / 表单（C2） ---------- */
@@ -1552,7 +1554,7 @@ async function initStartup(opts) {
   renderStartup(data);
   const checks = Array.isArray(data.checks) ? data.checks : [];
   const failed = checks.filter((c) => !c.ok).length;
-  const allGreen = checks.length === 5 && checks.every((c) => !!(c && c.ok));
+  const allGreen = checksAllPassed(checks);
   setStartupEnter(allGreen);
   showStartup();
   if (allGreen) {
@@ -1641,7 +1643,7 @@ async function recheckSelfcheck() {
   }
   const checks = Array.isArray(data && data.checks) ? data.checks : [];
   const failed = checks.filter((c) => !c.ok).length;
-  if (checks.length === 5 && !failed) {
+  if (checksAllPassed(checks)) {
     hideCapCard();
     renderStartup(data);
     setStartupEnter(true);
@@ -1748,8 +1750,18 @@ function criticalMissing(checks) {
     (c) => c && keys.indexOf(c.key) >= 0 && !c.ok);
 }
 
+function checksAllPassed(checks) {
+  /* 六项（python/tshark/npcap/scapy/port/admin）全过才算全绿。
+     旧后端只下发五项（没有 scapy 项）：同样按全过处理，避免升级后的页面把
+     旧载荷误判成「有项没通过」；但新载荷缺项（例如只有 5 项且带 scapy）不放过。 */
+  if (!Array.isArray(checks) || !checks.length) return false;
+  if (!checks.every((c) => !!(c && c.ok))) return false;
+  if (checks.length === 6) return true;
+  return checks.length === 5 && !checks.some((c) => c && c.key === "scapy");
+}
+
 function allChecksPassed(checks) {
-  return Array.isArray(checks) && checks.length === 5 && checks.every((c) => !!(c && c.ok));
+  return checksAllPassed(checks);
 }
 
 function shouldShowStartup(data) {
@@ -1835,6 +1847,27 @@ function paintLocks() {
       : (lock.kind === "cap"
         ? (UI_COPY.disabled_title || "这个功能暂时不可用") + "：" + needForMode(MODE, lock)
         : "该功能需要管理员权限，点击查看如何提权");
+  }
+  paintPathEngine();
+}
+
+function paintPathEngine() {
+  /* 逐跳/路径入口：只有 scapy 与系统 tracert 都不可用才置灰；
+     缺 scapy 时**不灰**，只提示「已降级系统 tracert」。旧后端没有 path_probe
+     字段时保持原行为（不置灰、不显示提示）。 */
+  const toggle = $("#probe-path-toggle");
+  const note = $("#probe-path-note");
+  if (!toggle) return;
+  const caps = CAPS || {};
+  const unavailable = caps.path_probe === false;
+  toggle.disabled = unavailable;
+  if (unavailable) toggle.checked = false;
+  let text = "";
+  if (unavailable) text = UI_COPY.path_unavailable || "";
+  else if (caps.mtr_engine === "tracert") text = UI_COPY.path_tracert_hint || "";
+  if (note) {
+    note.textContent = text;
+    note.classList.toggle("hidden", !text);
   }
 }
 
@@ -3015,8 +3048,17 @@ function renderProbeBaseline(pb, copy, contrast) {
       + '<td class="mono">' + esc(loss) + '</td><td class="mono">' + esc(rtt) + '</td>'
       + '<td class="mono">' + esc(jitter) + '</td></tr>';
   }).join("");
-  const excluded = String(copy.excluded || "")
-    .replace("{count}", pb.excluded_packets == null ? 0 : pb.excluded_packets);
+  const excludedCount = Number(pb.excluded_packets || 0);
+  /* G3：排除句只在 N>0 时有信息量；0 不展示（文案仍取自 copy 表）。
+     收发/超时是模块自记三值，旧载荷没有 timeout 时按 sent-recv 推。 */
+  const sent = Number(pb.sent || 0);
+  const recv = Number(pb.recv || 0);
+  const timeout = (pb.timeout === null || pb.timeout === undefined)
+    ? Math.max(0, sent - recv) : Number(pb.timeout);
+  const summary = copyFill(copy.summary_line || "",
+    { sent: sent, recv: recv, timeout: timeout });
+  const excluded = excludedCount > 0
+    ? String(copy.excluded || "").replace("{count}", excludedCount) : "";
   let direction = "";
   if (contrast) {
     const key = {
@@ -3044,7 +3086,8 @@ function renderProbeBaseline(pb, copy, contrast) {
     + '<th>' + esc(copy.th_rtt || "") + '</th>'
     + '<th>' + esc(copy.th_jitter || "") + '</th></tr></thead><tbody>'
     + rows + '</tbody></table></div>'
-    + '<div class="hint">' + esc(excluded)
+    + '<div class="hint">' + esc(summary)
+    + (excluded ? " " + esc(excluded) : "")
     + (copy.ui_hint ? " " + esc(copy.ui_hint) : "") + '</div>'
     + direction;
 }
@@ -3090,8 +3133,17 @@ function renderPathProfile(pp, copy) {
   const lines = [];
   lines.push(copyFill(copy.target_line,
     { target: pp.target, ip: pp.target_ip, probes: pp.probes_sent }));
-  lines.push(pp.method === "tcp" || pp.icmp_filtered ? copy.method_tcp : copy.method_icmp);
-  const verdictKey = verdictKeys[pp.verdict_key];
+  if (pp.method === "tracert") {
+    /* 没有 scapy 的降级：数据源是系统命令，不能写成「ICMP 被过滤改用 TCP」。 */
+    lines.push(copy.method_tracert || "");
+  } else {
+    lines.push(pp.method === "tcp" || pp.icmp_filtered ? copy.method_tcp : copy.method_icmp);
+  }
+  let verdictKey = verdictKeys[pp.verdict_key];
+  if (verdictKey === "verdict_icmp_filtered" && pp.method === "tracert") {
+    /* tracert 降级没有 TCP 重扫，不能显示「已改用 TCP 探测」的旧文案。 */
+    verdictKey = "verdict_icmp_filtered_tracert";
+  }
   if (verdictKey && copy[verdictKey]) lines.push(copy[verdictKey]);
   if (pp.middle_loss_suspected && (pp.degraded_ttl === null || pp.degraded_ttl === undefined)) {
     lines.push(copyFill(copy.middle_loss_hint,

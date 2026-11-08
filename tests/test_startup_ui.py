@@ -246,7 +246,17 @@ class StartupPanelStaticTest(unittest.TestCase):
                       "initStartup")
         self.assertIn("data.first_run !== true", init)
         self.assertIn("finishStartup(true)", init)
-        self.assertIn("checks.length === 5", init)
+        # G2：自检从五项扩为六项（+scapy），全绿判定统一走 checksAllPassed。
+        self.assertIn("checksAllPassed(checks)", init)
+
+    def test_all_pass_helper_knows_six_checks_and_legacy_five(self):
+        helper = _slice("function checksAllPassed", "function allChecksPassed",
+                        "checksAllPassed")
+        self.assertIn("checks.length === 6", helper)
+        self.assertIn('c.key === "scapy"', helper,
+                      "旧后端五项载荷兼容：没有 scapy 项才算旧载荷")
+        self.assertIn("function allChecksPassed(checks) {\n  return checksAllPassed(checks);\n}",
+                      HTML, "旧函数名保留，避免其他入口失效")
 
 
 class PermissionCardStaticTest(unittest.TestCase):
