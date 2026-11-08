@@ -134,8 +134,10 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 
 ### ② 公开 lite 包（需自装 Python / Wireshark）
 
-从 [Releases](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases) 下载 v0.3.0 lite 源码包
-`NetDiag-0.3.0-lite.zip`（包大小 / SHA-256 发布后补充），解压后**推荐直接双击 `NetDiag.exe`**
+v0.3.0 **已发布**：从 [Release v0.3.0](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.0)
+下载 `NetDiag-0.3.0-lite.zip`（**169 个文件 / 974,570 B / SHA-256
+`c3687b917a331328a2e8ad45fa2291e9ac4a2e4f18eee157f0912c61ecdfd905`**，同页附
+`SHA256SUMS.txt`），解压后**推荐直接双击 `NetDiag.exe`**
 （首次运行先做五项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 
 ```bat
@@ -180,7 +182,7 @@ Npcap 安装器。双击 `NetDiag.vbs`（兼容，无黑窗）或 `start.bat`（
 | 注释覆盖率 | **292 / 292 = 100.0%**，32 个模块 | `python scripts/gen_api_doc.py --check 0.95` |
 | 判定可复现 | demo + 9 个确定性样本 = **20 / 20** 个产物逐字节相同 | `captures/faults_demo.pcap` + `scaffold/tests/fixtures/gen_pcap.py` |
 | API 契约 | **12 个 POST + 13 个 GET** 核心路由 | [`core/server.py`](core/server.py) / [`docs/HANDOVER-AI.md`](docs/HANDOVER-AI.md) §4 |
-| 发布包 | v0.2.0 lite：**142 个受控文件 / 669,357 B**（v0.3.0 实测值见 `docs/release-v0.3.0.md`，发布后回写） | [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) §2–§3 |
+| 发布包 | v0.3.0 lite：**169 个受控文件 / 974,570 B**（解压后 2,590,174 B） | [`docs/release-v0.3.0.md`](docs/release-v0.3.0.md) §2–§3 |
 | MCP | **7** 个工具，零第三方依赖 | [`mcp/wireshark-mcp/server.py`](mcp/wireshark-mcp/server.py) 的 `TOOLS` |
 | 运行时依赖 | 核心 **0 个 pip 依赖**（仅标准库） | 源码 import 检查；CI 不装第三方包 |
 
@@ -233,8 +235,8 @@ NetDiag/
 | [`docs/startup.md`](docs/startup.md) | 三个启动入口、启动不提权、按需提权权限卡、首屏自检、常见启动失败 |
 | [`docs/licensing.md`](docs/licensing.md) | 第三方许可、公开/内部分发边界 |
 | [`docs/api-reference.md`](docs/api-reference.md) | 自动生成的公开符号与签名（禁止手改） |
-| [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) | v0.2.0 发布资产、包内容与红线证据 |
-| `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容与红线证据（发布后补充） |
+| [`docs/release-v0.2.0.md`](docs/release-v0.2.0.md) | v0.2.0 发布资产、包内容与红线证据（历史） |
+| [`docs/release-v0.3.0.md`](docs/release-v0.3.0.md) | v0.3.0 发布资产、包内容、构建自检与红线证据 |
 
 ## Roadmap
 
