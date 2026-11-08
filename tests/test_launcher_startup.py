@@ -240,6 +240,11 @@ class LauncherStartupSourceContract(unittest.TestCase):
                       "H2：不允许对 10 个关闭端口各等 700ms；先枚举监听端口")
         self.assertIn("ListeningPorts()", self.source)
         self.assertIn("private static string ProbePing(int port)", self.source)
+        probe = self.source[self.source.index("private static string ProbeExisting"):
+                            self.source.index("private static bool[] ListeningPorts")]
+        self.assertIn("for (int port = PortMin; port <= PortMax; port++)", probe,
+                      "端口必须从 8787 起按升序探测（8787 优先）")
+        self.assertIn("ProbePing(port)", probe)
 
     def test_timing_and_artifact_markers(self):
         for marker in ("logs", "startup.log", "launcher-cache.json",
@@ -398,6 +403,31 @@ class LauncherStartupBinaryTest(unittest.TestCase):
         # 重扫后缓存应被重写为有效值（下一次命中）。
         code, data2 = self._measure(root, "stale-3")
         self.assertEqual((code, data2["python_cache"]), (0, "hit"), data2)
+
+    def test_python_cache_mtime_and_missing_path_invalidations(self):
+        """缓存校验覆盖 mtime 变化与路径不存在（H2 明确要求两项）。"""
+        root = self._make_root("cache-invalid")
+        code, _ = self._measure(root, "ci-1")
+        self.assertEqual(code, 0)
+        cache_file = root / "config" / "launcher-cache.json"
+        base = _read_json(cache_file)
+
+        cases = [
+            ("mtime", lambda payload: payload.update(mtime_utc=1)),
+            ("missing", lambda payload: payload.update(
+                python=str(root / "tools" / "python" / "gone-pythonw.exe"))),
+        ]
+        for name, mutate in cases:
+            payload = dict(base)
+            mutate(payload)
+            cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            code, data = self._measure(root, f"ci-{name}")
+            self.assertEqual(code, 0, data)
+            self.assertTrue(data["python_cache"].startswith("invalid:"),
+                            f"{name} 失效未触发重扫：{data['python_cache']}")
+            self.assertTrue(data["ok"], data)
+        code, data = self._measure(root, "ci-final")
+        self.assertEqual((code, data["python_cache"]), (0, "hit"), data)
 
     def test_dry_run_reports_env_contract_and_starts_nothing(self):
         root = self._make_root("dry")
