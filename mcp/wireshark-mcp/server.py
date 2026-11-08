@@ -4,9 +4,9 @@
   list_interfaces        列出可用网卡
   capture_live_packets   按目标 IP 实时抓包并诊断
   scan_network_threats   不带目标的全网段威胁扫描
-  analyze_pcap           离线分析已有 pcap
-  probe_link             分段链路体检（按协议自适应：TLS / HTTP / SMB / Banner / Opaque）
-  listen_flows           被动监听网卡，输出会话表（源/目标/协议/包长/连接状态）
+  analyze_pcap           分析抓包文件（离线分析已有 pcap）
+  probe_link             连通与速度测试（分段链路体检：TLS / HTTP / SMB / Banner / Opaque）
+  listen_flows           通信观察（被动监听网卡），输出会话表（源/目标/协议/包长/连接状态）
   doctor                 环境自检
 
 启动：python server.py   （由 MCP 客户端配置 command/args 拉起）
@@ -68,7 +68,7 @@ TOOLS = [
     },
     {
         "name": "analyze_pcap",
-        "description": "离线分析已有 pcap/pcapng 文件，输出同样格式的诊断报告。权限受限无法实时抓包时使用。",
+        "description": "分析抓包文件（离线分析已有 pcap/pcapng），输出同样格式的诊断报告。权限受限无法实时抓包时使用。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -100,7 +100,7 @@ TOOLS = [
     },
     {
         "name": "listen_flows",
-        "description": ("被动监听网卡（只读不发包），把流量聚合成会话表：源 IP:端口、目标 IP:端口、"
+        "description": ("通信观察（被动监听网卡，只读不发包），把流量聚合成会话表：源 IP:端口、目标 IP:端口、"
                         "协议（按端口 + 首包特征识别，认不出显示 Unknown TCP/UDP）、包数、"
                         "平均包长、总流量、连接状态（ESTABLISHED / SYN 无响应 / RST 重置 / FIN 关闭）。"),
         "inputSchema": {
@@ -145,7 +145,7 @@ def _err(msg: str) -> dict:
 def _flows_markdown(res: dict) -> str:
     """把会话表转成适合直接读的 Markdown。"""
     s = res["summary"]
-    head = (f"## 被动监听（{res['interface']} / {res['duration']}s / 引擎 {res['engine']}）\n\n"
+    head = (f"## 通信观察（被动监听）（{res['interface']} / {res['duration']}s / 引擎 {res['engine']}）\n\n"
             f"- 会话 {s['flows']} 条，报文 {s['packets']} 个，流量 {s['bytes'] / 1024:.1f} KB\n"
             f"- 未识别 {s['unknown']} 条，RST 重置 {s['rst']} 条，SYN 无响应 {s['syn_no_reply']} 条\n"
             f"- 过滤器：`{res['bpf'] or '全部流量'}`\n\n"
@@ -187,7 +187,7 @@ def call_tool(name: str, args: dict) -> dict:
                                 duration=_num(args.get("duration") or 30, 30, 5, 180),
                                 interface=args.get("interface"), logger=lambda m: None)
         if not res.get("ok"):
-            hint = " 可改用 analyze_pcap 做离线分析。" if res.get("degraded") else ""
+            hint = " 可改用 analyze_pcap 分析抓包文件。" if res.get("degraded") else ""
             return _err(res.get("error", "抓包失败") + hint)
         return _text(report.render_markdown(res))
 
@@ -196,7 +196,7 @@ def call_tool(name: str, args: dict) -> dict:
                                 duration=_num(args.get("duration") or 60, 60, 5, 180),
                                 interface=args.get("interface"), logger=lambda m: None)
         if not res.get("ok"):
-            hint = " 可改用 analyze_pcap 做离线分析。" if res.get("degraded") else ""
+            hint = " 可改用 analyze_pcap 分析抓包文件。" if res.get("degraded") else ""
             return _err(res.get("error", "扫描失败") + hint)
         return _text(report.render_markdown(res))
 
@@ -216,7 +216,7 @@ def call_tool(name: str, args: dict) -> dict:
                           engine=(args.get("engine") or "auto"),
                           logger=lambda m: None)
         if not res.get("ok"):
-            return _err(res.get("error", "被动监听失败"))
+            return _err(res.get("error", "通信观察失败"))
         return _text(_flows_markdown(res))
 
     if name == "analyze_pcap":

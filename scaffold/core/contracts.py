@@ -478,7 +478,7 @@ class ProbeResult:
 
 @dataclass
 class PassiveResult:
-    """``passive``（被动监听）的结果。"""
+    """``passive``（通信观察 / 被动监听）的结果。"""
 
     interface: str = ""
     duration_s: float = 0.0

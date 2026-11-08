@@ -39,7 +39,7 @@ scaffold/
 │   ├── verdict/verdict.py      findings → 主判定（纯函数）
 │   ├── pathprobe.py            MTR + 影子探测（合并规划第 4、6 步）
 │   ├── probe.py                协议自适应体检（迁移占位）
-│   ├── passive.py              被动监听（迁移占位）
+│   ├── passive.py              通信观察（被动监听，迁移占位）
 │   ├── egress/
 │   │   ├── sanitize.py         ★ 出口脱敏（profile + 可逆伪名化 + 账本）
 │   │   └── ai.py               模型调用（只接受已脱敏 payload）

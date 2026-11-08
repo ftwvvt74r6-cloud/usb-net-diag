@@ -235,7 +235,7 @@ def _job_phase(state: str, logs: list[dict]) -> str:
     messages = [str(row.get("m") or "") for row in (logs or [])]
     if any("报告已生成" in m for m in messages):
         return "完成"
-    if any("开始分析报文" in m or "链路体检" in m for m in messages):
+    if any("开始分析报文" in m or "连通与速度测试" in m for m in messages):
         return "分析中"
     if any("开始抓包" in m for m in messages):
         return "抓包中"
@@ -374,7 +374,7 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             res = diagnose.run_scan(target=target, duration=duration,
                                     interface=interface, logger=log)
             if not res.get("ok") and res.get("empty_capture"):
-                # 0 包不直接判失败：自动做一次链路体检（目标 → 默认网关），
+                # 0 包不直接判失败：自动做一次连通与速度测试（目标 → 默认网关），
                 # 拿到时延/抖动/丢包就降级成中性结论；拿不到才走红色失败。
                 fallback = diagnose.degraded_empty_capture_result(
                     target=target, duration=duration,
@@ -633,6 +633,104 @@ def passive_status() -> dict:
     return snap
 
 
+# ---------------------------------------------------------------- 结果页联动
+#: 默认网关缓存：``/api/status`` 每 0.5 秒被轮询一次，GetBestRoute 虽快也没必要每次问。
+GATEWAY_CACHE: dict = {"at": 0.0, "value": ""}
+
+
+def _gateway_now(ttl: float = 30.0) -> str:
+    """取默认网关（缓存 ``ttl`` 秒）；取不到返回空串，绝不影响状态接口。"""
+    now = time.time()
+    if now - float(GATEWAY_CACHE.get("at") or 0) > ttl:
+        try:
+            GATEWAY_CACHE["value"] = diagnose.winapi.default_gateway()
+        except Exception:  # noqa: BLE001  取网关失败只让按钮消失，不影响结果
+            GATEWAY_CACHE["value"] = ""
+        GATEWAY_CACHE["at"] = now
+    return str(GATEWAY_CACHE.get("value") or "")
+
+
+def _peer_from_streams(streams: list[dict]) -> tuple[str, int] | None:
+    """从 ``meta.streams_top`` 里挑一个最值得复测的服务端对端。
+
+    优先带「无响应 / 重传 / RST」标记的会话，其次是重传次数多、报文多的；
+    本机回环地址直接跳过（对它们做实时抓包没有意义）。返回
+    ``(host, port)``；没有合法对端时返回 ``None``。
+    """
+    best: tuple[str, int] | None = None
+    best_score = -1
+    for item in streams or []:
+        if not isinstance(item, dict):
+            continue
+        host = str(item.get("server") or "").strip()
+        if not host or host in ("-", "0.0.0.0", "::", "::1"):
+            continue
+        if host.startswith("127.") or host == "localhost":
+            continue
+        try:
+            port = int(item.get("dport") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if not 1 <= port <= 65535:
+            port = 0
+        flags = " ".join(str(f) for f in (item.get("flags") or []))
+        score = 0
+        if any(k in flags for k in ("无响应", "重传", "RST")):
+            score += 100
+        score += int(item.get("retrans") or 0) * 10
+        score += min(int(item.get("packets") or 0), 50)
+        if score > best_score:
+            best, best_score = (host, port), score
+    return best
+
+
+def link_actions(result: dict | None, gateway: str = "") -> list[dict]:
+    """生成结果页「接下来怎么做」里的一键复测按钮参数（只描述，不执行）。
+
+    这是**加法字段**：只进 ``/api/status`` 的响应，不写进报告 JSON / Markdown，
+    因此不会改变 ``reports/`` 快照。前端拿到后负责弹确认框、切模式、预填表单。
+
+    Args:
+        result: ``JOB["result"]``（正常结果或 0 包降级结果）；空 / 非 dict 时返回 ``[]``。
+        gateway: 默认网关（调用方查好传入，便于单测不碰系统 API）；空串时若降级
+            结果里的 ``link.via == "gateway"`` 会用 ``link.host`` 兜底。
+
+    Returns:
+        list[dict]: 每项键 ``kind``（``live`` / ``probe``）/ ``mode``（前端模式名）/
+            ``label``（按钮文案）/ ``target`` / ``port``（live 为端口，probe 为 ``None``）/
+            ``display``（确认框里的 ``IP:端口``）/ ``confirm``（确认文案）。
+            ``live`` 只在结果里有合法 Stream 对端时出现，``probe`` 只在知道网关时出现；
+            两者都没有时返回 ``[]``（结果页不显示空的按钮区）。
+    """
+    if not isinstance(result, dict):
+        return []
+    actions: list[dict] = []
+    meta = result.get("meta") or {}
+    peer = _peer_from_streams(meta.get("streams_top") or [])
+    if peer:
+        host, port = peer
+        display = f"{host}:{port}" if port else host
+        actions.append({
+            "kind": "live", "mode": "live", "needs_admin": True,
+            "label": "用单目标诊断复测对端",
+            "target": host, "port": port, "display": display,
+            "confirm": f"将切换到『单目标诊断』并预填 {display}，是否继续？",
+        })
+    gw = str(gateway or "").strip()
+    if not gw and result.get("degraded"):
+        link = result.get("link") or {}
+        if str(link.get("via") or "") == "gateway":
+            gw = str(link.get("host") or "").strip()
+    if gw:
+        actions.append({
+            "kind": "probe", "mode": "probe", "needs_admin": False,
+            "label": "用连通与速度测试复测网关",
+            "target": gw, "port": None, "display": gw,
+            "confirm": f"将切换到『连通与速度测试』并预填网关 {gw}，是否继续？",
+        })
+    return actions
+
+
 class Handler(BaseHTTPRequestHandler):
     """本地 Web UI 与 API 的请求处理器。
 
@@ -889,6 +987,10 @@ class Handler(BaseHTTPRequestHandler):
             attempt, attempts = _job_attempt(data.get("logs") or [])
             data["attempt"] = attempt
             data["attempts"] = attempts
+            # 加法字段：结果页「接下来怎么做」的一键复测按钮参数。
+            # 只进状态响应，不进报告，所以 faults_demo 快照不受影响。
+            if data["state"] == "done" and data.get("result"):
+                data["link_actions"] = link_actions(data["result"], _gateway_now())
             return self._json(data)
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]

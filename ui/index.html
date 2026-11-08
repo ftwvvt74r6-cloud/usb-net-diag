@@ -382,6 +382,10 @@
     border-left:3px solid var(--accent);padding:6px 10px;border-radius:0 6px 6px 0;margin-top:7px}
   .vproof{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.6;word-break:break-all}
   .steps{margin:4px 0 0;padding-left:19px;font-size:12.5px;line-height:1.85;color:var(--text-2)}
+  .linkacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;
+    padding:10px 12px;border:1px dashed #c7d2fe;border-radius:10px;background:#f8faff}
+  .linkacts .hint{margin:0 4px 0 0;flex:none}
+  .linkacts .btn{width:auto;padding:6px 11px;font-size:12px}
   .sev{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;
     font-weight:700;white-space:nowrap}
   .sev.严重{background:var(--crit-bg);color:var(--crit)}
@@ -845,6 +849,26 @@
     <div class="mfoot">
       <button class="btn ghost" id="perm-cancel">取消</button>
       <button class="btn" id="perm-elevate">以管理员身份重启</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask hidden" id="link-mask">
+  <div class="modal small" role="dialog" aria-modal="true" aria-label="切换模式并预填">
+    <div class="mhead">
+      <div>
+        <b>切换模式并预填？</b>
+        <em>只切换模式、填好参数，不会自动开始采集</em>
+      </div>
+      <button class="xbtn" id="link-close" title="关闭">✕</button>
+    </div>
+    <div class="mbody">
+      <p id="link-confirm-text" style="margin:2px 0 12px;font-size:12.8px;line-height:1.75;color:var(--text-2)"></p>
+      <div class="hint">切换后请确认参数，再点「开始…」；取消则留在当前结果页。</div>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" id="link-cancel">取消</button>
+      <button class="btn" id="link-go">继续，切过去</button>
     </div>
   </div>
 </div>
@@ -1879,9 +1903,8 @@ async function poll() {
       const res = s.result || {};
       stopRun();
       if (RUN_MODE) setMode(RUN_MODE);
-      if (res.degraded) renderDegraded(res);
-      else render(res);
-      appendLog("任务完成：结果已渲染到右侧", "s");
+      if (res.degraded) renderDegraded(res, s.link_actions || []);
+      else render(res, s.link_actions || []);
     } else if (s.state === "error") {
       const why = s.error || "未知错误";
       RUN_MODE = s.mode || RUN_MODE;
@@ -1993,10 +2016,67 @@ $("#pstop").onclick = async () => {
   $("#hint").textContent = "正在停止…";
 };
 
+function renderPassiveEmpty(res){
+  hideQuestion();
+  const spec = UI.cards.empty_sessions || {};
+  const title = spec.title || "未观察到任何 TCP/IP 会话";
+  const tried = (res.tried || []).map((t) =>
+    '<li><span class="mono">#' + esc(t.index) + ' ' + esc(t.name) + '</span> · '
+    + esc(t.packets) + ' 个报文</li>').join("");
+  const reasons = [
+    "抓包点可能看不到业务流量：VPN / 代理 / TUN 虚拟网卡（如 mihomo 的 Meta）会改写路由，物理网卡上可能没有业务报文。",
+    "这段时间内本来没有 TCP/UDP 会话（例如应用只在点击时短暂连接）。",
+    res.auto === false
+      ? "你手动指定了网卡 " + esc(res.interface || "-") + "：已按指定停在这块，不自动换卡。"
+      : "自动选择只验证了「这块网卡有报文」，没有验证它承载的正是你要观察的业务。",
+  ].map((x) => '<li>' + x + '</li>').join("");
+  const steps = (res.next_steps || []).map((x) => '<li>' + esc(x) + '</li>').join("");
+  const chips = [
+    '<span class="chip">网卡 <b>' + esc(res.interface || "-") + '</b></span>',
+    '<span class="chip">监听时长 <b>' + esc(res.duration || 0) + 's</b></span>',
+    '<span class="chip">引擎 <b>' + esc(res.engine || "-") + '</b></span>',
+    '<span class="chip">过滤器 <b>' + esc(res.bpf || "全部流量") + '</b></span>',
+  ];
+  if ((res.tried || []).length > 1) {
+    chips.push('<span class="chip">尝试候选 <b>' + (res.tried || []).length
+      + '/' + esc(res.attempts || (res.tried || []).length) + ' 块</b></span>');
+  }
+
+  $("#result-title").textContent = title;
+  $("#result-sub").textContent = "通信观察没有抓到任何 TCP/IP 会话，按「0 会话」给出结论卡";
+  $("#result-chip").textContent = "0 条会话";
+  $("#result").innerHTML =
+    '<div class="vcard 警告" data-card="empty_sessions">'
+    + '<div class="vkind">采集有效性 · 降级</div>'
+    + '<div class="vtop"><span class="vt">未捕获会话</span><span class="vlay">采集有效性</span>'
+    + '<h3>' + esc(title) + '</h3></div>'
+    + '<p class="vplain">' + esc(res.advice || res.headline || "") + '</p>'
+    + '<div class="chips">' + chips.join("") + '</div></div>'
+    + '<div class="sectitle">为什么没观察到会话</div>'
+    + '<div class="point"><div class="vl"><ol class="steps">' + reasons + '</ol></div></div>'
+    + '<div class="sectitle">试过的候选网卡（自动换卡最多 3 块）</div>'
+    + '<div class="point"><div class="vl"><ul class="facts">'
+    + (tried || "<li>—</li>") + '</ul></div></div>'
+    + '<div class="sectitle">接下来怎么做（建议按顺序执行）</div>'
+    + '<ol class="steps">' + steps + '</ol>'
+    + '<div class="toolbar" style="margin-top:12px">'
+    + '<button class="btn ghost" id="pempty-retry">再观察一次</button>'
+    + '<button class="btn ghost" id="pempty-probe">去连通与速度测试</button></div>';
+  const retry = $("#pempty-retry");
+  if (retry) retry.onclick = () => {
+    if (isLocked("passive")) { showPermModal(); return; }
+    startPassive();
+  };
+  const probe = $("#pempty-probe");
+  if (probe) probe.onclick = () => setMode("probe");
+  scrollMainTop();
+}
+
 function renderPassive(res){
   if (!res || !res.ok) return;
-  hideQuestion();
   const s = res.summary || {};
+  if (!(s.flows || 0)) { renderPassiveEmpty(res); return; }
+  hideQuestion();
   const st = (k, v) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`;
   const dist = (s.by_proto || []).slice(0, 8).map((p) => {
     const w = Math.max(3, Math.round(p.flows / Math.max(1, s.flows) * 100));
@@ -2053,7 +2133,68 @@ function miniTable(head, body){
     + body.map(r=>'<tr>' + r.map(c=>'<td>'+c+'</td>').join('') + '</tr>').join('') + '</tbody></table>';
 }
 
-function render(res) {
+/* ---------- 结果页联动：按钮 → 确认框 → 切模式 + 预填 ---------- */
+let PENDING_LINK = null;
+
+function linkActionsHtml(actions){
+  if (!(actions || []).length) return "";
+  return '<div class="linkacts"><span class="hint">一键复测（会先确认，不会自动开始）：</span>'
+    + actions.map((a, i) => '<button class="btn ghost linkact" data-idx="' + i + '">'
+      + esc(a.label) + ' → <span class="mono">' + esc(a.display) + '</span></button>').join("")
+    + '</div>';
+}
+
+function askLinkAction(action){
+  if (!action) return;
+  PENDING_LINK = action;
+  $("#link-confirm-text").textContent = action.confirm || "";
+  $("#link-mask").classList.remove("hidden");
+  $("#link-go").focus();
+}
+
+function closeLinkModal(){
+  $("#link-mask").classList.add("hidden");
+  PENDING_LINK = null;
+}
+
+/* 只切模式与预填，不自动开始采集；live 的目标框只收 IP（BPF 不支持端口），端口写进提示。 */
+function applyLinkAction(action){
+  if (!action) return;
+  if (action.mode === "probe") {
+    setMode("probe");
+    $("#probe-target").value = action.target || "";
+    $("#probe-port").value = "";
+    $("#hint").textContent = "已预填网关 " + action.display + "；端口留空，按协议自动识别。";
+    setTimeout(() => $("#probe-target").focus(), 60);
+  } else {
+    setMode("live");
+    $("#target").value = action.target || "";
+    $("#hint").textContent = "已预填发现的对端 " + action.display
+      + "；抓包按 IP 过滤，端口 " + (action.port || "-") + " 仅作提示（过滤器不支持写端口）。";
+    setTimeout(() => $("#target").focus(), 60);
+  }
+  const sc = $("#main-scroll");
+  if (sc) sc.scrollTop = 0;
+}
+
+function wireLinkActions(actions){
+  document.querySelectorAll("#result .linkact").forEach((b) => {
+    b.onclick = () => askLinkAction((actions || [])[Number(b.dataset.idx)]);
+  });
+}
+
+$("#link-close").onclick = closeLinkModal;
+$("#link-cancel").onclick = closeLinkModal;
+$("#link-mask").addEventListener("mousedown", (e) => {
+  if (e.target.id === "link-mask") closeLinkModal();
+});
+$("#link-go").onclick = () => {
+  const action = PENDING_LINK;
+  closeLinkModal();
+  applyLinkAction(action);
+};
+
+function render(res, actions) {
   if (!res || !res.ok) return;
   hideQuestion();
   LAST_RESULT = res;
@@ -2207,6 +2348,7 @@ function render(res) {
 
     ${points ? '<div class="sectitle">问题详解</div>' + points : ""}
     ${steps}
+    ${linkActionsHtml(actions)}
 
     <div class="sectitle">会话明细（按问题严重度排序）</div>
     ${streamTable}
@@ -2246,11 +2388,12 @@ function render(res) {
     URL.revokeObjectURL(a.href);
   };
   $("#ai-explain").onclick = runAI;
+  wireLinkActions(actions);
   scrollMainTop();
 }
 
 /* ---------- 0 包降级结果页（中性，不报红） ---------- */
-function renderDegraded(res) {
+function renderDegraded(res, actions) {
   hideQuestion();
   LAST_RESULT = res;
   const link = res.link || {};
@@ -2311,6 +2454,7 @@ function renderDegraded(res) {
     + '<div class="point"><div class="vl"><ol class="steps">' + reasons + '</ol></div></div>'
     + '<div class="sectitle">接下来怎么做（建议按顺序执行）</div>'
     + '<ol class="steps">' + steps + '</ol>'
+    + linkActionsHtml(actions)
     + '<div class="hint">本次抓包：' + esc(cap.duration || 0) + ' 秒 · 目标 '
     + esc(cap.target || "全网") + ' · 原始提示：<span class="fname">'
     + esc(cap.error || "-") + '</span></div>'
@@ -2331,6 +2475,7 @@ function renderDegraded(res) {
     setMode("probe");
     if (cap.target && cap.target !== "全网") $("#probe-target").value = cap.target;
   };
+  wireLinkActions(actions);
   scrollMainTop();
 }
 

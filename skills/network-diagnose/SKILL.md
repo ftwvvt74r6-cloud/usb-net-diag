@@ -17,7 +17,7 @@ whenToUse: 当用户反馈「网慢、卡、打不开、时通时不通、某个
 | 已能复现问题，需要看丢包、重传、具体会话 | `capture_live_packets` | 抓包才能看到重传、乱序、RST、窗口等传输层细节 |
 | 目标机器不能装驱动 / 没有管理员权限 | `analyze_pcap` | 让用户在自己机器上抓包后拿来分析 |
 | 不知道抓哪台、想先看整体 | `scan_network_threats`（全网抓包） | 抓本机网卡全部流量，覆盖所有会话 |
-| 想知道「这台机器实际在跑什么协议」 | `listen_flows` | 被动监听，输出会话表：源/目标/协议/包长/连接状态，不发任何报文 |
+| 想知道「这台机器实际在跑什么协议」 | `listen_flows` | 通信观察（被动监听），输出会话表：源/目标/协议/包长/连接状态，不发任何报文 |
 
 推荐顺序：**先 listen_flows 看全局在跑什么，再 probe_link 判断瓶颈段，最后才决定要不要抓包**。
 如果体检显示 TCP 握手就慢或不通，抓包重点看 SYN/重传；
@@ -105,11 +105,11 @@ DNS 逐条解析耗时与 rcode、HTTP 请求逐条耗时与状态码、ICMP 明
 | 工具 | 用途 | 关键参数 |
 |---|---|---|
 | `probe_link` | 协议自适应分段体检，定位瓶颈段 | `target`（可带端口）、`port`、`count`、`proto`（http/tls/smb/rdp/ssh/opaque） |
-| `listen_flows` | 被动监听，输出会话表 | `target`（IP/CIDR，可空）、`duration`、`interface`、`engine` |
+| `listen_flows` | 通信观察（被动监听），输出会话表 | `target`（IP/CIDR，可空）、`duration`、`interface`、`engine` |
 | `list_interfaces` | 列出可抓包网卡 | 无 |
-| `capture_live_packets` | 定向抓包 + 分层诊断 | `target_ip`（可空）、`duration`、`interface` |
-| `scan_network_threats` | 全网抓包 + 分层诊断 | `duration`、`interface` |
-| `analyze_pcap` | 离线分析已有抓包 | `pcap_file`、`target` |
+| `capture_live_packets` | 单目标诊断（定向抓包）+ 分层诊断 | `target_ip`（可空）、`duration`、`interface` |
+| `scan_network_threats` | 全网体检（全网扫描）+ 分层诊断 | `duration`、`interface` |
+| `analyze_pcap` | 分析抓包文件（离线分析已有抓包） | `pcap_file`、`target` |
 | `doctor` | 检查 tshark/Npcap/权限 | 无 |
 
 ## 五、撰写要求

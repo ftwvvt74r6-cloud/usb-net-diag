@@ -81,6 +81,13 @@ INSUFFICIENT_REASON = "no_decidable_dimension"
 #: 落盘报告里 tshark 路径的占位：绝对路径是机器相关键，换机器重跑会产生脏 diff。
 TSHARK_PATH_PLACEHOLDER = "<TSHARK_PATH>"
 
+#: 分析抓包文件（``run_scan --pcap``）时写进 ``meta.bpf`` 的模式标记。
+#: 它同时会显示在报告的「网卡 / 过滤器」一行，所以必须是用户可见的新模式名。
+OFFLINE_BPF = "分析抓包文件"
+
+#: 旧版写进报告的模式标记；只用于兼容历史报告 / 旧调用方，不再新写。
+_OFFLINE_BPF_LEGACY = "离线分析"
+
 # 排查顺序：自下而上。同严重度时，越底层越优先（先查链路再查应用）
 LAYER_RANK = {"L2 本地链路": 0, "L3 网络层": 1, "L4 传输层": 2, "L7 应用层": 3, "安全观察": 9}
 CAT_RANK = {
@@ -411,15 +418,20 @@ def _load_copy() -> dict:
 
 
 def _is_offline(meta: dict) -> bool:
-    """离线分析标记：``run_scan`` 走 ``--pcap`` 路径时把 bpf 写成「离线分析」。"""
-    return meta.get("bpf") == "离线分析"
+    """分析抓包文件标记：``run_scan`` 走 ``--pcap`` 路径时把 bpf 写成 :data:`OFFLINE_BPF`。
+
+    旧报告 / 旧调用方写的是「离线分析」；两个都认，避免历史数据被当成在线抓包，
+    给出「换一块网卡再抓」这种做不到的建议。
+    """
+    return meta.get("bpf") in (OFFLINE_BPF, _OFFLINE_BPF_LEGACY)
 
 
 def _insufficient_steps(meta: dict) -> list[str]:
     """证据不足时的两条处置建议；copy 表优先，缺失回退内联常量。
 
     Args:
-        meta: 采集元信息；``bpf == "离线分析"`` 时第一条建议换成离线版本。
+        meta: 采集元信息；``bpf`` 是分析抓包文件标记（:data:`OFFLINE_BPF`，兼容旧值
+            「离线分析」）时第一条建议换成离线版本。
 
     Returns:
         list[str]: 两条建议文案（可直接展示的成句中文）。

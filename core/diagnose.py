@@ -804,7 +804,7 @@ def degraded_empty_capture_result(target: str = "", duration: int = 0,
         next_steps.insert(0, f"目标 {target} 当前没有响应：先查路由 / 防火墙，"
                              "或用「连通与速度测试」确认目标端口是否在监听。")
 
-    logger(f"[提示] 未捕获业务报文，已自动做连通与速度测试（链路体检）：{metrics}"
+    logger(f"[提示] 未捕获业务报文，已自动做连通与速度测试：{metrics}"
            f"（{'目标' if via == 'target' else '默认网关'} {host}），"
            f"按「{card_title}」降级，不判为失败")
     return {
@@ -986,7 +986,7 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
               report_dir: str | Path | None = None) -> dict:
     """``run_scan`` 的实现体（拆出来是为了让记录逻辑只包一层、不散落在每个 return）。"""
     cfg = load_config()
-    cap: dict = {"ok": True, "bpf": "离线分析", "interface": "-", "duration": 0}
+    cap: dict = {"ok": True, "bpf": verdict.OFFLINE_BPF, "interface": "-", "duration": 0}
     if pcap:
         p = Path(pcap)
         # 支持 U 盘盘符变化：只给文件名时回落到 captures/

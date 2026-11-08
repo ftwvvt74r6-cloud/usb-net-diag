@@ -102,20 +102,94 @@ def _bpf(target: str) -> str:
     return f"host {t}"
 
 
-def _resolve_iface(interface: str | None) -> tuple[dict | None, str]:
-    """把界面传来的序号 / 名称 / 设备路径统一成抓包设备名。"""
+def _device_name(item: dict | None) -> str:
+    """从 ``tshark -D`` 的条目里取 scapy 能用的 ``\\Device\\NPF_{...}`` 设备名。"""
+    name = (item or {}).get("name", "")
+    m = re.search(r"(\\Device\\NPF_\{[^}]+\})", name)
+    return m.group(1) if m else name
+
+
+def _resolve_iface(interface: str | None) -> tuple[dict | None, str, bool, list[dict]]:
+    """把界面传来的序号 / 名称 / 设备路径统一成抓包设备名，并做真实流量探测。
+
+    与 :func:`diagnose.capture_live` 同款选卡逻辑（这里不能反向 import diagnose：
+    server 同时 import 两者，会形成环）：显式指定 → 只认那块；自动选择 → 先按
+    :func:`tshark.order_interfaces` 的优先级（物理在前、虚拟靠后、断线卡也被探测）
+    逐块试抓 2 秒，取第一块真有报文的；全都没探测到再用
+    :func:`tshark.pick_interface` 兜底 —— 于是「名字像以太网但没插网线」不会
+    一上来就被当成默认网卡。
+
+    Args:
+        interface: 界面传的网卡序号（``"5"``）或名称关键字（``"WLAN"`` / 设备路径）；
+            空 / ``None`` 表示自动选择。
+
+    Returns:
+        tuple[dict | None, str, bool, list[dict]]: ``(chosen, device, explicit, ordered)``。
+        ``chosen`` 是 ``tshark.list_interfaces()`` 的原始项（可能为 ``None``：一块网卡都没有）；
+        ``device`` 是 ``\\Device\\NPF_{...}`` 设备名（给 scapy 用）；``explicit``
+        表示用户是否显式指定（显式选中 0 包时不自动换卡）；``ordered`` 是按优先级
+        排好的完整候选列表（供 0 包换卡用）。
+    """
     items = tshark.list_interfaces()
+    ordered = tshark.order_interfaces(items)
     raw = (interface or "").strip()
     chosen = None
     if raw.isdigit():
         chosen = next((i for i in items if i["index"] == int(raw)), None)
     elif raw:
         chosen = next((i for i in items if raw == i["name"] or raw in i["name"]), None)
-    if chosen is None:
-        chosen = tshark.pick_interface(items)
-    name = (chosen or {}).get("name", "")
-    m = re.search(r"(\\Device\\NPF_\{[^}]+\})", name)
-    return chosen, (m.group(1) if m else name)
+    explicit = chosen is not None
+    if chosen is None and items:
+        # 先按候选顺序真实抓 2 秒；名字只能猜（以太网可能没插网线），流量不会说谎。
+        ts = tshark.find_tshark()
+        if ts:
+            chosen = tshark.probe_interface(ts, ordered[:3])
+        if chosen is None:
+            chosen = tshark.pick_interface(items)
+    return chosen, _device_name(chosen), explicit, ordered
+
+
+def _candidate_plan(chosen: dict | None, ordered: list[dict],
+                    limit: int = 3) -> list[dict]:
+    """给出「首选网卡 + 后续候选」的尝试顺序（按网卡序号去重）。
+
+    Args:
+        chosen: 首选网卡（真实探测命中的那块，或 ``pick_interface`` 的兜底结果）。
+        ordered: :func:`tshark.order_interfaces` 的候选顺序（物理优先、虚拟靠后）。
+        limit: 最多尝试几块，默认 3（首次 + 最多两次换卡重试）。
+
+    Returns:
+        list[dict]: 首项必为 ``chosen``（非空时），其余按 ``ordered`` 顺序补齐；
+            按 ``index`` 去重后截断到 ``limit``。``chosen`` 为空时直接取
+            ``ordered[:limit]``，空列表返回 ``[]``。
+    """
+    plan: list[dict] = []
+    seen: set = set()
+    if chosen:
+        plan.append(chosen)
+        seen.add(chosen.get("index"))
+    for item in ordered:
+        if len(plan) >= limit:
+            break
+        index = item.get("index")
+        if index in seen:
+            continue
+        plan.append(item)
+        seen.add(index)
+    return plan[:limit]
+
+
+def _probe_summary(plan: list[dict], tried: list[dict], explicit: bool) -> str:
+    """构造「哪块网卡都没抓到包」时给人看的一句事实描述。"""
+    names = "、".join(f"{tshark.short_name(i['name'])}[{i['index']}]" for i in plan) or "-"
+    if explicit:
+        return (f"你显式指定了网卡 {names}：已按你的选择停在这块，不自动换卡；"
+                "它在这段时间内没有捕获到任何报文。")
+    if len(plan) <= 1:
+        return f"候选网卡 {names} 在这段时间内没有捕获到任何报文。"
+    detail = "；".join(f"{t['name']}[{t['index']}] {t['packets']} 个报文" for t in tried)
+    return f"连续试了 {len(tried)} 块候选网卡（{detail}），都没有捕获到报文。"
+
 
 
 def _payload(b: bytes) -> bytes:
@@ -245,8 +319,8 @@ def _capture_scapy(device: str, duration: int, bpf: str, max_packets: int,
             cnt["drop"] += 1
         if rec:
             recs.append(rec)
-        if logger and cnt["n"] % 500 == 0:
-            logger(f"已捕获 {cnt['n']} 个报文，会话 {len(recs)} 条…")
+        if logger and cnt["n"] % 2000 == 0:
+            logger(f"已捕获 {cnt['n']} 个报文…")
 
     sniffer = AsyncSniffer(iface=device or None, filter=(bpf or None), prn=_prn,
                            store=False, stop_filter=lambda p: cnt["n"] >= max_packets)
@@ -525,14 +599,26 @@ def _count_by(flows: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------- 入口
+def _capture_once(engine: str, device: str, duration: int, bpf: str,
+                  max_packets: int, logger=None, should_stop=None) -> list[dict]:
+    """按引擎抓一次；异常原样抛出，由 :func:`run` 决定是否换引擎重试。"""
+    if engine == "scapy":
+        return _capture_scapy(device, duration, bpf, max_packets, logger, should_stop)
+    return _capture_tshark(device, duration, bpf, max_packets, logger, should_stop)
+
+
 def run(interface: str | None = None, duration: int = 20, target: str = "",
         max_packets: int = 20000, engine: str = "auto", logger=None,
         should_stop=None) -> dict:
     """监听网卡若干秒，返回会话表与汇总。**只听不发**，不构造任何报文。
 
+    选卡规则与实时抓包一致：显式指定就只听那块；自动选择先按
+    :func:`tshark.order_interfaces` 排序并真实试抓 2 秒，取第一块有报文的网卡；
+    抓到 0 包时按候选顺序换下一块（最多 3 块），控制台逐块说明「第 N 块无流量」。
+
     Args:
         interface: 网卡序号或名称关键字；空则自动挑选。
-        duration: 监听秒数，夹在 3~300。
+        duration: 监听秒数，夹在 3~300；换卡重试时每块缩短为 ``min(duration, 10)``。
         target: 只保留与该目标相关的会话（IP/CIDR/域名）；空表示全部流量。
         max_packets: 包数上限，夹在 200~200000，防止长时间监听把内存吃满。
         engine: ``auto`` / ``scapy`` / ``tshark``；``auto`` 优先 Scapy，不可用时回落 tshark。
@@ -540,9 +626,11 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
         should_stop: 可选无参回调，返回 True 时提前结束（界面「停止」按钮用）。
 
     Returns:
-        dict: 成功 ``{"ok": True, "interface", "duration", "engine", "bpf",
-            "flows": [...], "summary": {...}}``；失败 ``{"ok": False, "error": "..."}``
-            （如没有可用网卡、目标过滤器非法）。
+        dict: 成功 ``{"ok": True, "interface", "interface_index", "device", "duration",
+            "engine", "bpf", "flows": [...], "summary": {...}, "attempts", "tried",
+            "auto"}``；0 会话时额外带 ``card="empty_sessions"`` / ``next_steps``，
+            ``tried`` 记录每块候选网卡实际抓到多少报文。失败 ``{"ok": False, "error"}``
+            （没有可用网卡、目标过滤器非法、两种引擎都打不开）。
     """
     duration = max(3, min(int(duration or 20), 300))
     max_packets = max(200, min(int(max_packets or 20000), 200000))
@@ -551,8 +639,14 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
         bpf = _bpf(target)
     except ValueError as exc:
         return {"ok": False, "error": f"目标/过滤器不合法：{exc}"}
-    chosen, device = _resolve_iface(interface)
-    if not device:
+
+    chosen, device, explicit, ordered = _resolve_iface(interface)
+    if not chosen or not device:
+        return {"ok": False, "error": "没有可用网卡：请安装 Npcap 并以管理员身份运行"}
+    plan = [chosen] if explicit else _candidate_plan(chosen, ordered, limit=3)
+    if not plan:
+        plan = ordered[:3]
+    if not plan:
         return {"ok": False, "error": "没有可用网卡：请安装 Npcap 并以管理员身份运行"}
 
     status = engine_status()
@@ -563,44 +657,92 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
         return {"ok": False, "error": "scapy 未安装且找不到 tshark，无法抓包"}
 
     if logger:
-        logger(f"通信观察（被动监听）：网卡 {tshark.short_name(device)}，{duration}s，"
-               f"过滤器 {bpf or '全部流量'}，引擎 {used}")
+        picked = tshark.short_name(chosen["name"])
+        if explicit:
+            logger(f"通信观察（被动监听）：使用指定网卡 {picked}[{chosen['index']}]")
+        else:
+            logger(f"通信观察（被动监听）：自动选择网卡 {picked}[{chosen['index']}]"
+                   f"（已按「物理优先 + 真实试抓 2 秒」探测，候选最多 {len(plan)} 块）")
 
     t0 = time.time()
-    try:
-        if used == "scapy":
-            recs = _capture_scapy(device, duration, bpf, max_packets, logger, should_stop)
-        else:
-            recs = _capture_tshark(device, duration, bpf, max_packets, logger, should_stop)
-    except Exception as exc:  # noqa: BLE001
-        if engine in ("auto", "") and used == "scapy":
-            if logger:
-                logger(f"scapy 不可用（{type(exc).__name__}: {exc}），改用 tshark 兜底")
-            used = "tshark"
-            try:
-                recs = _capture_tshark(device, duration, bpf, max_packets, logger, should_stop)
-            except Exception as exc2:  # noqa: BLE001
-                return {"ok": False, "error": f"两种引擎都失败：{exc2}"}
-        else:
-            return {"ok": False, "error": f"{used} 抓包失败：{exc}"}
+    recs: list[dict] = []
+    tried: list[dict] = []
+    last = plan[0]
+    for attempt, cand in enumerate(plan, 1):
+        last = cand
+        cand_name = tshark.short_name(cand["name"])
+        attempt_duration = duration if attempt == 1 else min(duration, 10)
+        prefix = f"（第 {attempt}/{len(plan)} 块）" if len(plan) > 1 else ""
+        shorten = (f"（重试缩短时长，原 {duration}s）"
+                   if attempt_duration < duration else "")
+        if logger:
+            logger(f"通信观察（被动监听）开始{prefix}：网卡[{cand['index']}] {cand_name}，"
+                   f"时长 {attempt_duration}s{shorten}，过滤器 {bpf or '全部流量'}，"
+                   f"引擎 {used}")
+        try:
+            recs = _capture_once(used, _device_name(cand), attempt_duration, bpf,
+                                 max_packets, logger, should_stop)
+        except Exception as exc:  # noqa: BLE001
+            if engine in ("auto", "") and used == "scapy":
+                if logger:
+                    logger(f"scapy 不可用（{type(exc).__name__}: {exc}），改用 tshark 兜底")
+                used = "tshark"
+                try:
+                    recs = _capture_once(used, _device_name(cand), attempt_duration,
+                                         bpf, max_packets, logger, should_stop)
+                except Exception as exc2:  # noqa: BLE001
+                    return {"ok": False, "error": f"两种引擎都失败：{exc2}"}
+            else:
+                return {"ok": False, "error": f"{used} 抓包失败：{exc}"}
+        tried.append({"index": cand["index"], "name": cand_name, "packets": len(recs)})
+        if recs:
+            break
+        if explicit or attempt >= len(plan):
+            break
+        if should_stop and should_stop():
+            break
+        nxt = plan[attempt]
+        if logger:
+            logger(f"[提示] 第 {attempt}/{len(plan)} 块网卡 {cand_name}[{cand['index']}] "
+                   f"无流量（0 个报文），换第 {attempt + 1}/{len(plan)} 块 "
+                   f"{tshark.short_name(nxt['name'])}[{nxt['index']}] 重试 ...")
 
     flows, summary = build_flows(recs)
-    iface_name = tshark.short_name((chosen or {}).get("name") or device)
+    iface_name = tshark.short_name(last["name"])
     elapsed = round(time.time() - t0, 1)
     if logger:
         logger(f"通信观察（被动监听）完成：{summary['packets']} 个报文 / {summary['flows']} 条会话，"
                f"未识别 {summary['unknown']} 条")
 
+    base = {
+        "ok": True, "engine": used, "engine_version": status.get("scapy_version", ""),
+        "flows": flows, "summary": summary,
+        "interface": iface_name, "interface_index": last["index"],
+        "device": _device_name(last),
+        "duration": elapsed, "target": target, "bpf": bpf,
+        "attempts": len(plan), "tried": tried, "auto": not explicit,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
     if not recs:
-        return {
-            "ok": True, "engine": used, "flows": [], "summary": summary,
-            "interface": iface_name, "device": device,
-            "duration": elapsed, "target": target, "bpf": bpf,
-            "headline": "这段时间没有抓到与目标相关的流量",
-            "advice": ("确认所选网卡是真正跑业务的那块（多网卡机器常见选错），"
-                       "或目标 IP 写错；也可以把目标留空抓全部流量再筛选。"),
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        reason = _probe_summary(plan, tried, explicit)
+        next_steps = [
+            "换一块有流量的网卡（或保持「自动选择」）再观察一次：有线和无线同时在线时，业务可能只走其中一块。",
+            "如果走代理 / VPN，优先在 TUN 虚拟网卡（如 Meta）上观察；物理网卡上可能看不到业务报文。",
+            "把监听时长调到 30~60 秒，并在这段时间里实际打开要观察的应用（如视频、OA）。",
+        ]
+        if bpf:
+            next_steps.insert(0, f"当前过滤器 `{bpf}` 可能过窄：先把目标留空，观察全部流量。")
+        if logger:
+            logger(f"[提示] 通信观察（被动监听）未捕获到任何报文：{reason}")
+        base.update({
+            "headline": "未观察到任何 TCP/IP 会话",
+            "card": "empty_sessions",
+            "advice": (reason + " 未观察到会话不代表网络断：可能流量走了代理 / TUN，"
+                       "或这段时间本来没有 TCP/UDP 交互。"),
+            "next_steps": next_steps,
+        })
+        return base
 
     unknown = summary["unknown"]
     if unknown:
@@ -624,11 +766,5 @@ def run(interface: str | None = None, duration: int = 20, target: str = "",
                   f"常见于 P2P 下载、视频分发、网盘同步或 CDN 探测，通常是带宽被占用的原因。"
                   "如非业务需要，可用 netstat -ano 找到对应进程再做限制。")
 
-    return {
-        "ok": True, "engine": used, "engine_version": status.get("scapy_version", ""),
-        "flows": flows, "summary": summary,
-        "interface": iface_name, "device": device,
-        "duration": elapsed, "target": target, "bpf": bpf,
-        "headline": headline, "advice": advice,
-        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    base.update({"headline": headline, "advice": advice})
+    return base

@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**29** 个（有模块说明 29 个）
-- 公开符号：**212** 个（有 docstring 212 个，合格 212 个）
+- 公开符号：**213** 个（有 docstring 213 个，合格 213 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -2396,8 +2396,8 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `engine_status` | function | 62 | ✅ |
-| `build_flows` | function | 398 | ✅ |
-| `run` | function | 528 | ✅ |
+| `build_flows` | function | 472 | ✅ |
+| `run` | function | 610 | ✅ |
 
 ### `engine_status`
 
@@ -2445,9 +2445,13 @@ def run(interface: str | None=None, duration: int=20, target: str='', max_packet
 ```text
 监听网卡若干秒，返回会话表与汇总。**只听不发**，不构造任何报文。
 
+选卡规则与实时抓包一致：显式指定就只听那块；自动选择先按
+:func:`tshark.order_interfaces` 排序并真实试抓 2 秒，取第一块有报文的网卡；
+抓到 0 包时按候选顺序换下一块（最多 3 块），控制台逐块说明「第 N 块无流量」。
+
 Args:
     interface: 网卡序号或名称关键字；空则自动挑选。
-    duration: 监听秒数，夹在 3~300。
+    duration: 监听秒数，夹在 3~300；换卡重试时每块缩短为 ``min(duration, 10)``。
     target: 只保留与该目标相关的会话（IP/CIDR/域名）；空表示全部流量。
     max_packets: 包数上限，夹在 200~200000，防止长时间监听把内存吃满。
     engine: ``auto`` / ``scapy`` / ``tshark``；``auto`` 优先 Scapy，不可用时回落 tshark。
@@ -2455,9 +2459,11 @@ Args:
     should_stop: 可选无参回调，返回 True 时提前结束（界面「停止」按钮用）。
 
 Returns:
-    dict: 成功 ``{"ok": True, "interface", "duration", "engine", "bpf",
-        "flows": [...], "summary": {...}}``；失败 ``{"ok": False, "error": "..."}``
-        （如没有可用网卡、目标过滤器非法）。
+    dict: 成功 ``{"ok": True, "interface", "interface_index", "device", "duration",
+        "engine", "bpf", "flows": [...], "summary": {...}, "attempts", "tried",
+        "auto"}``；0 会话时额外带 ``card="empty_sessions"`` / ``next_steps``，
+        ``tried`` 记录每块候选网卡实际抓到多少报文。失败 ``{"ok": False, "error"}``
+        （没有可用网卡、目标过滤器非法、两种引擎都打不开）。
 ```
 
 ## `core/platform/__init__.py`
@@ -3323,13 +3329,14 @@ Returns:
 | `engine_info` | function | 535 | ✅ |
 | `passive_start` | function | 578 | ✅ |
 | `passive_status` | function | 613 | ✅ |
-| `Handler` | class | 636 | ✅ |
-| `Handler.log_message` | method | 682 | ✅ |
-| `Handler.do_GET` | method | 820 | ✅ |
-| `Handler.do_POST` | method | 837 | ✅ |
-| `DiagServer` | class | 1043 | ✅ |
-| `create_server` | function | 1055 | ✅ |
-| `main` | function | 1102 | ✅ |
+| `link_actions` | function | 687 | ✅ |
+| `Handler` | class | 734 | ✅ |
+| `Handler.log_message` | method | 780 | ✅ |
+| `Handler.do_GET` | method | 918 | ✅ |
+| `Handler.do_POST` | method | 935 | ✅ |
+| `DiagServer` | class | 1145 | ✅ |
+| `create_server` | function | 1157 | ✅ |
+| `main` | function | 1204 | ✅ |
 
 ### `touch`
 
@@ -3529,6 +3536,31 @@ Returns:
     dict: 键 ``ok`` / ``state``（``idle``/``running``/``done``/``error``）/
         ``result``（完成后是 ``passive.run()`` 的结果，运行中为 ``None``）/
         ``error`` / ``engine`` / ``engine_info`` / ``elapsed``（已运行秒数）。
+```
+
+### `link_actions`
+
+```python
+def link_actions(result: dict | None, gateway: str='') -> list[dict]
+```
+
+```text
+生成结果页「接下来怎么做」里的一键复测按钮参数（只描述，不执行）。
+
+这是**加法字段**：只进 ``/api/status`` 的响应，不写进报告 JSON / Markdown，
+因此不会改变 ``reports/`` 快照。前端拿到后负责弹确认框、切模式、预填表单。
+
+Args:
+    result: ``JOB["result"]``（正常结果或 0 包降级结果）；空 / 非 dict 时返回 ``[]``。
+    gateway: 默认网关（调用方查好传入，便于单测不碰系统 API）；空串时若降级
+        结果里的 ``link.via == "gateway"`` 会用 ``link.host`` 兜底。
+
+Returns:
+    list[dict]: 每项键 ``kind``（``live`` / ``probe``）/ ``mode``（前端模式名）/
+        ``label``（按钮文案）/ ``target`` / ``port``（live 为端口，probe 为 ``None``）/
+        ``display``（确认框里的 ``IP:端口``）/ ``confirm``（确认文案）。
+        ``live`` 只在结果里有合法 Stream 对端时出现，``probe`` 只在知道网关时出现；
+        两者都没有时返回 ``[]``（结果页不显示空的按钮区）。
 ```
 
 ### `Handler`  (class)
@@ -3908,8 +3940,8 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 191 | ✅ |
-| `build` | function | 522 | ✅ |
+| `compute_layers` | function | 198 | ✅ |
+| `build` | function | 534 | ✅ |
 
 ### `compute_layers`
 
