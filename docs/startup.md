@@ -219,6 +219,8 @@ Python / tshark / Npcap / 管理员权限时用它。它不再是唯一入口，
 解释器（启动器层）和 8787~8796 全被占用（无法起本地服务）。除此之外，tshark /
 Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入主界面，首屏自检如实显示
 ❌，主界面按能力置灰不可用模式并给出修复指引；补齐后点「重新检测」**不需要重启**。
+`start.bat` 这个 Python 回退入口同样不再因缺 tshark 退出：只打印一行提示并继续启动
+（与 `NetDiag.exe` / `NetDiag.vbs` 行为一致）。
 
 `GET /api/selfcheck` 与 `GET /api/app` 都会下发 `capabilities`（后端唯一出处）：
 
@@ -227,8 +229,13 @@ Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入
 | `probe`（连通与速度测试） | 恒为 true | 永远可用，不依赖 tshark/Npcap |
 | `offline`（分析抓包文件） | 找到 tshark | 置灰，原因 `tshark` |
 | `live`（实时抓包） | tshark 且 Npcap | 置灰，原因 `tshark` / `npcap` / `tshark|npcap` |
-| `passive`（通信观察） | tshark 或内置 scapy | 置灰，原因 `tshark|scapy` |
+| `passive`（通信观察） | Npcap 且（tshark 或内置 scapy） | 置灰，原因 `npcap` / `tshark|scapy` / `tshark|scapy|npcap` |
 | `reports` / `settings` | 恒为 true | 永远可用 |
+
+通信观察要真正打开网卡收包，因此 **Npcap 是硬前提**；只装 tshark/scapy 而没有
+Npcap 时，运行期会报「没有可用网卡：请安装 Npcap」，所以能力矩阵直接置灰。
+`/api/app` 还会同批下发 `checks`，界面首屏据此一次拿全（两个接口共用 1.5s 的短
+TTL 缓存，不会把全套检查跑两遍；ack 写标记后会清缓存）。
 
 非管理员**不**是能力硬门槛：抓包类功能仍按 C2 的「按需提权」权限卡处理，不置灰封死。
 
@@ -245,11 +252,10 @@ Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入
   也可单独安装 Npcap；
 - 分析已有抓包文件**不需要** Npcap；
 - 装完点「重新检测」，不需要重启。
-
 #### 界面上怎么表现（首屏面板 / 置灰 / 说明卡 / 重新检测）
 
 **首屏「准备检查」面板**在一个条件满足时出现：`first_run: true`（首次运行），
-或者 `capabilities` 里 `python` / `tshark` / `npcap` 任一关键项为 `ok: false`。
+或者 `checks` 里 `python` / `tshark` / `npcap` 任一关键项为 `ok: false`。
 五项全过且不是首次运行：不弹面板（保持 C2 行为）。失败项除了 ✅/❌ 还会显示：
 
 - 一句「缺了会怎样」（`impact_*`）；
@@ -262,7 +268,7 @@ Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入
 | 入口 | 何时置灰 | 角标 |
 |---|---|---|
 | 全网体检 / 单目标诊断 | `capabilities.live === false` | 缺 tshark →「· 需 Wireshark」；缺 Npcap →「· 需 Npcap」；都缺 →「· 需 Wireshark 与 Npcap」 |
-| 通信观察 | `capabilities.passive === false` | 同上（缺 tshark 优先） |
+| 通信观察 | `capabilities.passive === false` | 缺 Npcap →「· 需 Npcap」；缺 tshark/scapy →「· 需 Wireshark」；都缺 →「· 需 Wireshark 与 Npcap」 |
 | 分析抓包文件 | `capabilities.offline === false` | 「· 需 Wireshark」 |
 | 连通与速度测试 / 报告与导出 / 设置 | **永不因缺组件置灰** | — |
 | 非管理员时的抓包类入口 | 仍按 C2 的管理员锁 →「· 需管理员」 | 点击弹权限卡（可提权） |
@@ -279,6 +285,10 @@ Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入
 
 **旧后端兼容**：`/api/selfcheck` 没有 `capabilities` 字段时，前端把 `CAPS` 置空，
 退回 C2 现状——只按管理员锁置灰，不崩、不误灰、也不会凭 `checks` 自己推断缺组件。
+
+**请求失败（fail-closed）**：`/api/selfcheck` 请求失败或返回非 2xx 时，界面保留上一次
+成功的 `CAPS` / `CHECKS`，只显示一条「准备检查失败，能力状态可能不准」的轻提示；
+不会把已置灰的能力重新放开。首次加载就失败时没有历史状态，仍退回仅管理员锁。
 
 #### Python（唯一无法进入界面的缺件）
 

@@ -225,7 +225,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|
 | `GET /api/ping` | 单实例/存活探测 | `ok/app/version/pid/url/started_at` |
-| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/capabilities` |
+| `GET /api/app` | 应用信息 | `ok/app/version/pid/port/url/idle_exit_min/auto_quit/admin/first_run/ui_copy/auto_open_browser/checks/capabilities` |
 | `GET /`、`/index.html` | 单文件控制台 | `ui/index.html` |
 | `GET /api/status` | 诊断任务状态 | `JOB` 全量快照 + `elapsed`；完成时另加 `conclusion`（7 键结论对象）、`result.conclusion_text` / `conclusion_markdown` / `conclusion_export`、`ui_copy.conclusion`（E2 加法字段） |
 | `GET /api/interfaces` | 网卡列表 | `interfaces[]/admin/npcap` |
@@ -233,7 +233,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/reports` | 历史报告索引（只读目录，不生成报告） | `ok/files[{name,size,mtime,json}]` |
 | `GET /api/report?path=` | 读报告 | 文件原文；只取 `Path(name).name`，防目录穿越 |
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
-| `GET /api/selfcheck` | 首屏准备检查（五项只读环境检查，含首次运行标记与能力矩阵） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
+| `GET /api/selfcheck` | 首屏准备检查（五项只读环境检查，含首次运行标记与能力矩阵；与 `/api/app` 共用 1.5s 短 TTL 缓存） | `ok/version/first_run/checks[{key,name,ok,detail,fix_kind,fix_url,fix_command,impact,doc_url}]/capabilities/ui_copy.startup` |
 | `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
 | `GET /api/probe?target=&port=&count=&proto=&path=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果；`path=0` 关闭逐跳（默认开） |
@@ -244,12 +244,13 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 ### 4.3.1 能力矩阵 `capabilities` 语义（F1/F2）
 
 `/api/selfcheck` 与 `/api/app` 都以**加法字段**下发同一个 `capabilities` 对象（唯一出处
-`core/selfcheck.py::capabilities()`；UI 只消费、不自己推断缺件）：
+`core/selfcheck.py::capabilities()`；UI 只消费、不自己推断缺件。两个 GET 共用
+`collect_cached()` 的 1.5s 短 TTL 缓存，ack 写标记后清缓存，不会把全套检查跑两遍）：
 
 ```json
 {"probe": true, "offline": false, "live": false, "passive": false,
  "reports": true, "settings": true,
- "missing": {"offline": "tshark", "live": "tshark|npcap", "passive": "tshark|scapy"},
+ "missing": {"offline": "tshark", "live": "tshark|npcap", "passive": "tshark|scapy|npcap"},
  "scapy": false}
 ```
 
@@ -258,9 +259,9 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `probe` | 连通与速度测试 | **恒 true**（只用标准库 socket） |
 | `offline` | 分析抓包文件 | = tshark 可用；不需要 Npcap |
 | `live` | 实时抓包（scan/live） | = tshark **且** Npcap |
-| `passive` | 通信观察 | = tshark **或** 内置 scapy；lite 包无 scapy 时等价于 tshark |
+| `passive` | 通信观察 | = Npcap **且**（tshark **或** 内置 scapy）；缺驱动时引擎可用也打不开网卡 |
 | `reports` / `settings` | 报告与导出 / 设置 | **恒 true** |
-| `missing[mode]` | 该模式不可用的原因机器码 | `tshark` / `npcap` / `tshark|npcap` / `tshark|scapy`；只列不可用模式 |
+| `missing[mode]` | 该模式不可用的原因机器码 | `tshark` / `npcap` / `tshark|npcap` / `tshark|scapy` / `tshark|scapy|npcap`；只列不可用模式 |
 | `scapy` | 被动监听是否有 scapy 引擎 | 复用 `passive.engine_status()` |
 
 **`admin` 不是能力硬门槛**：非管理员仍走 C2 的按需提权权限卡，不因 admin 置灰。
@@ -268,6 +269,8 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 `tshark` 的 `fix_url` 指向 Wireshark 下载页，`npcap` 指向 Npcap 下载页。
 **旧载荷兼容**：`/api/selfcheck` 没有 `capabilities` 时，UI 把 `CAPS` 置 null，退回
 「仅管理员锁」的 C2 行为，不崩、不误灰；`checks` 缺 `capabilities` 不能拿来自己推断。
+**失败 fail-closed**：`/api/selfcheck` 请求失败时 UI 保留上一次成功的 `CAPS` / `CHECKS`，
+只显示轻提示，不会把能力锁放开。
 
 ### 4.4.1 CLI `--json` 的结论结构
 

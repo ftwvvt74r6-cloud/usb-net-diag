@@ -283,8 +283,10 @@ class CapabilitiesMatrixTest(unittest.TestCase):
                                      "offline 只取决于 tshark")
                     self.assertEqual(caps["live"], tshark_ok and npcap_ok,
                                      "live = tshark 且 npcap")
-                    self.assertEqual(caps["passive"], tshark_ok or scapy_ok,
-                                     "passive = tshark 或 scapy")
+                    self.assertEqual(caps["passive"],
+                                     npcap_ok and (tshark_ok or scapy_ok),
+                                     "passive = Npcap 且（tshark 或 scapy）："
+                                     "没有驱动时引擎可用也打不开网卡")
                     self.assertEqual(caps["scapy"], scapy_ok)
 
                     expected_missing = {}
@@ -295,8 +297,13 @@ class CapabilitiesMatrixTest(unittest.TestCase):
                             expected_missing["live"] = "tshark|npcap"
                         else:
                             expected_missing["live"] = "tshark" if not tshark_ok else "npcap"
-                    if not (tshark_ok or scapy_ok):
-                        expected_missing["passive"] = "tshark|scapy"
+                    if not (npcap_ok and (tshark_ok or scapy_ok)):
+                        reasons = []
+                        if not (tshark_ok or scapy_ok):
+                            reasons.append("tshark|scapy")
+                        if not npcap_ok:
+                            reasons.append("npcap")
+                        expected_missing["passive"] = "|".join(reasons)
                     self.assertEqual(caps["missing"], expected_missing)
 
     def test_admin_is_not_a_hard_gate(self):
@@ -311,11 +318,41 @@ class CapabilitiesMatrixTest(unittest.TestCase):
             self.skipTest("core/passive.py 不可用")
         with mock.patch.object(selfcheck.passive, "engine_status",
                                return_value={"engine": "scapy", "scapy": True}) as status:
-            caps = selfcheck.capabilities(_cap_checks(False, False))
+            caps = selfcheck.capabilities(_cap_checks(False, True))
         status.assert_called_once()
         self.assertTrue(caps["scapy"])
-        self.assertTrue(caps["passive"], "有 scapy 时 passive 不必依赖 tshark")
+        self.assertTrue(caps["passive"],
+                        "Npcap 在 + 有 scapy 时 passive 不必依赖 tshark")
         self.assertNotIn("passive", caps["missing"])
+
+    def test_scapy_without_npcap_is_still_locked(self):
+        """B1：scapy 可导入但 Npcap 缺 → 通信观察不可用，原因是 npcap。"""
+        with mock.patch.object(selfcheck, "_scapy_available", return_value=True):
+            caps = selfcheck.capabilities(_cap_checks(False, False))
+        self.assertTrue(caps["scapy"])
+        self.assertFalse(caps["passive"])
+        self.assertEqual(caps["missing"]["passive"], "npcap")
+
+    def test_passive_missing_reason_codes_are_specific(self):
+        cases = [
+            # (tshark, npcap, scapy, passive, missing["passive"])
+            (True, False, False, False, "npcap"),
+            (False, False, True, False, "npcap"),
+            (False, True, False, False, "tshark|scapy"),
+            (False, True, True, True, None),
+            (False, False, False, False, "tshark|scapy|npcap"),
+            (True, True, False, True, None),
+        ]
+        for tshark_ok, npcap_ok, scapy_ok, expected, reason in cases:
+            with self.subTest(tshark=tshark_ok, npcap=npcap_ok, scapy=scapy_ok), \
+                    mock.patch.object(selfcheck, "_scapy_available",
+                                      return_value=scapy_ok):
+                caps = selfcheck.capabilities(_cap_checks(tshark_ok, npcap_ok))
+            self.assertEqual(caps["passive"], expected)
+            if reason is None:
+                self.assertNotIn("passive", caps["missing"])
+            else:
+                self.assertEqual(caps["missing"]["passive"], reason)
 
     def test_default_runs_the_five_checks(self):
         fixture = {
@@ -339,6 +376,64 @@ class CapabilitiesMatrixTest(unittest.TestCase):
                 caller.assert_called_once()
         self.assertTrue(caps["live"])
         self.assertTrue(caps["offline"])
+
+
+class SelfcheckCacheTest(unittest.TestCase):
+    """S2：``/api/app`` 与 ``/api/selfcheck`` 共用短 TTL 缓存，别把全套检查跑两遍。"""
+
+    def setUp(self):
+        selfcheck.invalidate_cache()
+
+    def tearDown(self):
+        selfcheck.invalidate_cache()
+
+    def _fixture(self) -> dict:
+        return {
+            "ok": True, "version": "9.9.9", "first_run": True,
+            "checks": [{"key": k, "name": k, "ok": True, "detail": "d",
+                        "fix_kind": "none", "fix_url": "", "fix_command": "",
+                        "impact": "i", "doc_url": "docs/startup.md"}
+                       for k in EXPECTED_KEYS],
+            "capabilities": {"probe": True, "offline": True, "live": True,
+                             "passive": True, "reports": True, "settings": True,
+                             "missing": {}, "scapy": False},
+            "ui_copy": {"startup": {}},
+        }
+
+    def test_two_calls_run_collect_once(self):
+        with mock.patch.object(selfcheck, "collect",
+                               return_value=self._fixture()) as collect:
+            first = selfcheck.collect_cached()
+            second = selfcheck.collect_cached()
+        self.assertEqual(collect.call_count, 1, "TTL 内第二次必须复用缓存")
+        self.assertEqual(first, second)
+
+    def test_force_and_invalidate_run_collect_again(self):
+        with mock.patch.object(selfcheck, "collect",
+                               return_value=self._fixture()) as collect:
+            selfcheck.collect_cached()
+            selfcheck.collect_cached(force=True)
+            self.assertEqual(collect.call_count, 2, "force=True 必须重新检查")
+            selfcheck.invalidate_cache()   # ack 处理器走这条
+            selfcheck.collect_cached()
+            self.assertEqual(collect.call_count, 3, "ack 清缓存后必须重新检查")
+
+    def test_expired_ttl_runs_collect_again(self):
+        with mock.patch.object(selfcheck, "CACHE_TTL_SECONDS", 0), \
+                mock.patch.object(selfcheck, "collect",
+                                  return_value=self._fixture()) as collect:
+            selfcheck.collect_cached()
+            selfcheck.collect_cached()
+        self.assertEqual(collect.call_count, 2, "TTL 归零后缓存必须失效")
+
+    def test_cached_result_is_a_deep_copy(self):
+        with mock.patch.object(selfcheck, "collect",
+                               return_value=self._fixture()):
+            first = selfcheck.collect_cached()
+            first["checks"][0]["ok"] = False
+            second = selfcheck.collect_cached()
+        self.assertTrue(second["checks"][0]["ok"],
+                        "调用方修改返回值不许污染缓存")
 
 
 class CollectResilienceTest(unittest.TestCase):
@@ -377,6 +472,9 @@ class CollectResilienceTest(unittest.TestCase):
         self.assertTrue(npcap["impact"].strip(), "异常项也要有 impact 文案")
         self.assertFalse(data["capabilities"]["live"])
         self.assertEqual(data["capabilities"]["missing"]["live"], "npcap")
+        self.assertFalse(data["capabilities"]["passive"],
+                         "Npcap 查询异常按缺驱动处理：通信观察也不可用")
+        self.assertEqual(data["capabilities"]["missing"]["passive"], "npcap")
         self.assertFalse(data["ok"])
         for key in ("python", "tshark", "port", "admin"):
             self.assertTrue(by_key[key]["ok"], f"{key} 不该被 npcap 的异常连累")
@@ -398,9 +496,9 @@ class StartupCopyContractTest(unittest.TestCase):
     REQUIRED_KEYS = (
         "impact_python", "impact_tshark", "impact_npcap", "impact_port",
         "impact_admin", "fix_python", "fix_tshark", "fix_npcap", "fix_port",
-        "fix_admin", "need_tshark", "need_npcap", "lock_tag_tshark",
-        "lock_tag_npcap", "disabled_title", "disabled_hint", "disabled_recheck",
-        "disabled_close", "docs_hint",
+        "fix_admin", "need_tshark", "need_npcap", "need_passive",
+        "lock_tag_tshark", "lock_tag_npcap", "disabled_title", "disabled_hint",
+        "disabled_recheck", "disabled_close", "docs_hint", "selfcheck_failed",
     )
 
     def test_required_keys_exist_and_non_empty(self):
@@ -414,10 +512,19 @@ class StartupCopyContractTest(unittest.TestCase):
         copy = selfcheck.ui_copy()
         self.assertIn("Wireshark", copy["fix_tshark"])
         self.assertIn("TSHARK_PATH", copy["fix_tshark"])
+        self.assertIn("重启", copy["fix_tshark"],
+                      "TSHARK_PATH 对已启动进程不生效，必须写明要重启/重新运行")
         self.assertIn("docs/startup.md", copy["fix_tshark"])
         self.assertIn("Npcap", copy["fix_npcap"])
         self.assertIn("3.11", copy["fix_python"])
         self.assertIn("8787", copy["fix_port"])
+
+    def test_passive_copy_mentions_npcap(self):
+        """B1：通信观察的「需要什么」必须包含 Npcap，不能只说引擎。"""
+        copy = selfcheck.ui_copy()
+        self.assertIn("Npcap", copy["need_passive"])
+        self.assertIn("通信观察", copy["impact_npcap"])
+        self.assertIn("Npcap", copy["npcap_missing"])
 
     def test_no_developer_hard_path_copy(self):
         raw = (ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8")
@@ -448,13 +555,28 @@ class SelfcheckRoutesTest(unittest.TestCase):
         cls.httpd.server_close()
         cls._env.stop()
 
+    def setUp(self) -> None:
+        selfcheck.invalidate_cache()
+
+    def tearDown(self) -> None:
+        selfcheck.invalidate_cache()
+
+    @staticmethod
+    def _snapshot(checks=None, caps=None, first_run=True) -> dict:
+        """构造一份与 ``collect()`` 同结构的响应（路由/缓存测试共用）。"""
+        checks = checks or [
+            {"key": k, "name": k, "ok": True, "detail": "d", "fix_kind": "none",
+             "fix_url": "", "fix_command": ""} for k in EXPECTED_KEYS]
+        caps = caps or {"probe": True, "offline": True, "live": True,
+                        "passive": True, "reports": True, "settings": True,
+                        "missing": {}, "scapy": False}
+        return {"ok": True, "version": "9.9.9", "first_run": first_run,
+                "checks": checks, "capabilities": caps,
+                "ui_copy": {"startup": {}}}
+
     def test_get_selfcheck_returns_five_checks(self):
-        fixture = {"ok": True, "version": "9.9.9", "first_run": True,
-                   "checks": [{"key": k, "name": k, "ok": True, "detail": "d",
-                               "fix_kind": "none", "fix_url": "", "fix_command": ""}
-                              for k in EXPECTED_KEYS],
-                   "ui_copy": {"startup": {}}}
-        with mock.patch.object(server.selfcheck, "collect", return_value=fixture):
+        with mock.patch.object(server.selfcheck, "collect_cached",
+                               return_value=self._snapshot()):
             code, text = _http(self.port, "GET", "/api/selfcheck")
         self.assertEqual(code, 200, text[:300])
         data = json.loads(text)
@@ -473,9 +595,10 @@ class SelfcheckRoutesTest(unittest.TestCase):
         self.assertFalse(data["writable"])
 
     def test_app_exposes_first_run_and_startup_copy(self):
-        with mock.patch.object(server.selfcheck, "is_first_run", return_value=False), \
-                mock.patch.object(server.selfcheck, "ui_copy",
-                                  return_value={"panel_title": "准备检查"}):
+        snap = self._snapshot(first_run=False)
+        snap["ui_copy"] = {"startup": {"panel_title": "准备检查"}}
+        with mock.patch.object(server.selfcheck, "collect_cached",
+                               return_value=snap):
             code, text = _http(self.port, "GET", "/api/app")
         self.assertEqual(code, 200, text[:300])
         data = json.loads(text)
@@ -486,18 +609,46 @@ class SelfcheckRoutesTest(unittest.TestCase):
         caps = {"probe": True, "offline": False, "live": False, "passive": False,
                 "reports": True, "settings": True,
                 "missing": {"offline": "tshark", "live": "tshark|npcap",
-                            "passive": "tshark|scapy"}, "scapy": False}
-        with mock.patch.object(server.selfcheck, "capabilities",
-                               return_value=caps) as caller:
+                            "passive": "tshark|scapy|npcap"}, "scapy": False}
+        snap = self._snapshot(caps=caps)
+        with mock.patch.object(server.selfcheck, "collect_cached",
+                               return_value=snap) as caller:
             code, text = _http(self.port, "GET", "/api/app")
         self.assertEqual(code, 200, text[:300])
         data = json.loads(text)
         self.assertEqual(data["capabilities"], caps)
+        # 加法字段：首屏一次拿全（checks 同批下发），既有字段照旧。
+        self.assertEqual([c["key"] for c in data["checks"]], EXPECTED_KEYS)
         caller.assert_called_once()
-        # 加法字段：既有字段照旧，旧前端不受影响。
         self.assertEqual(data["app"], "USBNetDiag")
         self.assertIn("admin", data)
         self.assertIn("version", data)
+
+    def test_app_and_selfcheck_share_one_collect(self):
+        """S2：首屏先 /api/app 再 /api/selfcheck，只允许跑一次全套检查。"""
+        with mock.patch.object(server.selfcheck, "collect",
+                               return_value=self._snapshot()) as collect:
+            code_a, text_a = _http(self.port, "GET", "/api/app")
+            code_b, text_b = _http(self.port, "GET", "/api/selfcheck")
+        self.assertEqual(code_a, 200, text_a[:300])
+        self.assertEqual(code_b, 200, text_b[:300])
+        self.assertEqual(collect.call_count, 1,
+                         "两个首屏接口必须复用同一份缓存结果")
+        self.assertEqual(json.loads(text_a)["capabilities"],
+                         json.loads(text_b)["capabilities"])
+
+    def test_ack_clears_cache_for_next_selfcheck(self):
+        """ack 改了 first_run：缓存必须作废，下一次请求重新检查。"""
+        with mock.patch.object(server.selfcheck, "collect",
+                               return_value=self._snapshot()) as collect, \
+                mock.patch.object(server.selfcheck, "ack_first_run",
+                                  return_value={"ok": True, "writable": True}):
+            _http(self.port, "GET", "/api/selfcheck")
+            code, text = _http(self.port, "POST", "/api/selfcheck/ack", b"{}")
+            self.assertEqual(code, 200, text[:300])
+            _http(self.port, "GET", "/api/selfcheck")
+        self.assertEqual(collect.call_count, 2,
+                         "ack 后第一次 /api/selfcheck 必须重新检查")
 
 
 if __name__ == "__main__":

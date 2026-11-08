@@ -674,6 +674,8 @@
       <a id="lock-elevate">以管理员身份重启</a>
     </div>
 
+    <div class="msg wait hidden" id="selfcheck-note" role="status"></div>
+
     <div class="pane" id="pane-capture">
       <div class="guide" id="mode-guide"></div>
 
@@ -1247,6 +1249,7 @@ const FORM_FIELDS = [
 let UI_COPY = {};          // copy/zh-CN.json 的 startup section（由 /api/selfcheck 下发）
 let CONCLUSION_COPY = {};  // copy/zh-CN.json 的 conclusion section（由 /api/status 下发）
 let STARTUP_DATA = null;   // 最近一次 /api/selfcheck 结果（重新检测时复用）
+let BOOT_STARTUP = null;   // /api/app 已下发的同一份检查结果（boot 只跑一次全套自检）
 let CAPS = null;           // 能力矩阵（/api/selfcheck 或 /api/app）；null = 旧后端，退回仅管理员锁
 let CHECKS = [];           // 最近一次五项检查（能力说明卡按 key 取 impact/fix_url）
 let FORM_CACHE = null;     // 最近一次读/写的表单快照
@@ -1387,6 +1390,14 @@ function setStartupMsg(html, cls) {
   box.innerHTML = html ? '<div class="msg ' + (cls || "wait") + '">' + html + '</div>' : "";
 }
 
+function setSelfcheckNote(text) {
+  /* 轻提示：selfcheck 请求失败时不改锁，只告诉用户「能力状态可能不准」（S5）。 */
+  const box = $("#selfcheck-note");
+  if (!box) return;
+  box.textContent = text || "";
+  box.classList.toggle("hidden", !text);
+}
+
 function checkByKey(key) {
   return (CHECKS || []).find((c) => c && c.key === key) || null;
 }
@@ -1484,11 +1495,23 @@ async function loadSelfcheck() {
   /* 不管是否首次运行都请求：CAPS 是置灰矩阵的唯一依据，CHECKS 供说明卡取 impact/修复。 */
   let data = null;
   try {
-    data = await fetch("/api/selfcheck", { cache: "no-store" }).then((x) => x.json());
+    const resp = await fetch("/api/selfcheck", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    data = await resp.json();
+    if (!data || typeof data !== "object") throw new Error("bad payload");
   } catch (e) {
     data = null;
   }
-  if (data && data.ui_copy && data.ui_copy.startup) {
+  if (!data) {
+    /* S5：失败时保留上一次成功的 CAPS/CHECKS（applyCapabilities(null) 不再清空），
+       否则能力锁会被全部放开（fail-open）。只做一条轻提示 + 控制台记录。 */
+    const note = UI_COPY.selfcheck_failed || "准备检查失败，能力状态可能不准；可点「重新检测」再试。";
+    setSelfcheckNote(note);
+    appendLog(note, false);
+    return null;
+  }
+  setSelfcheckNote("");
+  if (data.ui_copy && data.ui_copy.startup) {
     UI_COPY = data.ui_copy.startup;
     applyCopy();
     paintPermCopy();
@@ -1502,7 +1525,18 @@ async function loadSelfcheck() {
 async function initStartup(opts) {
   const manual = !!(opts && opts.manual);
   const force = !!(opts && opts.force);
-  const data = await loadSelfcheck();
+  let data = null;
+  if (!manual && !force && BOOT_STARTUP) {
+    /* /api/app 已带同一份 checks/capabilities：首屏直接复用，避免再跑一次全套自检。
+       只复用一次；之后的「重新检测」仍走 /api/selfcheck 拿最新状态。 */
+    data = BOOT_STARTUP;
+    BOOT_STARTUP = null;
+    STARTUP_DATA = data;
+    applyCapabilities(data);
+    paintLocks();
+  } else {
+    data = await loadSelfcheck();
+  }
   /* 旧后端没有 first_run 字段：`data.first_run !== true` 时不能当成首次运行。
      旧后端也没有 capabilities → 退回 C2 现状（不显示缺件面板、只按 admin 锁）。 */
   if (!data || typeof data !== "object" || data.first_run !== true) {
@@ -1600,6 +1634,11 @@ async function recheckSelfcheck() {
      恢复了就切到全绿首屏，没恢复就刷新说明卡原因。 */
   setCapMsg(esc(UI_COPY.disabled_rechecking || "正在重新检测…"), "wait");
   const data = await loadSelfcheck();
+  if (!data) {
+    /* 请求失败：保留上一次成功的 CAPS/CHECKS 与说明卡内容，只提示状态可能不准（S5）。 */
+    setCapMsg(esc(UI_COPY.selfcheck_failed || ""), "bad");
+    return null;
+  }
   const checks = Array.isArray(data && data.checks) ? data.checks : [];
   const failed = checks.filter((c) => !c.ok).length;
   if (checks.length === 5 && !failed) {
@@ -1693,7 +1732,10 @@ function lockInfo(mode) {
 function isLocked(mode) { return !!lockInfo(mode); }
 
 function applyCapabilities(data) {
-  /* 重新检测的唯一赋值点：CAPS/CHECKS 一起换；旧载荷没有 capabilities 时降级为 null。 */
+  /* 唯一赋值点：成功载荷才覆盖 CAPS/CHECKS；data 为 null（请求失败）时保留上一次，
+     否则一次瞬时 503 就会把能力锁全放开（S5 fail-open）。
+     旧载荷没有 capabilities 时仍降级为 null（退回仅管理员锁）。 */
+  if (!data || typeof data !== "object") return CAPS;
   CAPS = data && data.capabilities && typeof data.capabilities === "object"
     ? data.capabilities : null;
   CHECKS = Array.isArray(data && data.checks) ? data.checks : [];
@@ -2047,8 +2089,10 @@ async function boot() {
     APP_INFO = app;
     IS_ADMIN = app && typeof app.admin === "boolean" ? app.admin : !!r.admin;
     if (app && app.capabilities) {
-      /* 首屏不等 selfcheck：先用 /api/app 的能力矩阵置灰；随后 initStartup 以 selfcheck 为准覆盖。 */
-      applyCapabilities({ capabilities: app.capabilities });
+      /* 首屏只用 /api/app 一次：能力矩阵 + checks 都由它下发，initStartup 直接复用，
+         不再背靠背跑第二遍全套自检（S2）。 */
+      applyCapabilities(app);
+      BOOT_STARTUP = Array.isArray(app.checks) ? app : null;
     }
     if (app && app.ui_copy && app.ui_copy.startup) {
       UI_COPY = app.ui_copy.startup;
@@ -2441,9 +2485,11 @@ function wireFailureActions(kind) {
   const elevate = $("#err-elevate");
   if (elevate) elevate.onclick = showPermModal;
   const probe = $("#err-probe");
-  if (probe) probe.onclick = () => setMode("probe");
+  if (probe) probe.onclick = () => switchMode("probe");
   const offline = $("#err-offline");
-  if (offline) offline.onclick = () => setMode("offline");
+  /* 失败卡里的快捷入口也必须过统一闸门：缺 tshark 时 offline 可能已被能力锁，
+     直接 setMode 会绕过说明卡（S3）。 */
+  if (offline) offline.onclick = () => switchMode("offline");
   const diagpack = $("#err-diagpack");
   if (diagpack) diagpack.onclick = exportDiagPack;
   const refresh = $("#err-iface-refresh");
@@ -3971,7 +4017,11 @@ async function quitApp() {
 }
 
 async function loadAppInfo() {
-  const r = await fetch("/api/app").then((x) => x.json()).catch(() => null);
+  /* boot 已经拉过 /api/app：直接复用，避免首屏再发一次（S2）。 */
+  let r = APP_INFO;
+  if (!r || typeof r !== "object") {
+    r = await fetch("/api/app").then((x) => x.json()).catch(() => null);
+  }
   if (r && r.ok) {
     APP_INFO = r;
     if (!document.title.includes("端口")) {

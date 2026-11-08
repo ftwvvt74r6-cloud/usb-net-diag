@@ -74,10 +74,10 @@ def _checks(tshark: bool = True, npcap: bool = True, python: bool = True,
 
 
 def _caps(tshark: bool = True, npcap: bool = True, scapy: bool = False) -> dict:
-    """按 ``core/selfcheck.py::capabilities()`` 的真值表构造能力矩阵。"""
+    """按 ``core/selfcheck.py::capabilities()`` 的真值表构造能力矩阵（B1：passive 要 Npcap）。"""
     live = tshark and npcap
     offline = tshark
-    passive = tshark or scapy
+    passive = npcap and (tshark or scapy)
     missing = {}
     if not offline:
         missing["offline"] = "tshark"
@@ -87,7 +87,12 @@ def _caps(tshark: bool = True, npcap: bool = True, scapy: bool = False) -> dict:
         else:
             missing["live"] = "tshark" if not tshark else "npcap"
     if not passive:
-        missing["passive"] = "tshark|scapy"
+        reasons = []
+        if not (tshark or scapy):
+            reasons.append("tshark|scapy")
+        if not npcap:
+            reasons.append("npcap")
+        missing["passive"] = "|".join(reasons)
     return {"probe": True, "offline": offline, "live": live, "passive": passive,
             "reports": True, "settings": True, "missing": missing, "scapy": scapy}
 
@@ -162,6 +167,21 @@ const after = { scan: isLocked("scan"), offline: isLocked("offline"),
                 passive: isLocked("passive"),
                 tag: afterLock ? afterLock.tag : "" };
 out.recheck = { before: before, after: after };
+// S5：selfcheck 请求失败（data=null）时 applyCapabilities 必须保留上一次 CAPS/CHECKS，
+// 不许把能力锁清空（fail-open）；随后成功载荷仍能恢复/更新。
+applyCapabilities(PAYLOADS.missing_tshark);
+const failBefore = { passive: isLocked("passive"), offline: isLocked("offline") };
+const failReturn = applyCapabilities(null);
+out.failure = {
+  before: failBefore,
+  capsKept: !!CAPS,
+  checksKept: (CHECKS || []).length,
+  passiveLocked: isLocked("passive"),
+  offlineLocked: isLocked("offline"),
+  returnedTruthy: !!failReturn,
+};
+applyCapabilities(PAYLOADS.all_green);
+out.failure.afterRecoverPassiveLocked = isLocked("passive");
 console.log(JSON.stringify(out));
 """.replace("__PAYLOADS__", json.dumps(payloads, ensure_ascii=False))
     with tempfile.TemporaryDirectory(prefix="netdiag-f2-js-") as tmp:
@@ -365,7 +385,7 @@ class ServerWiringStaticTest(unittest.TestCase):
         server = (ROOT / "core" / "server.py").read_text(encoding="utf-8")
         self.assertIn('path == "/api/selfcheck"', server)
         self.assertIn('parsed.path == "/api/selfcheck/ack"', server)
-        self.assertIn("selfcheck.collect()", server)
+        self.assertIn("selfcheck.collect_cached()", server)
         self.assertIn("selfcheck.ack_first_run()", server)
 
     def test_selfcheck_module_has_no_write_in_collect(self):
@@ -385,7 +405,7 @@ class CapabilityMatrixRuntimeTest(unittest.TestCase):
     def setUpClass(cls):
         hostile = _payload()
         hostile["capabilities"]["probe"] = False   # 即使后端异常，probe 也必须可点
-        cls.matrix = _run_lock_harness({
+        payloads = {
             "missing_tshark": _payload(tshark=False),
             "missing_npcap": _payload(tshark=True, npcap=False),
             "all_green": _payload(),
@@ -394,7 +414,14 @@ class CapabilityMatrixRuntimeTest(unittest.TestCase):
             "old_payload_missing": _payload(tshark=False, with_caps=False),
             "first_run_green": _payload(first_run=True),
             "hostile_probe_false": hostile,
-        })
+        }
+        # 8 组合覆盖：tshark × Npcap × scapy（B1 的核心真值表，UI 只消费后端结果）。
+        for tshark in (True, False):
+            for npcap in (True, False):
+                for scapy in (True, False):
+                    payloads[f"combo_{int(tshark)}{int(npcap)}{int(scapy)}"] = _payload(
+                        tshark=tshark, npcap=npcap, scapy=scapy)
+        cls.matrix = _run_lock_harness(payloads)
 
     def _row(self, name: str, admin: bool = False) -> dict:
         return self.matrix["payloads"][name][str(admin).lower()]
@@ -413,21 +440,54 @@ class CapabilityMatrixRuntimeTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.assertFalse(row[mode]["locked"], f"{mode} 不许置灰")
 
-    def test_npcap_missing_locks_live_only(self):
+    def test_npcap_missing_locks_live_and_passive(self):
+        """B1：缺 Npcap 时 live/scan/passive 都置灰；offline 与 probe 不受影响。"""
         row = self._row("missing_npcap")
-        for mode in ("scan", "live"):
+        for mode in ("scan", "live", "passive"):
             self._assert_cap(row, mode, STARTUP["lock_tag_npcap"])
-        # 被动监听：tshark 在就能用，不因 Npcap 缺而能力置灰；非管理员仍按 C2 锁（admin）。
-        self.assertNotEqual(row["passive"].get("kind"), "cap",
-                            "缺 Npcap 不该能力锁 passive（被动监听不需要 Npcap）")
         for mode in ("offline", "probe", "reports", "settings"):
             with self.subTest(mode=mode):
                 self.assertFalse(row[mode]["locked"],
-                                 f"缺 Npcap 不该锁 {mode}（分析 pcap / 被动监听走 tshark）")
-        admin_row = self._row("missing_npcap", admin=True)
-        for mode in ("passive", "offline", "probe"):
+                                 f"缺 Npcap 不该锁 {mode}（分析 pcap / 探针不需要驱动）")
+
+    def test_npcap_missing_admin_still_locks_passive(self):
+        """admin=true 且 Npcap 缺：能力锁优先，passive 必须置灰（点击弹说明卡）。"""
+        row = self._row("missing_npcap", admin=True)
+        for mode in ("scan", "live", "passive"):
             with self.subTest(mode=mode, admin=True):
-                self.assertFalse(admin_row[mode]["locked"])
+                self._assert_cap(row, mode, STARTUP["lock_tag_npcap"])
+        for mode in ("offline", "probe"):
+            with self.subTest(mode=mode, admin=True):
+                self.assertFalse(row[mode]["locked"])
+
+    def test_all_eight_component_combinations_lock_passive(self):
+        """8 组合全覆盖：UI 的 passive 锁必须严格跟随后端真值表。"""
+        for tshark in (True, False):
+            for npcap in (True, False):
+                for scapy in (True, False):
+                    name = f"combo_{int(tshark)}{int(npcap)}{int(scapy)}"
+                    expected = npcap and (tshark or scapy)
+                    for admin in (False, True):
+                        row = self._row(name, admin=admin)
+                        with self.subTest(tshark=tshark, npcap=npcap,
+                                          scapy=scapy, admin=admin):
+                            # 非管理员还有 C2 的管理员锁；这里只钉「能力锁」语义。
+                            self.assertEqual(row["passive"].get("kind") == "cap",
+                                             not expected,
+                                             "passive 能力锁与后端能力矩阵不一致")
+                            if not expected:
+                                self.assertEqual(row["passive"]["kind"], "cap")
+                                engines_missing = not (tshark or scapy)
+                                if engines_missing and not npcap:
+                                    expected_tag = STARTUP["lock_tag_both"]
+                                elif not npcap:
+                                    expected_tag = STARTUP["lock_tag_npcap"]
+                                else:
+                                    expected_tag = STARTUP["lock_tag_tshark"]
+                                self.assertEqual(row["passive"]["tag"], expected_tag)
+                            elif admin:
+                                self.assertFalse(row["passive"]["locked"],
+                                                 "管理员 + 能力可用时 passive 不许有锁")
 
     def test_all_present_is_only_admin_locked(self):
         row = self._row("all_green")
@@ -447,7 +507,8 @@ class CapabilityMatrixRuntimeTest(unittest.TestCase):
         self._assert_cap(row, "live", STARTUP["lock_tag_both"])
         self._assert_cap(row, "scan", STARTUP["lock_tag_both"])
         self._assert_cap(row, "offline", STARTUP["lock_tag_tshark"])
-        self._assert_cap(row, "passive", STARTUP["lock_tag_tshark"])
+        # Npcap 与两个引擎都缺：原因码是 tshark|scapy|npcap → 角标「需 Wireshark 与 Npcap」
+        self._assert_cap(row, "passive", STARTUP["lock_tag_both"])
 
     def test_old_payload_without_capabilities_keeps_c2_admin_only(self):
         # 旧载荷：即使 checks 里 tshark 是 ❌，也不能凭 checks 自造能力锁。
@@ -475,6 +536,18 @@ class CapabilityMatrixRuntimeTest(unittest.TestCase):
                                              "passive": True})
         self.assertEqual(recheck["after"], {"scan": False, "offline": False,
                                             "passive": False, "tag": ""})
+
+    def test_selfcheck_failure_keeps_previous_locks(self):
+        """S5：请求失败（data=null）不许清空 CAPS/CHECKS，锁状态必须保留。"""
+        fail = self.matrix["failure"]
+        self.assertEqual(fail["before"], {"passive": True, "offline": True})
+        self.assertTrue(fail["capsKept"], "失败时 CAPS 被清空 → 能力锁全部放开（fail-open）")
+        self.assertEqual(fail["checksKept"], 5, "失败时 CHECKS 也不许清空")
+        self.assertTrue(fail["passiveLocked"], "失败后 passive 必须仍置灰")
+        self.assertTrue(fail["offlineLocked"], "失败后 offline 必须仍置灰")
+        self.assertTrue(fail["returnedTruthy"], "保留时应返回上一次 CAPS")
+        self.assertFalse(fail["afterRecoverPassiveLocked"],
+                         "随后成功的全绿载荷仍要能恢复")
 
     def test_panel_visibility_rules(self):
         panel = self.matrix["panel"]
@@ -540,6 +613,47 @@ class StartupExtensionStaticTest(unittest.TestCase):
                          "sysinfo-startup")
         self.assertIn("initStartup({ manual: true, force: true })", sysinfo)
 
+    def test_boot_fetches_selfcheck_payload_once(self):
+        """S2：首屏复用 /api/app 下发的 checks/capabilities，不再背靠背跑全套。"""
+        boot = _slice("async function boot()", "async function loadCaptures", "boot")
+        self.assertIn("applyCapabilities(app)", boot,
+                      "boot 必须直接用 /api/app 的 capabilities + checks")
+        self.assertIn("BOOT_STARTUP = Array.isArray(app.checks) ? app : null;", boot)
+        init = _slice("async function initStartup", "function setCapMsg", "initStartup")
+        self.assertIn("data = BOOT_STARTUP;", init)
+        self.assertLess(init.index("data = BOOT_STARTUP;"),
+                        init.index("await loadSelfcheck()"),
+                        "boot 载荷优先复用；只有没有载荷时才请求 selfcheck")
+        load_app = _slice("async function loadAppInfo", "/* ---------------- 导出诊断包",
+                          "loadAppInfo")
+        self.assertIn("let r = APP_INFO;", load_app,
+                      "loadAppInfo 复用 boot 已拿到的 /api/app，不再重复请求")
+
+    def test_selfcheck_failure_is_fail_closed_with_hint(self):
+        """S5：请求失败保留上一份 CAPS/CHECKS，只轻提示；不把锁放开。"""
+        self.assertIn('id="selfcheck-note"', HTML)
+        self.assertTrue(str(STARTUP.get("selfcheck_failed", "")).strip())
+        load = _slice("async function loadSelfcheck", "async function initStartup",
+                      "loadSelfcheck")
+        self.assertIn("if (!resp.ok) throw new Error", load,
+                      "非 2xx 必须按失败处理，不能把错误 JSON 当能力载荷")
+        self.assertIn("setSelfcheckNote(note)", load)
+        self.assertIn("return null;", load)
+        self.assertLess(load.index("if (!data)"),
+                        load.index("STARTUP_DATA = data;"),
+                        "失败分支必须在覆盖 CAPS/CHECKS 之前返回")
+        caps = _slice("function applyCapabilities", "function criticalMissing",
+                      "applyCapabilities")
+        self.assertIn('if (!data || typeof data !== "object") return CAPS;', caps,
+                      "applyCapabilities(null) 必须保留上一次结果")
+        recheck = _slice("async function recheckSelfcheck", "function waitForElevatedReload",
+                         "recheckSelfcheck")
+        self.assertIn("if (!data) {", recheck)
+        self.assertIn("selfcheck_failed", recheck)
+        self.assertLess(recheck.index("if (!data) {"),
+                        recheck.index("const checks ="),
+                        "重新检测失败时不许按「0 项失败」继续走全绿分支")
+
 
 class CapabilityCardStaticTest(unittest.TestCase):
     """点击置灰项 → 能力说明卡：缺什么 / 缺了会怎样 / 怎么修复 / 重新检测 / 知道了。"""
@@ -585,6 +699,19 @@ class CapabilityCardStaticTest(unittest.TestCase):
         self.assertIn("guardMode(mode)", switch)
         self.assertIn("if (!guardMode(mode)) return false;", switch)
 
+    def test_failure_card_shortcuts_go_through_guard(self):
+        """S3：失败卡的 #err-offline / #err-probe 也走 switchMode（guardMode）。"""
+        wire = _slice("function wireFailureActions", "async function loadIfacesForError",
+                      "wireFailureActions")
+        self.assertIn('switchMode("offline")', wire,
+                      "失败卡「去分析抓包文件」必须过能力锁，不许直接 setMode")
+        self.assertNotIn('setMode("offline")', wire)
+        self.assertIn('switchMode("probe")', wire)
+        self.assertNotIn('setMode("probe")', wire)
+        switch = _slice("function switchMode", "function setMode", "switchMode")
+        self.assertIn("if (!guardMode(mode)) return false;", switch,
+                      "switchMode 自身必须过统一闸门，否则失败卡入口仍可绕过")
+
     def test_card_buttons_wired(self):
         self.assertIn('$("#cap-close").onclick = hideCapCard;', HTML)
         self.assertIn('$("#cap-close2").onclick = hideCapCard;', HTML)
@@ -622,10 +749,15 @@ class NoHardcodedPathStaticTest(unittest.TestCase):
                     "disabled_recheck", "disabled_close", "disabled_rechecking",
                     "recheck_still", "recheck_all_ok", "ready_enter", "enter",
                     "lock_banner_caps", "lock_banner_admin", "startup_open",
-                    "docs_url", "docs_hint", "wireshark_url", "npcap_url"):
+                    "docs_url", "docs_hint", "wireshark_url", "npcap_url",
+                    "selfcheck_failed"):
             with self.subTest(key=key):
                 self.assertTrue(str(STARTUP.get(key, "")).strip(), f"{key} 不能为空")
         self.assertIn("TSHARK_PATH", STARTUP["fix_tshark"])
+        self.assertIn("重启", STARTUP["fix_tshark"],
+                      "TSHARK_PATH 对已启动进程不生效，文案必须写明重启")
+        self.assertIn("Npcap", STARTUP["need_passive"],
+                      "通信观察需要 Npcap（B1）")
         self.assertIn("docs/startup.md", STARTUP["fix_tshark"])
         self.assertIn("Wireshark", STARTUP["need_tshark"])
         self.assertIn("Npcap", STARTUP["need_npcap"])

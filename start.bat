@@ -95,13 +95,10 @@ if errorlevel 3 goto :no_tshark
 goto :check_npcap
 
 :no_tshark
-echo.
-echo  [X] 未找到 tshark，实时抓包与「分析抓包文件」（离线分析）都不可用。
-echo      请将 Wireshark 便携版解压到:
-echo      %ROOT%\tools\WiresharkPortable\App\Wireshark\tshark.exe
-echo.
-pause
-exit /b 1
+REM 缺 tshark 只降级、不阻塞（与 F 目标一致）：界面首屏会显示缺件与修复指引，
+REM 离线分析 / 连通与速度测试仍可用，所以这里只提示一行，继续启动 app。
+echo  [警告] 未找到 tshark：实时抓包 / 通信观察 / 分析抓包文件不可用；其余功能照常，界面会提示怎么修复。
+goto :check_npcap
 
 REM ---------- 4. Npcap 驱动（只检测 + 交互式安装，不再静默安装）----------
 REM 为什么去掉 /S：Npcap 免费版不支持静默安装（会弹「Silent installation is

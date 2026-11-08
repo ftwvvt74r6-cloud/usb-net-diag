@@ -1,9 +1,13 @@
 """首屏「准备检查」的五项只读环境检查 + 首次运行标记（C2）。
 
-这个模块只回答一个问题：**这台机器现在能不能直接用**。它被两块代码调用：
+这个模块只回答一个问题：**这台机器现在能不能直接用**。它被三块代码调用：
 
 * ``GET /api/selfcheck``（界面首屏 / 「重新检测」按钮）—— 返回五项检查结果；
+* ``GET /api/app``（首屏先拿应用信息）—— 复用同一份检查结果里的能力矩阵；
 * ``POST /api/selfcheck/ack``（用户看过面板后）—— 写 ``config/ui-first-run.json``。
+
+两个 GET 走 :func:`collect_cached` 的短 TTL 缓存，避免首屏背靠背跑两遍全套检查；
+ack 改写了 ``first_run`` 后会清缓存。
 
 设计边界（为什么单独成模块而不是塞进 ``server.py``）：
 
@@ -18,9 +22,11 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -59,6 +65,15 @@ INTERFACES_COMMAND = "python core\\diagnose.py --interfaces"
 
 #: 缺组件修复说明的文档位置（相对仓库根；界面可复制/展示，不写死本机盘符）。
 DOCS_STARTUP = "docs/startup.md"
+
+#: ``/api/app`` 与 ``/api/selfcheck`` 复用自检结果的短 TTL（秒）。
+#: 首屏这两个接口背靠背请求；没有缓存时 tshark 版本 / 端口探测 / scapy 导入会各跑两遍
+#: （冷启动数百 ms、端口全占的沙箱里可到 5.8 s），而两次结果在首屏尺度上等价。
+CACHE_TTL_SECONDS = 1.5
+
+_CACHE_LOCK = threading.Lock()
+#: 缓存键是仓库根（测试用临时 root），值是 ``(monotonic 时间, collect 结果)``。
+_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _t(key: str, **args) -> str:
@@ -255,7 +270,7 @@ def _is_admin() -> bool:
 
 
 def check_npcap() -> dict:
-    """检查 Npcap 抓包驱动是否就绪（离线分析不需要它，但实时抓包必须要）。
+    """检查 Npcap 抓包驱动是否就绪（离线分析不需要它，但实时抓包与通信观察必须要）。
 
     Returns:
         dict: 未安装时 ``ok=False``，``fix_url`` 指向 Npcap 官网下载页；
@@ -326,8 +341,10 @@ def _scapy_available() -> bool:
 def capabilities(checks: list[dict] | None = None) -> dict:
     """把五项环境检查折算成「哪些功能现在可用」的能力矩阵（界面置灰的唯一依据）。
 
-    纯函数：只读传入的检查结果；``checks`` 为空时现场跑五项检查。``admin`` 不是
-    能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，不能置灰封死。
+    只读探测：不会写文件、不请求 UAC、不启动抓包子进程；但 ``checks`` 为空时会在
+    本机现场跑五项检查并探测 scapy 引擎，因此结果依赖本机环境，不是纯函数。
+    ``admin`` 不是能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，
+    不能置灰封死。
 
     Args:
         checks: 可选，五项检查结果（结构同 :func:`collect` 的 ``checks``）。测试注入
@@ -336,8 +353,8 @@ def capabilities(checks: list[dict] | None = None) -> dict:
     Returns:
         dict: 键 ``probe`` / ``offline`` / ``live`` / ``passive`` / ``reports`` /
             ``settings``（bool）、``missing``（不可用模式的机器码原因，键为模式名，
-            值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy``）、
-            ``scapy``（被动监听是否有 scapy 可用）。
+            值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy`` /
+            ``tshark|scapy|npcap``）、``scapy``（被动监听是否有 scapy 可用）。
 
     Example:
         >>> capabilities([{"key": "tshark", "ok": False},
@@ -356,7 +373,10 @@ def capabilities(checks: list[dict] | None = None) -> dict:
     npcap_ok = by_key.get("npcap", False)
     scapy_ok = _scapy_available()
     live_ok = tshark_ok and npcap_ok
-    passive_ok = tshark_ok or scapy_ok
+    # 通信观察要真正打开网卡收包：两种引擎都必须落在 Npcap 驱动上。
+    # 缺驱动时 tshark / scapy 再能导入也抓不到包（运行期见 passive.py 的
+    # 「没有可用网卡：请安装 Npcap」），所以 Npcap 是 passive 的前置条件。
+    passive_ok = npcap_ok and (tshark_ok or scapy_ok)
 
     missing: dict[str, str] = {}
     if not tshark_ok:
@@ -368,13 +388,19 @@ def capabilities(checks: list[dict] | None = None) -> dict:
         else:
             missing["live"] = "tshark" if not tshark_ok else "npcap"
     if not passive_ok:
-        missing["passive"] = "tshark|scapy"
+        # 原因按「引擎在前、驱动在后」聚合，UI 的 capTag 按 | 分段识别。
+        reasons: list[str] = []
+        if not (tshark_ok or scapy_ok):
+            reasons.append("tshark|scapy")
+        if not npcap_ok:
+            reasons.append("npcap")
+        missing["passive"] = "|".join(reasons)
 
     return {
         "probe": True,          # 连通与速度测试只用标准库 socket，永远可用
         "offline": tshark_ok,   # 分析抓包文件：只要 tshark，不需要 Npcap
         "live": live_ok,        # 实时抓包：tshark + Npcap
-        "passive": passive_ok,  # 通信观察：tshark 或内置 scapy 任一可用
+        "passive": passive_ok,  # 通信观察：Npcap 驱动 + (tshark 或内置 scapy)
         "reports": True,
         "settings": True,
         "missing": missing,
@@ -425,8 +451,58 @@ def collect(root: Path | None = None) -> dict:
     }
 
 
+def invalidate_cache() -> None:
+    """清空自检结果缓存（ack 写入首次运行标记后必须调用）。
+
+    ack 会改变 ``first_run``，缓存里还是旧值；不清掉的话 TTL 内下一次
+    ``/api/selfcheck`` 会把「首次运行」又下发一遍。
+
+    Returns:
+        None: 只清内存缓存，不写文件、不抛异常。
+    """
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+
+def collect_cached(root: Path | None = None, force: bool = False) -> dict:
+    """带短 TTL 的自检结果，供 ``/api/app`` 与 ``/api/selfcheck`` 共用。
+
+    首屏会先取 ``/api/app``（应用信息 + 能力矩阵），再取 ``/api/selfcheck`` 画面板；
+    两次都跑全套检查会重复探测 tshark 版本 / 端口 / scapy（冷启动数百 ms）。这里
+    按 ``CACHE_TTL_SECONDS`` 缓存，TTL 内第二次调用直接返回上次结果；``force``
+    或 :func:`invalidate_cache` 可强制重新探测。
+
+    Args:
+        root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
+        force: ``True`` 时跳过缓存重新跑五项检查（测试 / ack 后的强制刷新）。
+
+    Returns:
+        dict: 与 :func:`collect` 相同结构。返回深拷贝，调用方改字段不会污染缓存。
+
+    Example:
+        >>> first = collect_cached()          # 跑一次检查并缓存
+        >>> second = collect_cached()         # TTL 内复用，不再探测本机
+        >>> collect_cached(force=True)        # 强制重新检查
+    """
+    key = str(Path(root).resolve()) if root is not None else ""
+    if not force:
+        with _CACHE_LOCK:
+            hit = _CACHE.get(key)
+        if hit is not None and (time.monotonic() - hit[0]) < CACHE_TTL_SECONDS:
+            return copy.deepcopy(hit[1])
+    # 单飞：拿到锁后再次确认，避免两个并发首屏请求同时跑全套检查。
+    with _CACHE_LOCK:
+        hit = _CACHE.get(key)
+        if not force and hit is not None and (time.monotonic() - hit[0]) < CACHE_TTL_SECONDS:
+            return copy.deepcopy(hit[1])
+        data = collect(root)
+        _CACHE[key] = (time.monotonic(), data)
+        return copy.deepcopy(data)
+
+
 __all__ = [
-    "CHECK_KEYS", "MARKER_REL", "collect", "capabilities", "marker_path",
+    "CHECK_KEYS", "MARKER_REL", "CACHE_TTL_SECONDS", "collect", "collect_cached",
+    "invalidate_cache", "capabilities", "marker_path",
     "is_first_run", "ack_first_run", "ui_copy", "check_python", "check_tshark",
     "check_npcap", "check_port", "check_admin",
 ]

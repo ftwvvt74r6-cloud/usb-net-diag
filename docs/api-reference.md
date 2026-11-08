@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**33** 个（有模块说明 33 个）
-- 公开符号：**303** 个（有 docstring 303 个，合格 303 个）
+- 公开符号：**305** 个（有 docstring 305 个，合格 305 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -4934,17 +4934,19 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `ui_copy` | function | 80 | ✅ |
-| `marker_path` | function | 93 | ✅ |
-| `is_first_run` | function | 106 | ✅ |
-| `ack_first_run` | function | 121 | ✅ |
-| `check_python` | function | 199 | ✅ |
-| `check_tshark` | function | 218 | ✅ |
-| `check_npcap` | function | 257 | ✅ |
-| `check_port` | function | 270 | ✅ |
-| `check_admin` | function | 298 | ✅ |
-| `capabilities` | function | 326 | ✅ |
-| `collect` | function | 385 | ✅ |
+| `ui_copy` | function | 95 | ✅ |
+| `marker_path` | function | 108 | ✅ |
+| `is_first_run` | function | 121 | ✅ |
+| `ack_first_run` | function | 136 | ✅ |
+| `check_python` | function | 214 | ✅ |
+| `check_tshark` | function | 233 | ✅ |
+| `check_npcap` | function | 272 | ✅ |
+| `check_port` | function | 285 | ✅ |
+| `check_admin` | function | 313 | ✅ |
+| `capabilities` | function | 341 | ✅ |
+| `collect` | function | 411 | ✅ |
+| `invalidate_cache` | function | 454 | ✅ |
+| `collect_cached` | function | 467 | ✅ |
 
 ### `ui_copy`
 
@@ -5050,7 +5052,7 @@ def check_npcap() -> dict
 ```
 
 ```text
-检查 Npcap 抓包驱动是否就绪（离线分析不需要它，但实时抓包必须要）。
+检查 Npcap 抓包驱动是否就绪（离线分析不需要它，但实时抓包与通信观察必须要）。
 
 Returns:
     dict: 未安装时 ``ok=False``，``fix_url`` 指向 Npcap 官网下载页；
@@ -5099,8 +5101,10 @@ def capabilities(checks: list[dict] | None=None) -> dict
 ```text
 把五项环境检查折算成「哪些功能现在可用」的能力矩阵（界面置灰的唯一依据）。
 
-纯函数：只读传入的检查结果；``checks`` 为空时现场跑五项检查。``admin`` 不是
-能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，不能置灰封死。
+只读探测：不会写文件、不请求 UAC、不启动抓包子进程；但 ``checks`` 为空时会在
+本机现场跑五项检查并探测 scapy 引擎，因此结果依赖本机环境，不是纯函数。
+``admin`` 不是能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，
+不能置灰封死。
 
 Args:
     checks: 可选，五项检查结果（结构同 :func:`collect` 的 ``checks``）。测试注入
@@ -5109,8 +5113,8 @@ Args:
 Returns:
     dict: 键 ``probe`` / ``offline`` / ``live`` / ``passive`` / ``reports`` /
         ``settings``（bool）、``missing``（不可用模式的机器码原因，键为模式名，
-        值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy``）、
-        ``scapy``（被动监听是否有 scapy 可用）。
+        值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy`` /
+        ``tshark|scapy|npcap``）、``scapy``（被动监听是否有 scapy 可用）。
 
 Example:
     >>> capabilities([{"key": "tshark", "ok": False},
@@ -5141,6 +5145,49 @@ Returns:
         ``ui_copy``（``{"startup": {...}}`` 文案）。
 ```
 
+### `invalidate_cache`
+
+```python
+def invalidate_cache() -> None
+```
+
+```text
+清空自检结果缓存（ack 写入首次运行标记后必须调用）。
+
+ack 会改变 ``first_run``，缓存里还是旧值；不清掉的话 TTL 内下一次
+``/api/selfcheck`` 会把「首次运行」又下发一遍。
+
+Returns:
+    None: 只清内存缓存，不写文件、不抛异常。
+```
+
+### `collect_cached`
+
+```python
+def collect_cached(root: Path | None=None, force: bool=False) -> dict
+```
+
+```text
+带短 TTL 的自检结果，供 ``/api/app`` 与 ``/api/selfcheck`` 共用。
+
+首屏会先取 ``/api/app``（应用信息 + 能力矩阵），再取 ``/api/selfcheck`` 画面板；
+两次都跑全套检查会重复探测 tshark 版本 / 端口 / scapy（冷启动数百 ms）。这里
+按 ``CACHE_TTL_SECONDS`` 缓存，TTL 内第二次调用直接返回上次结果；``force``
+或 :func:`invalidate_cache` 可强制重新探测。
+
+Args:
+    root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
+    force: ``True`` 时跳过缓存重新跑五项检查（测试 / ack 后的强制刷新）。
+
+Returns:
+    dict: 与 :func:`collect` 相同结构。返回深拷贝，调用方改字段不会污染缓存。
+
+Example:
+    >>> first = collect_cached()          # 跑一次检查并缓存
+    >>> second = collect_cached()         # TTL 内复用，不再探测本机
+    >>> collect_cached(force=True)        # 强制重新检查
+```
+
 ## `core/server.py`
 
 **职责**：本地 Web UI + HTTP API（仅监听 127.0.0.1，不对外暴露）。
@@ -5167,9 +5214,9 @@ Returns:
 | `Handler.log_message` | method | 1143 | ✅ |
 | `Handler.do_GET` | method | 1281 | ✅ |
 | `Handler.do_POST` | method | 1298 | ✅ |
-| `DiagServer` | class | 1547 | ✅ |
-| `create_server` | function | 1559 | ✅ |
-| `main` | function | 1606 | ✅ |
+| `DiagServer` | class | 1556 | ✅ |
+| `create_server` | function | 1568 | ✅ |
+| `main` | function | 1615 | ✅ |
 
 ### `touch`
 

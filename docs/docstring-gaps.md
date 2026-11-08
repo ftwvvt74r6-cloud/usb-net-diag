@@ -3,7 +3,7 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**100.0%**（303/303）
+- 合格率：**100.0%**（305/305）
 - 模块说明：33/33
 
 ## 按文件汇总
@@ -37,7 +37,7 @@
 | `core/rules/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/rules/legacy_map.py` | 9 | 9 | 9 | 100% |
 | `core/sanitize.py` | 4 | 4 | 4 | 100% |
-| `core/selfcheck.py` | 11 | 11 | 11 | 100% |
+| `core/selfcheck.py` | 13 | 13 | 13 | 100% |
 | `core/server.py` | 23 | 23 | 23 | 100% |
 | `core/tshark.py` | 13 | 13 | 13 | 100% |
 | `core/verdict.py` | 2 | 2 | 2 | 100% |
