@@ -729,25 +729,31 @@ def request_elevation() -> dict:
     * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
       分析抓包文件与连通与速度测试不受影响。
 
+    返回值是结构化契约（UI 只读这几个键，不要再让路由层猜）：
+
     Returns:
-        dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
-            失败 ``{"ok": False, "error": "..."}``。
+        dict: 成功 ``{"ok": True, "restarted": True, "message": ...}``；
+            本来就有权限 ``{"ok": True, "restarted": False, "already_admin": True,
+            "message": ...}``；失败 ``{"ok": False, "restarted": False,
+            "error": "..."}`` —— 失败**不抛异常、不杀当前进程**。
     """
     if tshark.is_admin():
-        return {"ok": True, "already_admin": True, "message": "当前已是管理员权限"}
+        return {"ok": True, "restarted": False, "already_admin": True,
+                "message": "当前已是管理员权限"}
     try:
         import app  # noqa: PLC0415  延迟导入：只有提权时才需要启动器模块
         started = app.relaunch_as_admin()
     except Exception as exc:  # noqa: BLE001  提权失败只回可读错误，不影响服务
-        return {"ok": False, "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
+        return {"ok": False, "restarted": False,
+                "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
     if not started:
-        return {"ok": False,
+        return {"ok": False, "restarted": False,
                 "error": "未获得管理员权限（已取消，或被系统策略禁止）。"
                          "仍可继续使用分析抓包文件与连通与速度测试。"}
     log("[提示] 已请求以管理员身份重启，等待 Windows 授权…")
     threading.Timer(0.8, lambda: request_quit("正在以管理员权限重启，服务即将退出…")
                     ).start()
-    return {"ok": True, "message": "已请求管理员权限，服务将重启"}
+    return {"ok": True, "restarted": True, "message": "已请求管理员权限，服务将重启"}
 
 
 # ---------------------------------------------------------------- 通信观察

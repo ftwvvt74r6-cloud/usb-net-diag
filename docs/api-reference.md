@@ -402,11 +402,12 @@ def main() -> int
 ```text
 静默启动主流程。
 
-顺序：日志基建 → 重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
+顺序：日志基建 → 重定向输出 → 探测已有实例 → 建监听 → 开浏览器 → 阻塞。
+启动路径**不请求提权**；`--elevated` 只用于 /api/elevate 拉起的新进程。
 
 Returns:
-    int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」和
-        「已拉起提权进程」两种提前返回）；1 = 端口全被占用。
+    int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」）；
+        1 = 初始化失败 / 找不到 tshark / 端口全被占用。
 ```
 
 ## `core/bootstrap.py`
@@ -4733,17 +4734,17 @@ Returns:
 | `start_job` | function | 626 | ✅ |
 | `report_index` | function | 687 | ✅ |
 | `request_elevation` | function | 721 | ✅ |
-| `engine_info` | function | 754 | ✅ |
-| `passive_start` | function | 797 | ✅ |
-| `passive_status` | function | 832 | ✅ |
-| `link_actions` | function | 906 | ✅ |
-| `Handler` | class | 953 | ✅ |
-| `Handler.log_message` | method | 999 | ✅ |
-| `Handler.do_GET` | method | 1137 | ✅ |
-| `Handler.do_POST` | method | 1154 | ✅ |
-| `DiagServer` | class | 1382 | ✅ |
-| `create_server` | function | 1394 | ✅ |
-| `main` | function | 1441 | ✅ |
+| `engine_info` | function | 760 | ✅ |
+| `passive_start` | function | 803 | ✅ |
+| `passive_status` | function | 838 | ✅ |
+| `link_actions` | function | 912 | ✅ |
+| `Handler` | class | 959 | ✅ |
+| `Handler.log_message` | method | 1005 | ✅ |
+| `Handler.do_GET` | method | 1143 | ✅ |
+| `Handler.do_POST` | method | 1160 | ✅ |
+| `DiagServer` | class | 1388 | ✅ |
+| `create_server` | function | 1400 | ✅ |
+| `main` | function | 1447 | ✅ |
 
 ### `touch`
 
@@ -4922,9 +4923,13 @@ UI「以管理员身份重启」：调用启动器已有的 UAC 提权路径。
 * 用户点「否」/ 被组策略禁止 → 返回 ``ok: False``，旧服务继续跑，
   分析抓包文件与连通与速度测试不受影响。
 
+返回值是结构化契约（UI 只读这几个键，不要再让路由层猜）：
+
 Returns:
-    dict: 成功 ``{"ok": True, "message": ...}``（``already_admin`` 表示本来就有权限）；
-        失败 ``{"ok": False, "error": "..."}``。
+    dict: 成功 ``{"ok": True, "restarted": True, "message": ...}``；
+        本来就有权限 ``{"ok": True, "restarted": False, "already_admin": True,
+        "message": ...}``；失败 ``{"ok": False, "restarted": False,
+        "error": "..."}`` —— 失败**不抛异常、不杀当前进程**。
 ```
 
 ### `engine_info`

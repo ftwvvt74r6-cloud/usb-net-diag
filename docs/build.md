@@ -4,6 +4,10 @@
 > 许可依据见 [`licensing.md`](licensing.md) §0 / §2。
 >
 > 一条命令出包，脚本自己解压、用**包内或系统 Python** 真跑一遍测试，通过才说 `BUILD OK`。
+>
+> 从 C 批次起，lite 包额外包含**现场用系统 csc 编译的 `NetDiag.exe` 图形启动器**
+> （源码 `launcher/NetDiagLauncher.cs`，`asInvoker`，双击不请求提权）。exe 不进 git，
+> 由发布脚本构建；构建/运行细节见 [`startup.md`](startup.md)。
 
 ---
 
@@ -11,7 +15,7 @@
 
 | 模式 | 命令（仓库根目录） | 产物 | zip 体积 | 解压后 | 包内第三方二进制 | 能发给谁 |
 |---|---|---|---|---|---|---|
-| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-0.2.0-lite.zip` | 约 **0.7 MB** | 约 **1.7 MB** | **无** | **公开 Release / 任何人** |
+| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-0.2.0-lite.zip` | 约 **0.7 MB** | 约 **1.7 MB** | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-0.2.0-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
 | **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-0.2.0-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅组织内部同事**，禁止公开 |
 
@@ -27,6 +31,7 @@
 | 系统 | Windows 10/11 | Windows 10/11 |
 | Git | 能在仓库根目录执行 `git archive` | 同左 |
 | Python | 系统 Python 3.9+（跑脚本）；**包内不带** | 系统 Python 3.9+ 或 `tools\python\python.exe` |
+| `csc.exe` | **需要**：.NET Framework 4.x 自带（`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`，64 位不在时回退 32 位）；用于编译 lite 包的 `NetDiag.exe` | 不需要（内部包不构建 exe） |
 | `tools\` | **不需要** | **本机必须已有**（约 362.5 MiB，被 `.gitignore` 排除） |
 | 磁盘 | ≥ 50 MB | ≥ 1.2 GB（暂存 + zip + 解压自检） |
 | 工作区 | 已跟踪文件必须干净（`--allow-dirty` 仅本地调试） | 同左 |
@@ -54,6 +59,31 @@ python scripts\build_release.py --with-tools
 REM 3) 内部离线包（带 Npcap，仅内部分发）
 python scripts\build_release.py --with-npcap
 ```
+
+### 3.1 启动器 `NetDiag.exe`（lite 必做，发布脚本自动完成）
+
+lite 包里的 `NetDiag.exe` 不是提交进 git 的二进制，而是打包时现场编译：
+
+```bat
+REM 只校验源码/manifest（ubuntu CI 可跑，不需要 csc）
+python scripts\build_launcher.py --check
+
+REM 单独编译到仓库根（本地调试 / dry-run 用；*.exe 不入库）
+python scripts\build_launcher.py
+
+REM 编译到指定目录（build_release 内部就是这么调用的）
+python scripts\build_launcher.py --out %TEMP%\netdiag-launcher
+```
+
+- 编译器：`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe` → 32 位 Framework → PATH 里的 `csc`；
+  找不到时退出码非 0，并给出「装 .NET Framework / 只用 --check」的可操作提示。
+- 编译命令核心：`/target:winexe /optimize+ /win32icon:NetDiag.ico`
+  `/win32manifest:launcher\NetDiag.exe.manifest` `/codepage:65001`
+  （源码是 UTF-8；不加会让中文文案在中文系统变乱码）。
+- 产物最小校验：文件存在且 **> 8 KB**；manifest 必须是 `asInvoker`（解析 XML 断言，不是 grep 注释）。
+- 发版后人工复核：`NetDiag.exe --dry-run --report <临时文件>` 只输出 Python 路径，
+  不启动服务、不开浏览器。
+- 启动器详细行为（Python 定位顺序 / 退出码 / 提权边界）见 [`startup.md`](startup.md)。
 
 成功时最后一行是 **`BUILD OK`**，产物在 `logs\dist\`：
 
@@ -86,7 +116,7 @@ python scripts\build_release.py --with-npcap --out logs\dist\internal-npcap
 
 ---
 
-## 4. 脚本做了什么（7 步）
+## 4. 脚本做了什么（8 步）
 
 1. `git archive HEAD` → 暂存目录 `NetDiag\`：只含 **141 个受控文件**（约 1.5 MB，以 `git ls-files` 为准）。
    `.git`、`harness/`、`logs/`、`config/ai-config.json`、`reports/` 里非示例文件天然不在里面；
@@ -95,19 +125,24 @@ python scripts\build_release.py --with-npcap --out logs\dist\internal-npcap
    - lite：**跳过**，包里没有任何第三方二进制；
    - `--with-tools`：原样复制，只跳过 `__pycache__` / `*.pyc`，并**排除 `npcap-*.exe`**；
    - `--with-npcap`：原样复制，**包含** `npcap-1.79.exe`，并打印醒目警告。
-3. 生成包内 `README.txt`（按模式写清「要装什么 / 不要传什么」）；`自检.bat` 来自 git。
-4. 打 `NetDiag-<VERSION>-<mode>.zip`（`ZIP_DEFLATED`，level 6，含目录条目，空目录 `logs\` 保留）。
-5. 写 `SHA256SUMS.txt`（`sha256sum` 兼容：`<hash>  <文件名>`，LF 换行）。
-6. **解压到临时目录**并做构建自检：
+3. **lite 构建启动器**：调 `scripts/build_launcher.py --out <临时目录>` 编译
+   `NetDiag.exe` 并复制到包根 `NetDiag/NetDiag.exe`；内部包不构建（继续用
+   `NetDiag.vbs` / `start.bat` 入口）。exe 不进 git，只在构建时生成。
+4. 生成包内 `README.txt`（按模式写清「要装什么 / 不要传什么」）；`自检.bat` 来自 git。
+5. 打 `NetDiag-<VERSION>-<mode>.zip`（`ZIP_DEFLATED`，level 6，含目录条目，空目录 `logs\` 保留）。
+6. 写 `SHA256SUMS.txt`（`sha256sum` 兼容：`<hash>  <文件名>`，LF 换行）。
+7. **解压到临时目录**并做构建自检：
    - lite：用**系统 Python**；`--with-tools` / `--with-npcap`：用**包内便携 Python**；
-   - 全套 `unittest`（235 条，见 §6 的 skipped 说明）；
-   - 启动器契约（`test_launcher_contract.py`，8 tests）；
+   - 全套 `unittest`（条数以实际 `Ran N tests` 为准，见 §6 的 skipped 说明）；
+   - 启动器契约（`test_launcher_contract.py`，8 tests）+ 启动器/提权契约
+     （`test_launcher_exe.py` / `test_elevate_api.py`；无 csc 的机器上编译类用例 skip）；
    - 清单断言（按模式）：禁入项为零、`reports/` 只有两份示例、必要入口齐全、
      `自检.bat` 纯 ASCII + CRLF；
-   - **lite** 断言**没有** `tools/`、**没有** `npcap-*.exe`；
+   - **lite** 断言有 `NetDiag/NetDiag.exe`（非空且 > 8 KB）、**没有** `tools/`、
+     **没有** `npcap-*.exe`、**没有** Wireshark/tshark 二进制；
    - **`--with-tools`** 断言有 `tools/`、**没有** `npcap-*.exe`；
    - **`--with-npcap`** 断言有 `tools/`、**有** `npcap-*.exe`。
-7. 打印 zip 路径 / 大小 / SHA-256 / 测试行，最后输出 `BUILD OK`；任一步失败退出码非 0。
+8. 打印 zip 路径 / 大小 / SHA-256 / 启动器大小 / 测试行，最后输出 `BUILD OK`；任一步失败退出码非 0。
 
 ---
 
@@ -117,9 +152,11 @@ python scripts\build_release.py --with-npcap --out logs\dist\internal-npcap
 
 ```
 NetDiag\
+├── NetDiag.exe                    # 构建时用系统 csc 编译（asInvoker，启动不提权）
 ├── 自检.bat / README.txt          # README.txt 构建时生成
 ├── start.bat / NetDiag.vbs / 导出诊断包.bat
 ├── VERSION / CHANGELOG.md / README.md / AGENTS.md
+├── launcher\NetDiagLauncher.cs    # 启动器源码（exe 不提交，源码提交）
 ├── core\ ui\ mcp\ skills\ docs\ tests\ scaffold\ tasks\
 ├── config\*.example.json         # 只有示例；ai-config.json 绝不入包
 ├── captures\faults_demo.pcap
@@ -127,14 +164,15 @@ NetDiag\
 └── logs\                          # 空目录（首次运行写入）
 ```
 
-**没有 `tools\`**。lite 用系统 Python 启动：
+**没有 `tools\`**。lite 用系统 Python 启动：双击 `NetDiag.exe`（推荐，自动定位
+Python 3.11+ 并打开浏览器），或手动：
 
 ```bat
 python core\server.py
 ```
 
-（`start.bat` / `NetDiag.vbs` 依赖 `tools\python`，只适用于内部离线包；
-lite 用户请直接用 `python core\server.py`，或按 `docs\START-HERE.md` 的源码方式运行。）
+（lite 包不含 `tools\python`：`NetDiag.vbs` 会回退系统 Python；`start.bat` 同样
+有三级回退。需要包内便携 Python 时用内部离线包。）
 
 ### 5.2 `--with-tools` / `--with-npcap`（内部）
 
@@ -159,17 +197,20 @@ tools\npcap-1.79.exe                        # 仅 --with-npcap 有
 | 检查 | lite | `--with-tools` / `--with-npcap` |
 |---|---|---|
 | 自检 Python | **系统 Python**（构建脚本的解释器） | **包内** `tools\python\python.exe` |
-| 全套测试 | `Ran 235 tests ... OK (skipped=19)` | `Ran 235 tests ... OK (skipped=2)` |
+| 全套测试 | `Ran N tests ... OK`（N 以实际为准，脚本只断言 ≥ 235） | 同左 |
 | 启动器契约 | `Ran 8 tests ... OK` | `Ran 8 tests ... OK` |
+| 启动器 / 提权契约 | `test_launcher_exe.py` + `test_elevate_api.py`；无 csc 的机器上编译类用例 skip | 同左（编译类用例在包内也会跑） |
+| `NetDiag.exe` | 存在且 > 8 KB（manifest = `asInvoker`） | 不存在（内部包继续用 VBS / start.bat） |
 | `tools/` 断言 | 不存在 | 存在，≥1900 文件 / ≥350 MiB |
 | Npcap 安装器 | 不存在 | `--with-tools`：不存在；`--with-npcap`：存在 |
+| Wireshark/tshark 二进制 | 不存在（`.exe` / `.dll` 按文件名断言） | 存在（在 `tools/` 下） |
 | 包内 `自检.bat` | 纯 ASCII（0 个 >0x7F 字节）+ CRLF | 同左 |
 
 > **skipped 为什么有两个数**：带 `tools/` 的包有 tshark + scapy，只跳过
 > 「需要管理员 + Npcap 的真实抓包」和「需要本机 openssl 的 TLS 自检」= **2**；
-> lite 没有 tshark / scapy，会多跳过 17 项 = **19**。两者都正常。
-> 脚本只断言 `Ran N tests`（N ≥ 235）且结果为 `OK`，不把 skipped 数写死 ——
-> 它随环境变化，写死会在别的机器误报。
+> lite 没有 tshark / scapy，会多跳过约 17 项。两者都正常。
+> 脚本只断言 `Ran N tests`（N ≥ 235）且结果为 `OK`，不把测试数/skipped 数写死 ——
+> 它们随环境与新增用例变化，写死会在别的机器误报。
 
 ---
 
@@ -183,21 +224,28 @@ $dst = "$env:TEMP\netdiag-lite-verify"
 Remove-Item $dst -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive logs\dist\NetDiag-0.2.0-lite.zip -DestinationPath $dst
 
-# 2) 自检：无 tshark / 无 Npcap 时是 WARN，不是 FAIL
+# 2) 启动器只定位 Python（不启动服务、不开浏览器）
+& "$dst\NetDiag\NetDiag.exe" --dry-run --report "$env:TEMP\netdiag-launcher.json"
+Get-Content "$env:TEMP\netdiag-launcher.json"
+# 期望：exit 0；JSON 里 ok=true、python 指向系统 Python、started=false
+
+# 3) 自检：无 tshark / 无 Npcap 时是 WARN，不是 FAIL
 & "$dst\NetDiag\自检.bat" --no-pause
 echo "exit=$LASTEXITCODE"
 # 期望：RESULT: USABLE；WARN 提示装 Wireshark / Npcap，FAIL 0
 
-# 3) 用系统 Python 跑全套测试
+# 4) 用系统 Python 跑全套测试
 Push-Location "$dst\NetDiag"
 $env:NETDIAG_LOG_DIR = "$env:TEMP\netdiag-lite-logs"
 python -m unittest discover -s tests
 Pop-Location
-# 期望：Ran 235 tests ... OK (skipped=19)
+# 期望：Ran N tests ... OK（skipped≈19，取决于本机 Python / openssl）
 
-# 4) 校验和
+# 5) 校验和 + 启动器确实在 zip 根
 Get-FileHash logs\dist\NetDiag-0.2.0-lite.zip -Algorithm SHA256
 Get-Content logs\dist\SHA256SUMS.txt
+(Get-Item "$dst\NetDiag\NetDiag.exe").Length
+# 期望：> 8192 字节
 ```
 
 ### 7.2 内部包（发布时不需要做，改了打包逻辑时做）
@@ -311,8 +359,11 @@ $section
 | zip 很大 / 构建慢 | 内部包正常：362 MB 运行时压缩到约 147–149 MB；杀软实时扫描会更慢 |
 | 解压自检超时 | 把仓库加到杀软排除目录；或先用 `--skip-verify` 出包，再手工按 §7 验 |
 | lite 包 `自检.bat` 报 tshark WARN | 正常：lite 不含 Wireshark，装 Wireshark 或设 `TSHARK_PATH` 后重跑 |
-| lite 包双击 `start.bat` 报找不到 Python | 正常：`start.bat` 依赖 `tools\python`，lite 请用 `python core\server.py` |
-| 包内测试 `skipped=2` 而不是 19 | 正常，见 §6：带 `tools/` 的包少跳过 17 项 |
+| lite 构建报「找不到 csc.exe」 | 安装 .NET Framework 4.x（Windows 10/11 自带）；只想校验源码时用 `python scripts\build_launcher.py --check` |
+| `NetDiag.exe` 只有几 KB / 不是 PE | csc 编译失败但返回 0 的异常环境；重跑 `build_launcher.py` 看 stderr，发布脚本也会按 > 8 KB 拦下 |
+| lite 包双击 `NetDiag.exe` 提示找不到 Python | lite 不含 `tools\python`；装 Python 3.11+ 并勾选 Add python.exe to PATH，或用内部离线包 |
+| lite 包双击 `start.bat` 报找不到 Python | `start.bat` 会回退系统 python / `py -3`；都没有时按提示安装 Python 3.11+ |
+| 包内测试 `skipped=2` 而不是 19 | 正常，见 §6：带 `tools/` 的包少跳过约 17 项 |
 
 ---
 

@@ -1,9 +1,9 @@
 """静默启动器：像应用一样双击即用，全程不弹控制台窗口。
 
-由 NetDiag.vbs 用 pythonw.exe 拉起（pythonw 无控制台），流程：
+由 NetDiag.exe / NetDiag.vbs 用 pythonw.exe 拉起（pythonw 无控制台），流程：
   1. 已有实例在跑 → 直接把浏览器指过去，退出（避免开第二份
-  2. 非管理员 → 用 UAC 提权重启自己（抓包需要 Npcap 的驱动权限）；
-     用户点「否」就降级为普通权限继续跑，分析抓包文件 / 连通与速度测试仍可用
+  2. **启动不提权**：需要管理员的功能（实时抓包 / 通信观察）由界面按需请求，
+     用户点「否」就保持普通权限，分析抓包文件 / 连通与速度测试仍可用
   3. 生成配置 → 起本地服务（后台线程）→ 打开浏览器
   4. 界面点「退出」或长时间无人访问 → 自动收尾，不留后台进程
 
@@ -132,11 +132,12 @@ def find_running() -> str:
 def main() -> int:
     """静默启动主流程。
 
-    顺序：日志基建 → 重定向输出 → 探测已有实例 → 需要时提权 → 建监听 → 开浏览器 → 阻塞。
+    顺序：日志基建 → 重定向输出 → 探测已有实例 → 建监听 → 开浏览器 → 阻塞。
+    启动路径**不请求提权**；`--elevated` 只用于 /api/elevate 拉起的新进程。
 
     Returns:
-        int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」和
-            「已拉起提权进程」两种提前返回）；1 = 端口全被占用。
+        int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」）；
+            1 = 初始化失败 / 找不到 tshark / 端口全被占用。
     """
     # 日志基建（每次启动一次）：目录 → 裁剪 → 环境快照 → 崩溃钩子。
     # 必须在 redirect_output 之前裁剪：此时当天的 app 日志还没被本进程打开。
@@ -145,8 +146,8 @@ def main() -> int:
     logstore.write_env_snapshot({"entry": "app"})
     logstore.install_excepthooks()
     redirect_output()
-    as_console = "--console" in sys.argv
     elevated = "--elevated" in sys.argv
+    no_elevate = "--no-elevate" in sys.argv
 
     # 1. 已有一个实例在跑：直接开浏览器，不重复起服务。
     #    例外：本次是「界面点提权重启」拉起的 --elevated 新进程，旧实例会主动退出，
@@ -162,15 +163,15 @@ def main() -> int:
         webbrowser.open(url)
         return 0
 
-    # 2. 提权（只做一次）。UAC 被拒就以普通权限继续，功能降级但不崩
-    if not is_admin():
-        if not elevated and relaunch_as_admin():
-            return 0
-        if not as_console:
-            msgbox("未获得管理员权限：全网体检 / 单目标诊断 / 通信观察将不可用"
-                   "（分析抓包文件、连通与速度测试仍可用）。\n\n"
-                   "如需完整功能，请关闭后右键 NetDiag.vbs 选择"
-                   "「以管理员身份运行」，或用 start.bat 启动。")
+    # 2. 启动不提权：需要管理员的功能（实时抓包 / 通信观察）由界面按需请求
+    #    （POST /api/elevate）。这里不再自动 relaunch_as_admin —— 双击启动不该
+    #    先弹 UAC，也不该因为用户点了「否」就弹一个吓人的失败提示。
+    #    --no-elevate 是启动器传入的显式声明；默认行为本来就相同，属于双保险。
+    #    --elevated 仍保留：那是 /api/elevate 拉起的新进程，不是启动路径。
+    if elevated and no_elevate:
+        print("[提示] 同时收到 --elevated 与 --no-elevate，按不提权处理")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 启动不提权；"
+          f"需要管理员的功能会在界面按需请求（admin={is_admin()}）")
 
     import bootstrap  # noqa: PLC0415
     import diagnose  # noqa: PLC0415
