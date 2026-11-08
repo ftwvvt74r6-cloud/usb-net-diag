@@ -129,7 +129,10 @@ class LargeResponseResetDiskLogTest(unittest.TestCase):
 
     def test_noise_entries_are_single_line_each(self):
         """连接的异常只允许单行 debug；任何一行都不许带 ``File "...`` 栈帧。"""
-        _rst(self.port, b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        # 多打几次，避免 CI 上「RST 比 server 读请求还快」导致一次都没走到降级分支。
+        for _ in range(3):
+            _rst(self.port, b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            time.sleep(0.1)
         time.sleep(0.5)
         status, _ = _get_ping(self.port)
         self.assertEqual(status, 200)
