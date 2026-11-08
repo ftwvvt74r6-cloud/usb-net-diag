@@ -556,7 +556,7 @@ python -m unittest discover -s tests        # 期望 565 条，OK (skipped≈27�
 
 ### 10.3 fork 后自检
 
-- [ ] 干净目录（无 `tools/`、无 `config/app-config.json`）跑测试 → `OK (skipped=19)`
+- [ ] 干净目录（无 `tools/`、无 `config/app-config.json`）跑测试 → `OK (skipped=27)`
 - [ ] **有 tshark 时**（系统安装或 `tools/` + `TSHARK_PATH`）：
       `python core/diagnose.py --pcap captures/faults_demo.pcap --report-out <tmp>` 能出报告
       （**没有 tshark 时这条会以「未找到 tshark」退出，属预期，不是 bug**）
@@ -684,7 +684,7 @@ curl.exe -X POST http://127.0.0.1:8787/api/quit
 | 测试绿但 UI 打不开 | 看 `logs/app-*.log` / `logs/diag-*.log`，先查端口占用与 `ui/index.html` |
 | demo 报告层/计数不对 | 先确认 `captures/faults_demo.pcap` 未被改（sha256 应与入库一致），再看 `rows[]` |
 | 诊断包解压乱码/缺 README | 看 `core/diagpack.py` 的 `README_NAME` 与 zip 条目名脱敏（`*` → `_`） |
-| 干净环境 skip 不是 19 | 说明环境里多了/少了 tshark、openssl 或 tools；不是代码问题 |
+| 干净环境 skip 不是 27 | 说明环境里多了/少了 tshark、openssl 或 tools；不是代码问题 |
 
 ---
 
