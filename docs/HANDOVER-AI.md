@@ -1,7 +1,7 @@
 # HANDOVER-AI —— NetDiag（网络矩阵）交接手册
 
 > **写给谁**：接手本仓库的 AI 编码助手 / 新开发者。
-> **对齐版本**：`VERSION` = `0.3.2`；写作基线 `main` = `ec374a0`（H 批次 PR #36 合并后的 main；F = PR #34、G = PR #35）。
+> **对齐版本**：`VERSION` = `0.3.2`；写作基线 `main` = `e0004c9`（v0.3.2 发布 commit，PR #37 合并；F = PR #34、G = PR #35、H = PR #36）。
 > **时效性**：文中数字是 2026-11-09 在本仓库实测的；合并新 PR 后 sha 会变，以
 > `git log -1 --oneline` 与代码为准。**冲突时优先级：代码 > 本文件 > 其他文档。**
 > **命令占位符**：`<python>` = 仓库自带 `tools\python\python.exe`（3.11.9）；
@@ -577,9 +577,9 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
 | `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 33 模块/314 符号 |
-| `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（H 批次启动器 + v0.3.1 历史实测；v0.3.2 不预写包大小/SHA） |
-| `docs/release-v0.3.2.md` | v0.3.2 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ⏳ **发版后**由 Lead 回写；本 PR 不创建、不预写数字 |
-| `docs/release-v0.3.1.md` | v0.3.1 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 历史（最新已发布版本） |
+| `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（v0.3.2 lite 实测 187 文件 / 1,199,811 B / 解压后 3,301,772 B；v0.3.1 历史值另列） |
+| `docs/release-v0.3.2.md` | v0.3.2 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 当前（已发布） |
+| `docs/release-v0.3.1.md` | v0.3.1 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 历史（v0.3.1） |
 | `docs/release-v0.3.0.md` | v0.3.0 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ❌ 历史（v0.3.0） |
 | `docs/release-v0.2.0.md` | v0.2.0 发布资产与法务修正回合证据 | ❌ 历史（v0.2.0） |
 | `docs/licensing.md` | Wireshark / Npcap / Python 的再分发边界（lite 只发代码） | ✅ 当前 |
@@ -599,10 +599,12 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/git-setup.md` | Git 接管操作手册（已去个人化，含 `<owner>/<repo>` 占位符） | ✅ 可用；示例数字偏旧 |
 | `docs/assets/` | 图标/Logo | ✅ |
 
-> **v0.3.2 发布记录（待发版）**：版本进位 PR `chore/release-v0.3.2` 只改
-> `VERSION` / `core/__init__.py::__version__` / `CHANGELOG` / `README` / `docs/HANDOVER-AI.md` /
-> `docs/build.md`；**不打包、不建 tag、不发 Release**。tag `v0.3.2`、lite 包大小与 SHA-256
-> 由 Lead 合并后执行，并回写 `docs/release-v0.3.2.md` 与本文件。
+> **v0.3.2 发布记录**：tag `v0.3.2`（annotated tag object `06c449dd…`）→ commit
+> `e0004c9dbefdd77d78950b778fdfea59ef5c7e99`（v0.3.2 发布 commit，PR #37 合并）；
+> Release <https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.2>；
+> lite `NetDiag-0.3.2-lite.zip` **187 个文件 / 1,199,811 B / SHA-256
+> `da0c69b8b05eb52517c0550040cb5feef7d19b2580a335ed17a60f8a898e2e0e`**，
+> 解压后 3,301,772 B；不含 Wireshark / Npcap / `tools/`。细节见 `docs/release-v0.3.2.md`。
 >
 > **v0.3.1 发布记录（历史）**：tag `v0.3.1`（annotated tag object `b15f592c…`）→ commit
 > `d4b13dcd1220e149b4f9283ce2930875dab4cfd5`（v0.3.1 发布 commit，PR #32 合并）；
