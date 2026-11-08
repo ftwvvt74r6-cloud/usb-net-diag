@@ -36,6 +36,11 @@ import copytext  # noqa: E402
 import tshark  # noqa: E402
 import version  # noqa: E402
 
+try:  # 被动监听引擎只在探测 scapy 时用；导入失败按「没有 scapy」降级
+    import passive  # noqa: E402
+except Exception:  # noqa: BLE001  裁剪发行包可能没有 passive.py
+    passive = None  # type: ignore[assignment]
+
 try:  # 平台能力缺失（如被裁剪的发行包）时退回 tshark 的兼容实现
     from core.platform import winapi  # noqa: E402
 except Exception:  # noqa: BLE001  导入失败只让 npcap/管理员检查降级，不拖垮模块
@@ -51,6 +56,9 @@ PYTHON_DOWNLOAD_URL = "https://www.python.org/downloads/windows/"
 WIRESHARK_DOWNLOAD_URL = "https://www.wireshark.org/download.html"
 NPCAP_DOWNLOAD_URL = "https://npcap.com/#download"
 INTERFACES_COMMAND = "python core\\diagnose.py --interfaces"
+
+#: 缺组件修复说明的文档位置（相对仓库根；界面可复制/展示，不写死本机盘符）。
+DOCS_STARTUP = "docs/startup.md"
 
 
 def _t(key: str, **args) -> str:
@@ -155,7 +163,8 @@ def _check(key: str, ok: bool, detail: str, fix_kind: str = "none",
 
     Returns:
         dict: 键 ``key`` / ``name`` / ``ok`` / ``detail`` / ``fix_kind`` /
-            ``fix_url`` / ``fix_command``（后四个失败时才有意义）。
+            ``fix_url`` / ``fix_command`` / ``impact`` / ``doc_url``
+            （后五个失败时才有意义）。
     """
     return {
         "key": key,
@@ -165,6 +174,9 @@ def _check(key: str, ok: bool, detail: str, fix_kind: str = "none",
         "fix_kind": fix_kind,
         "fix_url": fix_url,
         "fix_command": fix_command,
+        # impact 是「缺了会怎样」的一句话，放在 copy 表里，界面不用自己编文案。
+        "impact": _t(f"impact_{key}"),
+        "doc_url": DOCS_STARTUP,
     }
 
 
@@ -296,11 +308,86 @@ def check_admin() -> dict:
                   fix_kind="none" if ok else "elevate")
 
 
+def _scapy_available() -> bool:
+    """被动监听是否有 scapy 引擎可用（复用 ``passive.engine_status()``，不重复探测）。
+
+    Returns:
+        bool: ``True`` 表示 scapy 可导入；模块缺失 / 导入失败 / 探测异常都返回 ``False``
+            （lite 包没有 scapy 时，被动监听只能依赖 tshark）。
+    """
+    try:
+        if passive is None:
+            return False
+        return bool(passive.engine_status().get("scapy"))
+    except Exception:  # noqa: BLE001  scapy 探测失败只让 passive 降级，不拖垮自检
+        return False
+
+
+def capabilities(checks: list[dict] | None = None) -> dict:
+    """把五项环境检查折算成「哪些功能现在可用」的能力矩阵（界面置灰的唯一依据）。
+
+    纯函数：只读传入的检查结果；``checks`` 为空时现场跑五项检查。``admin`` 不是
+    能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，不能置灰封死。
+
+    Args:
+        checks: 可选，五项检查结果（结构同 :func:`collect` 的 ``checks``）。测试注入
+            构造的 ✅/❌ 组合；``None`` 时跑真实的 :func:`check_python` 等五项。
+
+    Returns:
+        dict: 键 ``probe`` / ``offline`` / ``live`` / ``passive`` / ``reports`` /
+            ``settings``（bool）、``missing``（不可用模式的机器码原因，键为模式名，
+            值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy``）、
+            ``scapy``（被动监听是否有 scapy 可用）。
+
+    Example:
+        >>> capabilities([{"key": "tshark", "ok": False},
+        ...               {"key": "npcap", "ok": False}])["probe"]
+        True
+    """
+    if checks is None:
+        checks = [check_python(), check_tshark(), check_npcap(),
+                  check_port(), check_admin()]
+    by_key: dict[str, bool] = {}
+    for item in checks:
+        if isinstance(item, dict) and item.get("key"):
+            by_key[str(item["key"])] = bool(item.get("ok"))
+
+    tshark_ok = by_key.get("tshark", False)
+    npcap_ok = by_key.get("npcap", False)
+    scapy_ok = _scapy_available()
+    live_ok = tshark_ok and npcap_ok
+    passive_ok = tshark_ok or scapy_ok
+
+    missing: dict[str, str] = {}
+    if not tshark_ok:
+        # 离线分析只需要 tshark；实时抓包还额外要 Npcap，所以原因分开写。
+        missing["offline"] = "tshark"
+    if not live_ok:
+        if not tshark_ok and not npcap_ok:
+            missing["live"] = "tshark|npcap"
+        else:
+            missing["live"] = "tshark" if not tshark_ok else "npcap"
+    if not passive_ok:
+        missing["passive"] = "tshark|scapy"
+
+    return {
+        "probe": True,          # 连通与速度测试只用标准库 socket，永远可用
+        "offline": tshark_ok,   # 分析抓包文件：只要 tshark，不需要 Npcap
+        "live": live_ok,        # 实时抓包：tshark + Npcap
+        "passive": passive_ok,  # 通信观察：tshark 或内置 scapy 任一可用
+        "reports": True,
+        "settings": True,
+        "missing": missing,
+        "scapy": scapy_ok,
+    }
+
+
 def collect(root: Path | None = None) -> dict:
     """跑完五项检查并组装 ``GET /api/selfcheck`` 的响应。
 
     纯读：不写标记文件、不请求 UAC、不启动抓包子进程。``first_run`` 只读
-    ``<root>/config/ui-first-run.json`` 是否存在。
+    ``<root>/config/ui-first-run.json`` 是否存在。单项检查抛异常时只把该项标成
+    ``ok=False`` 并记录原因，绝不让整个接口 500。
 
     Args:
         root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
@@ -308,21 +395,38 @@ def collect(root: Path | None = None) -> dict:
     Returns:
         dict: 键 ``ok``（五项是否全过）/ ``version``（``VERSION`` 文件）/
             ``first_run``（标记不存在）/ ``checks``（固定 5 项，顺序为
-            :data:`CHECK_KEYS`）/ ``ui_copy``（``{"startup": {...}}`` 文案）。
+            :data:`CHECK_KEYS`）/ ``capabilities``（能力矩阵）/
+            ``ui_copy``（``{"startup": {...}}`` 文案）。
     """
-    checks = [check_python(), check_tshark(), check_npcap(),
-              check_port(), check_admin()]
+    funcs = (
+        ("python", check_python),
+        ("tshark", check_tshark),
+        ("npcap", check_npcap),
+        ("port", check_port),
+        ("admin", check_admin),
+    )
+    checks: list[dict] = []
+    for key, func in funcs:
+        try:
+            item = func()
+            if not isinstance(item, dict):
+                raise TypeError(f"检查项 {key} 没有返回 dict")
+        except Exception as exc:  # noqa: BLE001  单项失败只降级该项，整体响应照常返回
+            item = _check(key, False,
+                          _t("check_error", reason=f"{type(exc).__name__}: {exc}"))
+        checks.append(item)
     return {
         "ok": all(item.get("ok") for item in checks),
         "version": version.read_version(Path(root) if root is not None else ROOT),
         "first_run": is_first_run(root),
         "checks": checks,
+        "capabilities": capabilities(checks),
         "ui_copy": {"startup": ui_copy()},
     }
 
 
 __all__ = [
-    "CHECK_KEYS", "MARKER_REL", "collect", "marker_path", "is_first_run",
-    "ack_first_run", "ui_copy", "check_python", "check_tshark", "check_npcap",
-    "check_port", "check_admin",
+    "CHECK_KEYS", "MARKER_REL", "collect", "capabilities", "marker_path",
+    "is_first_run", "ack_first_run", "ui_copy", "check_python", "check_tshark",
+    "check_npcap", "check_port", "check_admin",
 ]

@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**33** 个（有模块说明 33 个）
-- 公开符号：**302** 个（有 docstring 302 个，合格 302 个）
+- 公开符号：**303** 个（有 docstring 303 个，合格 303 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -308,13 +308,13 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `redirect_output` | function | 36 | ✅ |
-| `msgbox` | function | 54 | ✅ |
-| `is_admin` | function | 71 | ✅ |
-| `relaunch_as_admin` | function | 83 | ✅ |
-| `find_running` | function | 106 | ✅ |
-| `first_free_port` | function | 132 | ✅ |
-| `main` | function | 159 | ✅ |
+| `redirect_output` | function | 39 | ✅ |
+| `msgbox` | function | 57 | ✅ |
+| `is_admin` | function | 74 | ✅ |
+| `relaunch_as_admin` | function | 86 | ✅ |
+| `find_running` | function | 109 | ✅ |
+| `first_free_port` | function | 135 | ✅ |
+| `main` | function | 162 | ✅ |
 
 ### `redirect_output`
 
@@ -428,8 +428,8 @@ def main() -> int
 启动路径**不请求提权**；`--elevated` 只用于 /api/elevate 拉起的新进程。
 
 Returns:
-    int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」）；
-        1 = 初始化失败 / 找不到 tshark / 端口全被占用。
+    int: 进程退出码。0 = 正常（含「已有实例，直接把浏览器叫起来」、缺可选组件但
+        服务已启动）；1 = 初始化失败 / 端口全被占用（物理上无法起本地服务）。
 ```
 
 ## `core/bootstrap.py`
@@ -4934,16 +4934,17 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `ui_copy` | function | 72 | ✅ |
-| `marker_path` | function | 85 | ✅ |
-| `is_first_run` | function | 98 | ✅ |
-| `ack_first_run` | function | 113 | ✅ |
-| `check_python` | function | 187 | ✅ |
-| `check_tshark` | function | 206 | ✅ |
-| `check_npcap` | function | 245 | ✅ |
-| `check_port` | function | 258 | ✅ |
-| `check_admin` | function | 286 | ✅ |
-| `collect` | function | 299 | ✅ |
+| `ui_copy` | function | 80 | ✅ |
+| `marker_path` | function | 93 | ✅ |
+| `is_first_run` | function | 106 | ✅ |
+| `ack_first_run` | function | 121 | ✅ |
+| `check_python` | function | 199 | ✅ |
+| `check_tshark` | function | 218 | ✅ |
+| `check_npcap` | function | 257 | ✅ |
+| `check_port` | function | 270 | ✅ |
+| `check_admin` | function | 298 | ✅ |
+| `capabilities` | function | 326 | ✅ |
+| `collect` | function | 385 | ✅ |
 
 ### `ui_copy`
 
@@ -5089,6 +5090,34 @@ Returns:
         但离线分析与连通与速度测试不受影响。
 ```
 
+### `capabilities`
+
+```python
+def capabilities(checks: list[dict] | None=None) -> dict
+```
+
+```text
+把五项环境检查折算成「哪些功能现在可用」的能力矩阵（界面置灰的唯一依据）。
+
+纯函数：只读传入的检查结果；``checks`` 为空时现场跑五项检查。``admin`` 不是
+能力硬门槛 —— 非管理员仍可点「以管理员身份重启」按需提权，不能置灰封死。
+
+Args:
+    checks: 可选，五项检查结果（结构同 :func:`collect` 的 ``checks``）。测试注入
+        构造的 ✅/❌ 组合；``None`` 时跑真实的 :func:`check_python` 等五项。
+
+Returns:
+    dict: 键 ``probe`` / ``offline`` / ``live`` / ``passive`` / ``reports`` /
+        ``settings``（bool）、``missing``（不可用模式的机器码原因，键为模式名，
+        值为 ``tshark`` / ``npcap`` / ``tshark|npcap`` / ``tshark|scapy``）、
+        ``scapy``（被动监听是否有 scapy 可用）。
+
+Example:
+    >>> capabilities([{"key": "tshark", "ok": False},
+    ...               {"key": "npcap", "ok": False}])["probe"]
+    True
+```
+
 ### `collect`
 
 ```python
@@ -5099,7 +5128,8 @@ def collect(root: Path | None=None) -> dict
 跑完五项检查并组装 ``GET /api/selfcheck`` 的响应。
 
 纯读：不写标记文件、不请求 UAC、不启动抓包子进程。``first_run`` 只读
-``<root>/config/ui-first-run.json`` 是否存在。
+``<root>/config/ui-first-run.json`` 是否存在。单项检查抛异常时只把该项标成
+``ok=False`` 并记录原因，绝不让整个接口 500。
 
 Args:
     root: 仓库根目录（测试注入临时目录用）；``None`` 用运行时仓库根。
@@ -5107,7 +5137,8 @@ Args:
 Returns:
     dict: 键 ``ok``（五项是否全过）/ ``version``（``VERSION`` 文件）/
         ``first_run``（标记不存在）/ ``checks``（固定 5 项，顺序为
-        :data:`CHECK_KEYS`）/ ``ui_copy``（``{"startup": {...}}`` 文案）。
+        :data:`CHECK_KEYS`）/ ``capabilities``（能力矩阵）/
+        ``ui_copy``（``{"startup": {...}}`` 文案）。
 ```
 
 ## `core/server.py`
@@ -5136,9 +5167,9 @@ Returns:
 | `Handler.log_message` | method | 1143 | ✅ |
 | `Handler.do_GET` | method | 1281 | ✅ |
 | `Handler.do_POST` | method | 1298 | ✅ |
-| `DiagServer` | class | 1544 | ✅ |
-| `create_server` | function | 1556 | ✅ |
-| `main` | function | 1603 | ✅ |
+| `DiagServer` | class | 1547 | ✅ |
+| `create_server` | function | 1559 | ✅ |
+| `main` | function | 1606 | ✅ |
 
 ### `touch`
 

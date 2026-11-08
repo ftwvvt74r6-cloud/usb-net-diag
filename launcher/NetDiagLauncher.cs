@@ -339,13 +339,12 @@ namespace NetDiag
         // ------------------------------------------------------------ 小工具
         private static string NoPythonMessage()
         {
-            return "未找到可用的 Python 运行时（需要 Python 3.11+）。\n\n已尝试：\n"
-                   + "  1) " + Path.Combine(_root, "tools", "python", "pythonw.exe") + "\n"
-                   + "  2) " + Path.Combine(_root, "tools", "python", "python.exe") + "\n"
-                   + "  3) PATH 中的 python.exe\n  4) py -3（Python Launcher）\n\n"
-                   + "请安装 Python 3.11 或更高版本（安装时勾选 Add python.exe to PATH）：\n"
+            return "这台电脑还没有可用的 Python 3.11+，NetDiag 无法启动本地界面。\n\n"
+                   + "请安装 Python 3.11 或更高版本（安装时勾选 Add python.exe to PATH），"
+                   + "然后重新双击 NetDiag.exe：\n"
                    + "https://www.python.org/downloads/windows/\n\n"
-                   + "或使用带 tools\\python 的完整离线包。";
+                   + "如果用的是内部完整包，请确认包内 tools\\python 目录存在；"
+                   + "更多排查见 docs/startup.md。";
         }
 
         private static void WriteDryRunReport(string path, PythonCandidate python, string error)

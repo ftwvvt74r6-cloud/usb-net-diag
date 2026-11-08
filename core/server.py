@@ -1337,6 +1337,9 @@ class Handler(BaseHTTPRequestHandler):
                                # 前端不另存一份中文（文案唯一来源仍是 copy/zh-CN.json）。
                                "first_run": selfcheck.is_first_run(),
                                "ui_copy": {"startup": selfcheck.ui_copy()},
+                               # 加法字段：首屏不用等 /api/selfcheck 就能先按能力置灰；
+                               # 旧前端不读也不受影响。
+                               "capabilities": selfcheck.capabilities(),
                                "auto_open_browser": bool(cfg.get("auto_open_browser", True))})
         if path in ("/", "/index.html"):
             f = UI_DIR / "index.html"

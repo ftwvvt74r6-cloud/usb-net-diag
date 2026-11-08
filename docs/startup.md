@@ -209,6 +209,53 @@ Python / tshark / Npcap / 管理员权限时用它。它不再是唯一入口，
 
 ---
 
+### 5.5 缺组件时的行为与修复（v0.3.2）
+
+**缺组件不再阻塞启动。** 启动期只做两件「物理上无法继续」的例外：没有 Python
+解释器（启动器层）和 8787~8796 全被占用（无法起本地服务）。除此之外，tshark /
+Npcap / 端口 / 管理员权限的缺失都只降低能力：程序照常进入主界面，首屏自检如实显示
+❌，主界面按能力置灰不可用模式并给出修复指引；补齐后点「重新检测」**不需要重启**。
+
+`GET /api/selfcheck` 与 `GET /api/app` 都会下发 `capabilities`（后端唯一出处）：
+
+| 能力 | 判定 | 缺了时 |
+|---|---|---|
+| `probe`（连通与速度测试） | 恒为 true | 永远可用，不依赖 tshark/Npcap |
+| `offline`（分析抓包文件） | 找到 tshark | 置灰，原因 `tshark` |
+| `live`（实时抓包） | tshark 且 Npcap | 置灰，原因 `tshark` / `npcap` / `tshark|npcap` |
+| `passive`（通信观察） | tshark 或内置 scapy | 置灰，原因 `tshark|scapy` |
+| `reports` / `settings` | 恒为 true | 永远可用 |
+
+非管理员**不**是能力硬门槛：抓包类功能仍按 C2 的「按需提权」权限卡处理，不置灰封死。
+
+#### tshark / Wireshark
+
+- 推荐：安装 Wireshark（安装包自带 `tshark.exe`），装完点「重新检测」；
+- 已有 tshark（便携版或自定义目录）时，设置环境变量 `TSHARK_PATH` 指向
+  `tshark.exe` 的完整路径，重启程序后生效；
+- lite 公开包**不含** Wireshark / tshark，也不会自动下载（合规策略不变）。
+
+#### Npcap
+
+- 实时抓包与通信观察需要 Npcap 抓包驱动；装 Wireshark 时勾选 Npcap 即可，
+  也可单独安装 Npcap；
+- 分析已有抓包文件**不需要** Npcap；
+- 装完点「重新检测」，不需要重启。
+
+#### Python（唯一无法进入界面的缺件）
+
+lite 公开包不带 `tools\python`，需要系统 **Python 3.11+**（安装时勾选
+`Add python.exe to PATH`）。没有可用 Python 时启动器会给出友好提示并退出（退出码 2）；
+`--dry-run --report` 会写结构化 `ok:false` / `error`，不弹框。这是物理例外，不是本批
+「缺可选组件」的阻塞。
+
+#### 端口 8787~8796 全被占用（物理例外）
+
+本地服务起不来，界面无法打开；弹窗会提示关掉占用端口的程序或重启电脑后重试。
+此时不是缺 tshark，也不会误报。
+
+---
+
 ## 6. `start.bat`（Python 回退入口）
 
 - 顶部会提示「推荐双击 `NetDiag.exe`；`start.bat` 为 Python 回退入口」；
