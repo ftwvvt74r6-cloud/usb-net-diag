@@ -10,6 +10,7 @@ API:
   POST /api/elevate         非管理员一键请求 UAC 提权重启
   POST /api/upload?name=x   上传 pcap 后分析抓包文件
   GET  /api/report?path=    读取报告文件
+  GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
   GET  /api/ai              AI 模型配置（Key 已脱敏）
   POST /api/ai              保存 AI 配置（局部更新，即时生效）
@@ -54,6 +55,7 @@ import bootstrap  # noqa: E402
 import copytext  # noqa: E402
 import diagnose  # noqa: E402
 import diagpack  # noqa: E402
+import evidence  # noqa: E402
 import logstore  # noqa: E402
 import passive  # noqa: E402
 import pathprobe  # noqa: E402
@@ -440,16 +442,63 @@ def _path_ui_copy() -> dict:
         return {}
 
 
-def _attach_probe_ui_copy(result: dict | None) -> dict | None:
-    """给带探针基线 / 路径剖面的结果补一份 ``ui_copy``（不原地改 JOB 里的结果）。
+def _evidence_ui_copy() -> dict:
+    """取证请求单结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的 ``evidence``）。
 
-    Args:
-        result: ``JOB["result"]``；两个区块都没有时原样返回。
+    清单正文来自 ``core/copy/evidence_checklist.json``（后端算好随结果下发），
+    页面只负责排版与按钮，不另存一份中文标签。
 
     Returns:
-        dict | None: 有 ``meta.probe_baseline`` 和/或 ``meta.path_profile`` 时返回
-            浅拷贝 + ``ui_copy``（键 ``probe`` / ``path``）；否则返回原对象
-            （离线路径零改动）。
+        dict: ``evidence`` section 的字符串映射；读取失败时返回 ``{}``。
+    """
+    try:
+        return copytext.section(copytext.load_table(), "evidence_checklist")
+    except Exception:                              # noqa: BLE001  文案缺失不拖垮状态接口
+        return {}
+
+
+def evidence_payload(result: dict | None, full: bool = False, fmt: str = "md") -> dict:
+    """生成 ``/api/evidence`` 的响应体（纯计算，不写文件、不联网）。
+
+    Args:
+        result: 最近一次诊断结果（``JOB["result"]``）；``None`` 表示还没有结果。
+        full: ``True`` 输出覆盖 7 维的通用空白版；``False`` 按本次结论取相关维度。
+        fmt: ``"md"``（报告内区块同款 Markdown）或 ``"txt"``（纯文本，供复制）。
+            其它值由路由层拒绝；这里按 ``md`` 兜底。
+
+    Returns:
+        dict: 成功 ``{"ok": True, "fmt", "full", "dimensions": [维度机器码],
+        "content": str}``；没有结果 / 本次不需要取证时 ``{"ok": False, "error": "..."}``
+        （错误可直接展示给用户）。
+    """
+    if not isinstance(result, dict) or not result:
+        return {"ok": False, "error": "还没有可用的诊断结果，请先完成一次诊断"}
+    checklist = evidence.build_checklist(result, full=full)
+    dims = [dim.get("key", "") for dim in checklist.get("dimensions") or []]
+    content = (evidence.render_checklist_text(checklist) if fmt == "txt"
+               else evidence.render_checklist_markdown(checklist))
+    if not content:
+        return {"ok": False,
+                "error": "本次结论不需要外部取证（可用 full=1 获取通用空白版）"}
+    return {"ok": True, "fmt": "txt" if fmt == "txt" else "md",
+            "full": bool(full), "dimensions": dims, "content": content}
+
+
+
+def _attach_probe_ui_copy(result: dict | None) -> dict | None:
+    """给带探针基线 / 路径剖面 / 取证清单的结果补界面文案（不原地改 JOB 里的结果）。
+
+    取证清单（``evidence_checklist``）是**只进状态响应**的加法字段：它由
+    最近一次结果现算，不写进报告 JSON，所以 20 产物快照不受影响。
+
+    Args:
+        result: ``JOB["result"]``；三个区块都没有时原样返回。
+
+    Returns:
+        dict | None: 有 ``meta.probe_baseline`` / ``meta.path_profile`` 或本次
+            需要外部取证时返回浅拷贝 + ``ui_copy``（键 ``probe`` / ``path`` /
+            ``evidence``），需要取证时另加 ``evidence_checklist``；否则返回原对象
+            （离线路径 / 正常结果零改动）。
     """
     if not isinstance(result, dict):
         return result
@@ -459,11 +508,17 @@ def _attach_probe_ui_copy(result: dict | None) -> dict | None:
         payload["probe"] = _probe_ui_copy()
     if isinstance(meta.get("path_profile"), dict):
         payload["path"] = _path_ui_copy()
+    checklist = evidence.build_checklist(result)
+    if checklist.get("dimensions"):
+        payload["evidence"] = _evidence_ui_copy()
     if not payload:
         return result
     enriched = dict(result)
+    if checklist.get("dimensions"):
+        enriched["evidence_checklist"] = checklist
     enriched["ui_copy"] = payload
     return enriched
+
 
 
 def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None,
@@ -1152,6 +1207,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"report not found", "text/plain; charset=utf-8")
             ctype = "text/markdown; charset=utf-8" if target.suffix == ".md" else "application/json; charset=utf-8"
             return self._send(200, target.read_bytes(), ctype)
+        if path == "/api/evidence":
+            # 纯计算：只读最近一次诊断结果，不写文件、不联网。
+            q = urllib.parse.parse_qs(parsed.query)
+            full = _to_bool((q.get("full") or [None])[0], False)
+            fmt = ((q.get("fmt") or ["md"])[0] or "md").strip().lower()
+            if fmt not in ("md", "txt"):
+                return self._json({"ok": False, "error": "fmt 只支持 md / txt"})
+            with LOCK:
+                latest = JOB.get("result")
+            return self._json(evidence_payload(latest, full=full, fmt=fmt))
         if path == "/api/doctor":
             return self._json(doctor_cached())
         if path == "/api/passive":

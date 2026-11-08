@@ -2348,6 +2348,90 @@ function renderPathProfile(pp, copy) {
     + (copy.ui_hint ? '<div class="hint">' + esc(copy.ui_hint) + '</div>' : "");
 }
 
+/* ---------- 取证请求单区块 ----------
+   结论驱动：后端把 core/copy/evidence_checklist.json 里与本次结论相关的维度
+   算好随结果下发（res.evidence_checklist），标签随 res.ui_copy.evidence 下发；
+   页面只做排版。复制/导出走 GET /api/evidence（纯计算，不写文件）。 */
+function renderEvidenceChecklist(ev, copy, pcapName) {
+  if (!ev || !(ev.dimensions || []).length || !copy) return "";
+  const blocks = (ev.dimensions || []).map((dim, i) => {
+    const rows = (dim.items || []).map((it) =>
+      '<tr><td><b>' + esc(it.field) + '</b></td><td>' + esc(it.why) + '</td>'
+      + '<td>' + esc(it.where) + '</td><td>' + esc(it.criteria) + '</td></tr>').join("");
+    const table = rows
+      ? '<div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table>'
+        + '<thead><tr><th>' + esc(copy.th_field || "") + '</th><th>' + esc(copy.th_why || "") + '</th>'
+        + '<th>' + esc(copy.th_where || "") + '</th><th>' + esc(copy.th_criteria || "") + '</th></tr></thead>'
+        + '<tbody>' + rows + '</tbody></table></div>'
+      : "";
+    return '<div style="margin-top:12px"><h5>' + (i + 1) + '. ' + esc(dim.name || "") + '</h5>'
+      + (dim.note ? '<div class="hint" style="font-size:12px;color:var(--text-2)">'
+          + esc(dim.note) + '</div>' : "")
+      + table + '</div>';
+  }).join("");
+  const fullTag = ev.full ? ' <span class="tag">' + esc(copy.btn_copy_full || "") + '</span>' : "";
+  return '<div class="sectitle">' + esc(copy.ui_title || "") + fullTag + '</div>'
+    + '<div class="hint" style="margin-bottom:8px">' + esc(copy.ui_hint || "") + '</div>'
+    + blocks
+    + '<div class="toolbar" style="margin-top:10px">'
+    + '<button class="btn ghost" data-evidence="copy">' + esc(copy.btn_copy || "") + '</button>'
+    + '<button class="btn ghost" data-evidence="copy-full">' + esc(copy.btn_copy_full || "") + '</button>'
+    + '<button class="btn ghost" data-evidence="download">' + esc(copy.btn_download || "") + '</button>'
+    + '</div>';
+}
+
+/* 复制纯文本：优先 Clipboard API，失败时退回隐藏 textarea（老内核/无权限）。 */
+async function copyPlainText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e2) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+}
+
+/* 「复制本次 / 复制通用空白版 / 导出 .md」统一入口：服务端现算，页面不缓存正文。 */
+async function evidenceAction(kind, pcapName, button) {
+  const full = kind === "copy-full" ? 1 : 0;
+  const fmt = kind === "download" ? "md" : "txt";
+  const copy = (LAST_RESULT && LAST_RESULT.ui_copy && LAST_RESULT.ui_copy.evidence) || {};
+  try {
+    const r = await fetch("/api/evidence?full=" + full + "&fmt=" + fmt).then((x) => x.json());
+    if (!r.ok) {
+      appendLog((copy.error_prefix || "") + (r.error || ""), "e");
+      return;
+    }
+    if (kind === "download") {
+      const blob = new Blob([r.content], { type: "text/markdown;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = (pcapName || "report").replace(/\.[^.]+$/, "") + "-evidence.md";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      return;
+    }
+    const ok = await copyPlainText(r.content);
+    if (ok && button) {
+      const original = button.textContent;
+      button.textContent = copy.copy_ok || original;
+      setTimeout(() => (button.textContent = original), 1500);
+    } else if (!ok) {
+      appendLog(copy.copy_fail || "", "e");
+    }
+  } catch (e) {
+    appendLog((copy.error_prefix || "") + e, "e");
+  }
+}
+
 function render(res, actions) {
   if (!res || !res.ok) return;
   hideQuestion();
@@ -2490,6 +2574,9 @@ function render(res, actions) {
   /* 路径剖面：只有实时抓包 + 有目标 + MTR 真拿到逐跳数据时后端才下发。 */
   const pathBlock = renderPathProfile(
     m.path_profile, (res.ui_copy || {}).path || null);
+  /* 取证请求单：后端按本次结论算好相关维度后才下发；正常且无需取证时为空。 */
+  const evidenceBlock = renderEvidenceChecklist(
+    res.evidence_checklist, (res.ui_copy || {}).evidence || null, m.pcap_name || "");
 
   const html = `
     <div class="vcard ${esc(lv)}" data-card="${isNormal ? "normal" : "fault"}">
@@ -2513,6 +2600,7 @@ function render(res, actions) {
     ${points ? '<div class="sectitle">问题详解</div>' + points : ""}
     ${steps}
     ${linkActionsHtml(actions)}
+    ${evidenceBlock}
 
     <div class="sectitle">会话明细（按问题严重度排序）</div>
     ${streamTable}
@@ -2552,6 +2640,9 @@ function render(res, actions) {
     URL.revokeObjectURL(a.href);
   };
   $("#ai-explain").onclick = runAI;
+  document.querySelectorAll("[data-evidence]").forEach((btn) => {
+    btn.onclick = () => evidenceAction(btn.dataset.evidence, m.pcap_name || "", btn);
+  });
   wireLinkActions(actions);
   scrollMainTop();
 }

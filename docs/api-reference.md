@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**30** 个（有模块说明 30 个）
-- 公开符号：**274** 个（有 docstring 274 个，合格 274 个）
+- 扫描模块：**31** 个（有模块说明 31 个）
+- 公开符号：**281** 个（有 docstring 281 个，合格 281 个）
 - 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -1901,6 +1901,157 @@ def to_dict(self) -> dict
 Returns:
     dict: 键 ``code``（``ErrorCode.value``）/ ``message`` / ``hint``；
         构造时带了附加参数的话再加 ``detail``。
+```
+
+## `core/evidence.py`
+
+**职责**：通用「取证请求单」：把本次诊断结论翻译成一张可直接转发的取证清单。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `validate_template` | function | 64 | ✅ |
+| `load_template` | function | 117 | ✅ |
+| `dimensions_for` | function | 277 | ✅ |
+| `build_checklist` | function | 350 | ✅ |
+| `render_checklist_markdown` | function | 408 | ✅ |
+| `render_checklist_text` | function | 446 | ✅ |
+
+### `validate_template`
+
+```python
+def validate_template(template: dict) -> list[str]
+```
+
+```text
+校验清单模板结构，返回问题列表（空列表 = 合法）。
+
+只校验**结构**，不校验措辞；厂商名由测试用 ``-F`` 扫描，避免把「一家厂商
+改个名」这种文案变化误判成结构错误。
+
+Args:
+    template: 从 ``core/copy/evidence_checklist.json`` 读出的对象。
+
+Returns:
+    list[str]: 人类可读的问题列表；模板合法时为空列表。检查项：
+        7 个维度键齐全且无多余键、每维 ``name``/``note`` 为非空字符串、
+        ``items`` 为列表、每项恰好含 :data:`ITEM_FIELDS` 四键且值为非空字符串。
+```
+
+### `load_template`
+
+```python
+def load_template(path: Path | str | None=None) -> dict
+```
+
+```text
+读取并校验清单模板（显式 loader，便于测试注入与变异）。
+
+Args:
+    path: 模板文件路径；省略时读仓库内的
+        ``core/copy/evidence_checklist.json``。
+
+Returns:
+    dict: 已通过 :func:`validate_template` 的模板对象。
+
+Raises:
+    OSError: 文件不存在或不可读。
+    json.JSONDecodeError: 文件不是合法 JSON。
+    ValueError: JSON 合法但结构不符（缺维度、缺字段等），消息含前几条问题。
+```
+
+### `dimensions_for`
+
+```python
+def dimensions_for(result: dict, verdict: dict | None=None) -> list[str]
+```
+
+```text
+把「本次结论」映射成相关维度集合（纯函数、可测试、可变异）。
+
+规则（按顺序短路，命中即返回）：
+
+1. 判定为「证据不足」或 ``verdict.sufficiency.ok is False`` 或存在
+   ``category == "采集有效性"`` 的条目 → 返回**全部 7 维**（通用空白版）。
+2. 判定为「正常」且没有任何 ``points`` → 返回空列表（报告不出现区块）。
+3. 其余情况按问题条目逐条映射，并**始终包含** ``terminal``（工具自己已采，
+   列出来是为了声明「这一侧不需要再要」）：
+
+   - ``L2`` / ``本地可达性``（ARP、本地链路）→ ``wireless`` + ``wired``；
+   - ``L3`` / ``网络可达性`` / ``网络时延``（含 ICMP 不可达）→ ``transport``；
+   - ``L4`` / ``连接建立`` / ``传输质量``（重传、建连失败、零窗口）→ ``transport``；
+   - ``L7`` / ``域名解析`` → ``naming``；``TLS 会话`` → ``crypto_proxy`` + ``service``；
+     ``应用响应`` 或其它 L7 类别 → ``service``；
+   - ``verdict.probe_contrast`` 指向对端（``TARGET_SIDE``）→ 追加 ``service``；
+     指向本地（``LOCAL_SIDE``）→ 追加 ``wired``；
+   - 安全观察行不参与映射；类别无法识别但有故障 → 兜底 ``transport``。
+
+返回顺序固定为 :data:`DIMENSION_KEYS` 的顺序，便于逐字节断言。
+
+Args:
+    result: 诊断结果字典（读 ``verdict`` 与 ``rows``；缺 ``verdict`` 时现算）。
+    verdict: 可选的已算好判定（报告渲染路径传入，避免重复计算）。
+
+Returns:
+    list[str]: 维度机器码列表；空列表表示本次不需要外部取证。
+```
+
+### `build_checklist`
+
+```python
+def build_checklist(result: dict, full: bool=False, verdict: dict | None=None, template: dict | None=None) -> dict
+```
+
+```text
+按本次结论生成清单；``full=True`` 生成覆盖 7 维的通用空白版。
+
+Args:
+    result: 诊断结果字典（``verdict`` / ``rows`` 决定相关维度）。
+    full: 为 ``True`` 时忽略结论、输出全部 7 维（界面「复制通用空白版」用）。
+    verdict: 可选的已算好判定；报告渲染传入同一个判定，避免重复计算。
+    template: 可选的模板对象（测试注入/变异用）；省略时用导入期加载的模板。
+
+Returns:
+    dict: ``{"full": bool, "level": str, "layer": str, "dimensions": [...]}``；
+        ``dimensions`` 每项 ``{"key", "name", "note", "items"}``，``items``
+        每项恰好 ``field/why/where/criteria`` 四键。模板不可用时返回空
+        ``dimensions``（调用方据此不渲染区块）。
+```
+
+### `render_checklist_markdown`
+
+```python
+def render_checklist_markdown(checklist: dict) -> str
+```
+
+```text
+把清单渲染成报告内 Markdown 区块（维度小标题 + 四列表格）。
+
+维度与条目文字来自模板 JSON，标题/表头等标签来自 ``copy.evidence_checklist``；
+没有维度时返回空串（调用方据此不追加区块）。
+
+Args:
+    checklist: :func:`build_checklist` 的返回值。
+
+Returns:
+    str: 以 ``copy.evidence_checklist.section_title`` 开头、以换行结尾的 Markdown；
+        无维度时返回 ``""``。
+```
+
+### `render_checklist_text`
+
+```python
+def render_checklist_text(checklist: dict) -> str
+```
+
+```text
+把清单渲染成纯文本（方便直接发微信/工单，不含 Markdown 表格符号）。
+
+Args:
+    checklist: :func:`build_checklist` 的返回值。
+
+Returns:
+    str: 纯文本清单；无维度时返回 ``""``。正文不含 ``|`` 与 ``#`` 标题符号，
+        每项四字段各占一行并缩进。
 ```
 
 ## `core/extract/__init__.py`
@@ -4140,10 +4291,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 342 | ✅ |
-| `save` | function | 600 | ✅ |
-| `render_degraded` | function | 649 | ✅ |
-| `save_degraded` | function | 715 | ✅ |
+| `render_markdown` | function | 343 | ✅ |
+| `save` | function | 609 | ✅ |
+| `render_degraded` | function | 658 | ✅ |
+| `save_degraded` | function | 724 | ✅ |
 
 ### `render_markdown`
 
@@ -4509,26 +4660,27 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 125 | ✅ |
-| `request_quit` | function | 130 | ✅ |
-| `cleanup_pid` | function | 178 | ✅ |
-| `BodyTooLarge` | class | 188 | ✅ |
-| `doctor_cached` | function | 267 | ✅ |
-| `log` | function | 363 | ✅ |
-| `start_job` | function | 547 | ✅ |
-| `report_index` | function | 608 | ✅ |
-| `request_elevation` | function | 642 | ✅ |
-| `engine_info` | function | 675 | ✅ |
-| `passive_start` | function | 718 | ✅ |
-| `passive_status` | function | 753 | ✅ |
-| `link_actions` | function | 827 | ✅ |
-| `Handler` | class | 874 | ✅ |
-| `Handler.log_message` | method | 920 | ✅ |
-| `Handler.do_GET` | method | 1058 | ✅ |
-| `Handler.do_POST` | method | 1075 | ✅ |
-| `DiagServer` | class | 1293 | ✅ |
-| `create_server` | function | 1305 | ✅ |
-| `main` | function | 1352 | ✅ |
+| `touch` | function | 127 | ✅ |
+| `request_quit` | function | 132 | ✅ |
+| `cleanup_pid` | function | 180 | ✅ |
+| `BodyTooLarge` | class | 190 | ✅ |
+| `doctor_cached` | function | 269 | ✅ |
+| `log` | function | 365 | ✅ |
+| `evidence_payload` | function | 460 | ✅ |
+| `start_job` | function | 602 | ✅ |
+| `report_index` | function | 663 | ✅ |
+| `request_elevation` | function | 697 | ✅ |
+| `engine_info` | function | 730 | ✅ |
+| `passive_start` | function | 773 | ✅ |
+| `passive_status` | function | 808 | ✅ |
+| `link_actions` | function | 882 | ✅ |
+| `Handler` | class | 929 | ✅ |
+| `Handler.log_message` | method | 975 | ✅ |
+| `Handler.do_GET` | method | 1113 | ✅ |
+| `Handler.do_POST` | method | 1130 | ✅ |
+| `DiagServer` | class | 1358 | ✅ |
+| `create_server` | function | 1370 | ✅ |
+| `main` | function | 1417 | ✅ |
 
 ### `touch`
 
@@ -4614,6 +4766,27 @@ Returns:
     None: 内存里最多保留 400 条（超出丢最早的 100 条），界面靠轮询取增量；
         磁盘那份委托给 :func:`logstore.diag_log`（``logs/diag-YYYYMMDD.log``），
         供事后排障。
+```
+
+### `evidence_payload`
+
+```python
+def evidence_payload(result: dict | None, full: bool=False, fmt: str='md') -> dict
+```
+
+```text
+生成 ``/api/evidence`` 的响应体（纯计算，不写文件、不联网）。
+
+Args:
+    result: 最近一次诊断结果（``JOB["result"]``）；``None`` 表示还没有结果。
+    full: ``True`` 输出覆盖 7 维的通用空白版；``False`` 按本次结论取相关维度。
+    fmt: ``"md"``（报告内区块同款 Markdown）或 ``"txt"``（纯文本，供复制）。
+        其它值由路由层拒绝；这里按 ``md`` 兜底。
+
+Returns:
+    dict: 成功 ``{"ok": True, "fmt", "full", "dimensions": [维度机器码],
+    "content": str}``；没有结果 / 本次不需要取证时 ``{"ok": False, "error": "..."}``
+    （错误可直接展示给用户）。
 ```
 
 ### `start_job`

@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import verdict as verdict_mod
+import evidence as evidence_mod
 
 try:                                    # 扁平导入：core/ 在 sys.path 上（runtime / 测试）
     from copytext import text as _copy_text
@@ -587,6 +588,14 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
           _t("summary_line", critical=summary.get("critical_count", 0),
              warning=summary.get("warning_count", 0)),
           "", "```json", json.dumps(summary, ensure_ascii=False, indent=2), "```", ""]
+    # ---------------- 九、取证请求单（结论驱动） ----------------
+    # 只有「有相关维度」时才追加；「正常且没有问题」不输出（UI 仍提供通用空白版）。
+    # 这是本批唯一会改变离线报告的区块（用户已定稿的声明例外）：它**追加在全文末尾**，
+    # 因此旧内容逐字节不变——去掉「空行 + 区块」即与 main 的报告逐字节相等。
+    checklist = evidence_mod.build_checklist(result, verdict=vd)
+    evidence_block = evidence_mod.render_checklist_markdown(checklist)
+    if evidence_block:
+        L += ["", evidence_block.rstrip("\n")]
     return "\n".join(L)
 
 
