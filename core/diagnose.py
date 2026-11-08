@@ -727,7 +727,7 @@ def capture_live(target: str = "", duration: int = 30, interface: str | None = N
             error += f"（各网卡结果：{'；'.join(failures)}）"
         # 复审阻塞 1：全失败也要交代「最终用的是哪块卡、哪个过滤器」，否则
         # server 的降级卡与 degraded_* 报告只能填「自动选择 / 无（全网）」，
-        # 把实际用过的 `host 8.8.8.8` 误报成没过滤。
+        # 把实际用过的公网过滤器误报成没过滤。
         last = plan[-1] if plan else iface
         return {"ok": False, "degraded": True, "empty": True,
                 "interface": tshark.short_name(last["name"]),
