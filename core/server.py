@@ -62,6 +62,7 @@ import pathprobe  # noqa: E402
 import probe  # noqa: E402
 import report  # noqa: E402
 import tshark  # noqa: E402
+import verdict  # noqa: E402
 import version  # noqa: E402
 
 UI_DIR = ROOT / "ui"
@@ -443,13 +444,14 @@ def _path_ui_copy() -> dict:
 
 
 def _evidence_ui_copy() -> dict:
-    """取证请求单结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的 ``evidence``）。
+    """取证请求单结果块的界面文案（唯一来源：``core/copy/zh-CN.json`` 的
+    ``evidence_checklist``）。
 
     清单正文来自 ``core/copy/evidence_checklist.json``（后端算好随结果下发），
     页面只负责排版与按钮，不另存一份中文标签。
 
     Returns:
-        dict: ``evidence`` section 的字符串映射；读取失败时返回 ``{}``。
+        dict: ``evidence_checklist`` section 的字符串映射；读取失败时返回 ``{}``。
     """
     try:
         return copytext.section(copytext.load_table(), "evidence_checklist")
@@ -460,6 +462,14 @@ def _evidence_ui_copy() -> dict:
 def evidence_payload(result: dict | None, full: bool = False, fmt: str = "md") -> dict:
     """生成 ``/api/evidence`` 的响应体（纯计算，不写文件、不联网）。
 
+    ``full=True`` 是**通用空白版**：不依赖 ``JOB["result"]``，还没有诊断结果时
+    也返回全 7 维（``result=None`` 等价于空结果）。``full=False`` 才要求最近一次
+    诊断结果，并按结论挑相关维度。
+
+    为避免 ``dimensions_for`` 在缺 ``verdict`` 时回退去 ``verdict.build``（会读
+    copy 表），这里先把判定算好再显式传给 ``build_checklist``；已有
+    ``result["verdict"]`` 时直接复用，不重复计算。
+
     Args:
         result: 最近一次诊断结果（``JOB["result"]``）；``None`` 表示还没有结果。
         full: ``True`` 输出覆盖 7 维的通用空白版；``False`` 按本次结论取相关维度。
@@ -468,12 +478,24 @@ def evidence_payload(result: dict | None, full: bool = False, fmt: str = "md") -
 
     Returns:
         dict: 成功 ``{"ok": True, "fmt", "full", "dimensions": [维度机器码],
-        "content": str}``；没有结果 / 本次不需要取证时 ``{"ok": False, "error": "..."}``
-        （错误可直接展示给用户）。
+        "content": str}``；``full=False`` 且没有结果 / 本次不需要取证时
+        ``{"ok": False, "error": "..."}``（错误可直接展示给用户）。
     """
-    if not isinstance(result, dict) or not result:
+    has_result = isinstance(result, dict) and bool(result)
+    if not has_result and not full:
         return {"ok": False, "error": "还没有可用的诊断结果，请先完成一次诊断"}
-    checklist = evidence.build_checklist(result, full=full)
+    payload_result = result if has_result else {}
+    if full:
+        # 通用空白版不需要结论；只借用已有的判定做展示，不重新计算。
+        stored = payload_result.get("verdict")
+        verdict_obj = stored if isinstance(stored, dict) else {}
+        checklist = evidence.build_checklist(payload_result, full=True,
+                                             verdict=verdict_obj)
+    else:
+        stored = payload_result.get("verdict")
+        verdict_obj = stored if isinstance(stored, dict) else verdict.build(payload_result)
+        checklist = evidence.build_checklist(payload_result, full=False,
+                                             verdict=verdict_obj)
     dims = [dim.get("key", "") for dim in checklist.get("dimensions") or []]
     content = (evidence.render_checklist_text(checklist) if fmt == "txt"
                else evidence.render_checklist_markdown(checklist))
@@ -508,7 +530,9 @@ def _attach_probe_ui_copy(result: dict | None) -> dict | None:
         payload["probe"] = _probe_ui_copy()
     if isinstance(meta.get("path_profile"), dict):
         payload["path"] = _path_ui_copy()
-    checklist = evidence.build_checklist(result)
+    stored_verdict = result.get("verdict")
+    checklist = evidence.build_checklist(
+        result, verdict=stored_verdict if isinstance(stored_verdict, dict) else None)
     if checklist.get("dimensions"):
         payload["evidence"] = _evidence_ui_copy()
     if not payload:

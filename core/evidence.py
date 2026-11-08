@@ -158,7 +158,7 @@ def _e(key: str, **args) -> str:
     """取「取证请求单」的静态标签（``copy.evidence_checklist`` section）。
 
     Args:
-        key: ``evidence`` section 内的键。
+        key: ``evidence_checklist`` section 内的键。
         **args: ``{name}`` 占位符实参。
 
     Returns:
@@ -351,10 +351,13 @@ def build_checklist(result: dict, full: bool = False, verdict: dict | None = Non
                     template: dict | None = None) -> dict:
     """按本次结论生成清单；``full=True`` 生成覆盖 7 维的通用空白版。
 
+    ``full=True`` 时**不依赖 ``result`` 与结论**：``result={}`` 也能返回完整的
+    7 维（界面「复制通用空白版」在还没有诊断结果时也必须是可达的）。
+
     Args:
         result: 诊断结果字典（``verdict`` / ``rows`` 决定相关维度）。
         full: 为 ``True`` 时忽略结论、输出全部 7 维（界面「复制通用空白版」用）。
-        verdict: 可选的已算好判定；报告渲染传入同一个判定，避免重复计算。
+        verdict: 可选的已算好判定；报告渲染/接口传入同一个判定，避免重复计算。
         template: 可选的模板对象（测试注入/变异用）；省略时用导入期加载的模板。
 
     Returns:
@@ -365,8 +368,18 @@ def build_checklist(result: dict, full: bool = False, verdict: dict | None = Non
     """
     result = result if isinstance(result, dict) else {}
     chosen_template = template if isinstance(template, dict) else _TEMPLATE
-    vd = _verdict_of(result, verdict)
-    keys = list(DIMENSION_KEYS) if full else dimensions_for(result, verdict=vd)
+    if full:
+        # 通用空白版**不依赖本次结论**：没有结果（``{}``）也能生成全 7 维，
+        # 因此不调用 verdict.build，也不经 copy 表回退。有已算好/已附带的判定时
+        # 只借用 level/layer 做展示，不重新计算。
+        vd = verdict if isinstance(verdict, dict) else None
+        if vd is None:
+            found = result.get("verdict")
+            vd = found if isinstance(found, dict) else {}
+        keys = list(DIMENSION_KEYS)
+    else:
+        vd = _verdict_of(result, verdict)
+        keys = dimensions_for(result, verdict=vd)
     return {
         "full": bool(full),
         "level": str(vd.get("level") or ""),

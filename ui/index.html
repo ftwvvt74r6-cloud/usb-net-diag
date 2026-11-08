@@ -794,6 +794,14 @@
           每次诊断都会同时写一份 Markdown（给人看）和 JSON（给工单 / 脚本用）。</p>
         <div id="reports-list"><div class="empty" style="padding:20px"><b>正在读取…</b></div></div>
       </div></div>
+      <div class="card" style="margin-top:12px"><div class="body">
+        <p class="viewintro">需要向协作部门要证据时，可随时复制或导出「通用取证请求单（全 7 维）」。
+          <b>这个入口不依赖当前是否已有诊断结果</b>，清单按证据来源方组织，不含本次抓包的真实 IP / 域名。</p>
+        <div class="toolbar">
+          <button class="btn ghost" id="evidence-fixed-copy">复制通用取证请求单（全 7 维）</button>
+          <button class="btn ghost" id="evidence-fixed-download">导出通用取证请求单（.md）</button>
+        </div>
+      </div></div>
     </div>
 
     <div id="view-sysinfo" class="hidden">
@@ -2352,7 +2360,7 @@ function renderPathProfile(pp, copy) {
    结论驱动：后端把 core/copy/evidence_checklist.json 里与本次结论相关的维度
    算好随结果下发（res.evidence_checklist），标签随 res.ui_copy.evidence 下发；
    页面只做排版。复制/导出走 GET /api/evidence（纯计算，不写文件）。 */
-function renderEvidenceChecklist(ev, copy, pcapName) {
+function renderEvidenceChecklist(ev, copy) {
   if (!ev || !(ev.dimensions || []).length || !copy) return "";
   const blocks = (ev.dimensions || []).map((dim, i) => {
     const rows = (dim.items || []).map((it) =>
@@ -2399,10 +2407,11 @@ async function copyPlainText(text) {
   }
 }
 
-/* 「复制本次 / 复制通用空白版 / 导出 .md」统一入口：服务端现算，页面不缓存正文。 */
+/* 「复制本次 / 复制通用空白版 / 导出 .md / 导出通用空白版」统一入口：
+   服务端现算，页面不缓存正文。`download-full` 是「不依赖结果」的通用空白版导出。 */
 async function evidenceAction(kind, pcapName, button) {
-  const full = kind === "copy-full" ? 1 : 0;
-  const fmt = kind === "download" ? "md" : "txt";
+  const full = (kind === "copy-full" || kind === "download-full") ? 1 : 0;
+  const fmt = kind.indexOf("download") === 0 ? "md" : "txt";
   const copy = (LAST_RESULT && LAST_RESULT.ui_copy && LAST_RESULT.ui_copy.evidence) || {};
   try {
     const r = await fetch("/api/evidence?full=" + full + "&fmt=" + fmt).then((x) => x.json());
@@ -2431,6 +2440,16 @@ async function evidenceAction(kind, pcapName, button) {
     appendLog((copy.error_prefix || "") + e, "e");
   }
 }
+
+/* 固定入口（不依赖诊断结果）：页面加载后即可复制/导出通用空白版。
+   「报告与导出」页的两个按钮是静态 HTML，必须在启动时单独接线。 */
+function wireFixedEvidenceButtons() {
+  const copy = $("#evidence-fixed-copy");
+  if (copy) copy.onclick = () => evidenceAction("copy-full", "", copy);
+  const download = $("#evidence-fixed-download");
+  if (download) download.onclick = () => evidenceAction("download-full", "", download);
+}
+wireFixedEvidenceButtons();
 
 function render(res, actions) {
   if (!res || !res.ok) return;
@@ -2576,7 +2595,11 @@ function render(res, actions) {
     m.path_profile, (res.ui_copy || {}).path || null);
   /* 取证请求单：后端按本次结论算好相关维度后才下发；正常且无需取证时为空。 */
   const evidenceBlock = renderEvidenceChecklist(
-    res.evidence_checklist, (res.ui_copy || {}).evidence || null, m.pcap_name || "");
+    res.evidence_checklist, (res.ui_copy || {}).evidence || null);
+  /* 通用空白版入口独立于上面区块：正常结果（无维度）时也必须可达。 */
+  const evCopy = (res.ui_copy || {}).evidence || {};
+  const evCopyFullLabel = evCopy.btn_copy_full || "复制通用取证请求单（全 7 维）";
+  const evDownloadFullLabel = evCopy.btn_download || "导出通用取证请求单（.md）";
 
   const html = `
     <div class="vcard ${esc(lv)}" data-card="${isNormal ? "normal" : "fault"}">
@@ -2613,6 +2636,8 @@ function render(res, actions) {
          href="/api/report?path=${encodeURIComponent((res.report?.markdown || "").split(/[\\/]/).pop())}"
          target="_blank">查看 Markdown 报告</a>
       <button class="btn ghost" id="dl-json">下载报告 JSON</button>
+      <button class="btn ghost" id="evidence-copy-full-result">${esc(evCopyFullLabel)}</button>
+      <button class="btn ghost" id="evidence-download-full-result">${esc(evDownloadFullLabel)}</button>
     </div>
     ${techBlock}
     ${secBlock}
@@ -2643,6 +2668,10 @@ function render(res, actions) {
   document.querySelectorAll("[data-evidence]").forEach((btn) => {
     btn.onclick = () => evidenceAction(btn.dataset.evidence, m.pcap_name || "", btn);
   });
+  const evCopyFull = $("#evidence-copy-full-result");
+  if (evCopyFull) evCopyFull.onclick = () => evidenceAction("copy-full", m.pcap_name || "", evCopyFull);
+  const evDownloadFull = $("#evidence-download-full-result");
+  if (evDownloadFull) evDownloadFull.onclick = () => evidenceAction("download-full", m.pcap_name || "", evDownloadFull);
   wireLinkActions(actions);
   scrollMainTop();
 }

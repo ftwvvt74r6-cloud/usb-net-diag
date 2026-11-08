@@ -531,9 +531,9 @@ def _sufficiency(meta: dict, net_rows: list[dict]) -> Sufficiency:
     )
 
 
-#: 探针两侧对照的「显著差」阈值（百分点）：网关丢包比对端多这么多个点，
-#: 才敢说「疑似本地侧」；反过来是「疑似对端侧」。阈值内一律「证据不足」。
-PROBE_CONTRAST_DELTA_PCT = 10.0
+#: 单侧「丢包高」的阈值（百分比），与 ``pathprobe.PATH_LOSS_DEGRADED_PCT`` 同口径。
+#: 这里不 import pathprobe：verdict 层只依赖纯数据（probe_baseline），保持可离线单测。
+PROBE_CONTRAST_LOSS_HIGH_PCT = 20.0
 
 
 def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
@@ -547,6 +547,18 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
        （「传输质量」的 ``—``/``na`` 行不算方向类结论）；
     3. 基线里同时有 ``gateway`` 和 ``target`` 两个角色（两侧才能对照）。
 
+    **充分性判据是 sent/recv/loss，不是 RTT 样本数 n**：一侧 100% 丢包时它天然
+    没有 RTT 样本（``n=0``），但那正是「这一侧丢包」的最强证据；用 ``n>0`` 当门槛
+    会把「对端 100% 丢包」误判成证据不足。``n`` 只保留在返回值里供报告展示 RTT。
+
+    判定顺序（阈值 :data:`PROBE_CONTRAST_LOSS_HIGH_PCT`）：
+
+    * 网关高 → ``PROBE.CONTRAST.LOCAL_SIDE``（本地/接入侧）；
+    * 对端高 → ``PROBE.CONTRAST.TARGET_SIDE``（对端/服务侧）；
+    * 两侧都高 → ``PROBE.CONTRAST.BOTH_SIDES``；
+    * 两侧都低 / 只有一侧有样本且不丢 → ``PROBE.CONTRAST.INSUFFICIENT``；
+    * 两侧 ``sent == 0``（一条探针都没发）→ ``PROBE.CONTRAST.INSUFFICIENT``。
+
     Args:
         meta: 采集元信息（只读 ``probe_baseline``）。
         net_rows: 已排除安全观察行的 ``rows[]``。
@@ -556,8 +568,8 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
         "gateway_loss_pct": float|None, "target_loss_pct": float|None,
         "gateway_n": int, "target_n": int, "delta_pct": float|None}``。
         ``code`` ∈ ``PROBE.CONTRAST.LOCAL_SIDE`` / ``.TARGET_SIDE`` /
-        ``.INSUFFICIENT``（中文文案由 ``core/report.py`` 从 copy 表取，
-        verdict 层不写中文长文案）。
+        ``.BOTH_SIDES`` / ``.INSUFFICIENT``（中文文案由 ``core/report.py`` 从 copy
+        表取，verdict 层不写中文长文案）。
     """
     baseline = meta.get("probe_baseline")
     if not isinstance(baseline, dict):
@@ -579,29 +591,32 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
 
     gateway_n = _int(gateway.get("n"))
     target_n = _int(target.get("n"))
+    gateway_sent = _int(gateway.get("sent"))
+    target_sent = _int(target.get("sent"))
     gateway_loss = gateway.get("loss_pct")
     target_loss = target.get("loss_pct")
-    if gateway_n <= 0 or target_n <= 0:
-        return {
-            "code": "PROBE.CONTRAST.INSUFFICIENT",
-            "confidence": 0.3,
-            "gateway_loss_pct": gateway_loss,
-            "target_loss_pct": target_loss,
-            "gateway_n": gateway_n,
-            "target_n": target_n,
-            "delta_pct": None,
-        }
-    delta = round(float(gateway_loss or 0.0) - float(target_loss or 0.0), 1)
-    if delta >= PROBE_CONTRAST_DELTA_PCT:
-        code = "PROBE.CONTRAST.LOCAL_SIDE"
-        confidence = 0.6
-    elif -delta >= PROBE_CONTRAST_DELTA_PCT:
-        code = "PROBE.CONTRAST.TARGET_SIDE"
-        confidence = 0.6
+    delta = (round(float(gateway_loss or 0.0) - float(target_loss or 0.0), 1)
+             if gateway_loss is not None and target_loss is not None else None)
+
+    def _high(loss) -> bool:
+        """该侧丢包是否达到「高」阈值；``None``（无样本）不算高。"""
+        return loss is not None and float(loss) >= PROBE_CONTRAST_LOSS_HIGH_PCT
+
+    gateway_high = _high(gateway_loss)
+    target_high = _high(target_loss)
+    if gateway_high and target_high:
+        # 两侧都丢：不能硬指一侧；提示结合路径剖面判断是哪一段。
+        code, confidence = "PROBE.CONTRAST.BOTH_SIDES", 0.5
+    elif gateway_high:
+        code, confidence = "PROBE.CONTRAST.LOCAL_SIDE", 0.6
+    elif target_high:
+        code, confidence = "PROBE.CONTRAST.TARGET_SIDE", 0.6
+    elif gateway_sent <= 0 and target_sent <= 0:
+        # 一条探针都没发：连丢包率都没有，只能证据不足。
+        code, confidence = "PROBE.CONTRAST.INSUFFICIENT", 0.3
     else:
-        # 两侧丢包接近（含「两侧都丢」与「两侧都不丢」）：无法归因，不许硬指一侧。
-        code = "PROBE.CONTRAST.INSUFFICIENT"
-        confidence = 0.3
+        # 两侧都不高（含「只有一侧有样本且不丢」）：无法归因，不许硬指一侧。
+        code, confidence = "PROBE.CONTRAST.INSUFFICIENT", 0.3
     return {
         "code": code,
         "confidence": confidence,

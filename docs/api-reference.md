@@ -1585,7 +1585,7 @@ Returns:
 | `capture_live` | function | 603 | ✅ |
 | `degraded_empty_capture_result` | function | 871 | ✅ |
 | `run_scan` | function | 1048 | ✅ |
-| `main` | function | 1322 | ✅ |
+| `main` | function | 1325 | ✅ |
 
 ### `load_config`
 
@@ -1913,8 +1913,8 @@ Returns:
 | `load_template` | function | 117 | ✅ |
 | `dimensions_for` | function | 277 | ✅ |
 | `build_checklist` | function | 350 | ✅ |
-| `render_checklist_markdown` | function | 408 | ✅ |
-| `render_checklist_text` | function | 446 | ✅ |
+| `render_checklist_markdown` | function | 421 | ✅ |
+| `render_checklist_text` | function | 459 | ✅ |
 
 ### `validate_template`
 
@@ -2004,10 +2004,13 @@ def build_checklist(result: dict, full: bool=False, verdict: dict | None=None, t
 ```text
 按本次结论生成清单；``full=True`` 生成覆盖 7 维的通用空白版。
 
+``full=True`` 时**不依赖 ``result`` 与结论**：``result={}`` 也能返回完整的
+7 维（界面「复制通用空白版」在还没有诊断结果时也必须是可达的）。
+
 Args:
     result: 诊断结果字典（``verdict`` / ``rows`` 决定相关维度）。
     full: 为 ``True`` 时忽略结论、输出全部 7 维（界面「复制通用空白版」用）。
-    verdict: 可选的已算好判定；报告渲染传入同一个判定，避免重复计算。
+    verdict: 可选的已算好判定；报告渲染/接口传入同一个判定，避免重复计算。
     template: 可选的模板对象（测试注入/变异用）；省略时用导入期加载的模板。
 
 Returns:
@@ -2657,67 +2660,67 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `ProbeKind` | class | 119 | ✅ |
-| `HopStatus` | class | 127 | ✅ |
-| `ProbeSpec` | class | 138 | ✅ |
-| `ProbeSpec.to_dict` | method | 164 | ✅ |
-| `ProbeRecord` | class | 189 | ✅ |
-| `ProbeRecord.to_dict` | method | 213 | ✅ |
-| `ProbeLedger` | class | 234 | ✅ |
-| `ProbeLedger.ports` | method | 250 | ✅ |
-| `ProbeLedger.targets` | method | 258 | ✅ |
-| `ProbeLedger.kinds` | method | 266 | ✅ |
-| `ProbeLedger.has_icmp` | method | 274 | ✅ |
-| `ProbeLedger.exclusion_bpf` | method | 282 | ✅ |
-| `ProbeLedger.exclusion_display_filter` | method | 301 | ✅ |
-| `ProbeLedger.window` | method | 309 | ✅ |
-| `ProbeLedger.baseline` | method | 317 | ✅ |
-| `ProbeLedger.to_dict` | method | 339 | ✅ |
-| `HopStat` | class | 362 | ✅ |
-| `HopStat.loss_pct` | method | 382 | ✅ |
-| `HopStat.to_dict` | method | 391 | ✅ |
-| `PathProbeResult` | class | 416 | ✅ |
-| `PathProbeResult.to_dict` | method | 443 | ✅ |
-| `classify` | function | 479 | ✅ |
-| `clamp_path_options` | function | 519 | ✅ |
-| `build_hop_stats` | function | 560 | ✅ |
-| `degraded_hops` | function | 614 | ✅ |
-| `first_degraded_hop` | function | 647 | ✅ |
-| `looks_like_tun` | function | 666 | ✅ |
-| `summarize_path` | function | 713 | ✅ |
-| `exclusion_bpf` | function | 798 | ✅ |
-| `exclusion_display_filter` | function | 822 | ✅ |
-| `probe_marker_display_filter` | function | 843 | ✅ |
-| `path_exclusion_display_filter` | function | 868 | ✅ |
-| `discover_targets` | function | 947 | ✅ |
-| `plan` | function | 1012 | ✅ |
-| `shadow_specs` | function | 1038 | ✅ |
-| `rounds_for` | function | 1059 | ✅ |
-| `probe_len` | function | 1076 | ✅ |
-| `probe_src_port` | function | 1088 | ✅ |
-| `send_probe` | function | 1105 | ✅ |
-| `ShadowProber` | class | 1182 | ✅ |
-| `ShadowProber.start` | method | 1209 | ✅ |
-| `ShadowProber.stop` | method | 1219 | ✅ |
-| `ShadowProber.join` | method | 1223 | ✅ |
-| `ShadowProber.run_round` | method | 1238 | ✅ |
-| `ShadowProber.exclusion_bpf` | method | 1282 | ✅ |
-| `ShadowProber.exclusion_display_filter` | method | 1291 | ✅ |
-| `ShadowProber.marker_display_filter` | method | 1300 | ✅ |
-| `ShadowProber.sent_count` | method | 1310 | ✅ |
-| `ShadowProber.snapshot` | method | 1319 | ✅ |
-| `aggregate_records` | function | 1340 | ✅ |
-| `count_marked_packets` | function | 1408 | ✅ |
-| `count_time_exceeded_packets` | function | 1439 | ✅ |
-| `probe_tcp_reachable` | function | 1505 | ✅ |
-| `check_target_port` | function | 1540 | ✅ |
-| `run` | function | 1748 | ✅ |
-| `PathProfiler` | class | 1878 | ✅ |
-| `PathProfiler.start` | method | 1913 | ✅ |
-| `PathProfiler.stop` | method | 1924 | ✅ |
-| `PathProfiler.join` | method | 1928 | ✅ |
-| `PathProfiler.should_stop` | method | 1943 | ✅ |
-| `PathProfiler.snapshot` | method | 1963 | ✅ |
+| `ProbeKind` | class | 122 | ✅ |
+| `HopStatus` | class | 130 | ✅ |
+| `ProbeSpec` | class | 149 | ✅ |
+| `ProbeSpec.to_dict` | method | 175 | ✅ |
+| `ProbeRecord` | class | 200 | ✅ |
+| `ProbeRecord.to_dict` | method | 224 | ✅ |
+| `ProbeLedger` | class | 245 | ✅ |
+| `ProbeLedger.ports` | method | 261 | ✅ |
+| `ProbeLedger.targets` | method | 269 | ✅ |
+| `ProbeLedger.kinds` | method | 277 | ✅ |
+| `ProbeLedger.has_icmp` | method | 285 | ✅ |
+| `ProbeLedger.exclusion_bpf` | method | 293 | ✅ |
+| `ProbeLedger.exclusion_display_filter` | method | 312 | ✅ |
+| `ProbeLedger.window` | method | 320 | ✅ |
+| `ProbeLedger.baseline` | method | 328 | ✅ |
+| `ProbeLedger.to_dict` | method | 350 | ✅ |
+| `HopStat` | class | 373 | ✅ |
+| `HopStat.loss_pct` | method | 393 | ✅ |
+| `HopStat.to_dict` | method | 402 | ✅ |
+| `PathProbeResult` | class | 427 | ✅ |
+| `PathProbeResult.to_dict` | method | 454 | ✅ |
+| `classify` | function | 490 | ✅ |
+| `clamp_path_options` | function | 538 | ✅ |
+| `build_hop_stats` | function | 579 | ✅ |
+| `degraded_hops` | function | 647 | ✅ |
+| `first_degraded_hop` | function | 680 | ✅ |
+| `looks_like_tun` | function | 699 | ✅ |
+| `summarize_path` | function | 746 | ✅ |
+| `exclusion_bpf` | function | 831 | ✅ |
+| `exclusion_display_filter` | function | 855 | ✅ |
+| `probe_marker_display_filter` | function | 876 | ✅ |
+| `path_exclusion_display_filter` | function | 907 | ✅ |
+| `discover_targets` | function | 986 | ✅ |
+| `plan` | function | 1051 | ✅ |
+| `shadow_specs` | function | 1077 | ✅ |
+| `rounds_for` | function | 1098 | ✅ |
+| `probe_len` | function | 1115 | ✅ |
+| `probe_src_port` | function | 1127 | ✅ |
+| `send_probe` | function | 1144 | ✅ |
+| `ShadowProber` | class | 1221 | ✅ |
+| `ShadowProber.start` | method | 1248 | ✅ |
+| `ShadowProber.stop` | method | 1258 | ✅ |
+| `ShadowProber.join` | method | 1262 | ✅ |
+| `ShadowProber.run_round` | method | 1277 | ✅ |
+| `ShadowProber.exclusion_bpf` | method | 1321 | ✅ |
+| `ShadowProber.exclusion_display_filter` | method | 1330 | ✅ |
+| `ShadowProber.marker_display_filter` | method | 1339 | ✅ |
+| `ShadowProber.sent_count` | method | 1349 | ✅ |
+| `ShadowProber.snapshot` | method | 1358 | ✅ |
+| `aggregate_records` | function | 1379 | ✅ |
+| `count_marked_packets` | function | 1447 | ✅ |
+| `count_time_exceeded_packets` | function | 1482 | ✅ |
+| `probe_tcp_reachable` | function | 1550 | ✅ |
+| `check_target_port` | function | 1585 | ✅ |
+| `run` | function | 1797 | ✅ |
+| `PathProfiler` | class | 1936 | ✅ |
+| `PathProfiler.start` | method | 1971 | ✅ |
+| `PathProfiler.stop` | method | 1982 | ✅ |
+| `PathProfiler.join` | method | 1986 | ✅ |
+| `PathProfiler.should_stop` | method | 2001 | ✅ |
+| `PathProfiler.snapshot` | method | 2021 | ✅ |
 
 ### `ProbeKind`  (class)
 
@@ -2736,7 +2739,13 @@ class HopStatus
 ```
 
 ```text
-路径探测（MTR）单跳的状态机；本批只用 ``classify()`` 的判定口径。
+路径探测（MTR）单跳的状态（机器码，中文文案在 copy 表）。
+
+``OK`` 与 ``LOSS`` 保留既有语义（正常 / 全部超时）；``DEGRADED`` 是本批新增的
+「劣化」值，用于「丢包 ≥ 阈值但仍有响应」或「RTT 相对基线突增」的跳 ——
+这种跳不能再显示成「正常」，否则表格与「第几跳开始劣化」的结论自相矛盾。
+``FILTERED`` / ``UNREACHABLE`` / ``NO_TARGET`` 是保留机器码（当前由结论句 /
+方法标注表达，未逐跳赋值）。
 ```
 
 ### `ProbeSpec`  (class)
@@ -3042,10 +3051,14 @@ def classify(hops: Sequence[HopStat], target_port_reachable: bool | None=None) -
 ```
 
 ```text
-把逐跳统计翻成「该找谁」。
+把逐跳统计翻成「该找谁」（SPEC V7 要求保留的公开 API，主路径用 :func:`summarize_path`）。
 
 四态的关键是**最后一种**：全部都丢但目标端口 TCP 可通 → 这不是故障，是
 ICMP 被策略过滤（企业网常见），不能把「被过滤」误判成「链路故障」。
+
+本函数只做「按最终响应者定界」的旧口径；它不计算 RTT 突增、不区分「探测未完成」。
+实时路径 / 报告 / 服务端**主路径一律走 :func:`summarize_path`**，这里保留是为了
+兼容既有调用方与 SPEC 的公开 API 形状。阈值复用模块常量，避免出现第二套魔数。
 
 Args:
     hops: 逐跳统计（按 TTL 顺序）。
@@ -3105,6 +3118,8 @@ Returns:
     ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
     ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
     ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
+    ``status`` 与劣化判定同源：全部超时 → ``LOSS``；丢包 ≥
+    :data:`PATH_LOSS_DEGRADED_PCT` 或 RTT 突增 → ``DEGRADED``；否则 ``OK``。
 
 Example:
     >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
@@ -3264,6 +3279,11 @@ def probe_marker_display_filter(kinds: Iterable[ProbeKind]) -> str
 
 ```text
 生成「只匹配探针报文」的显示过滤（用于统计 pcap 里混进了多少探针包）。
+
+ICMP 片段**显式排除 type 11**：Wireshark 的 ``icmp.ident`` 对 ICMP 错误报文会
+命中内嵌的原始报文，不排除就会把我们自己的 time-exceeded 也算成「标记探针包」，
+与 :func:`count_time_exceeded_packets` 的整类计数重复。两处口径因此互斥：
+标记包 + type 11 包 = 本窗口被排除的互不重叠的包。
 
 Args:
     kinds: 本次会发出的探针协议集合。
@@ -3600,10 +3620,14 @@ def count_marked_packets(tshark_path, pcap, kinds: Iterable[ProbeKind]) -> int
 ```
 
 ```text
-用 tshark 显示过滤统计 pcap 里混进了多少**探针报文**。
+用 tshark 显示过滤统计 pcap 里混进了多少**标记探针报文**。
 
 这是「已排除 N 个探针包」这句报告文案的取数口：抓包 BPF 生效时应为 0；
 不为 0 说明 BPF 没盖住（例如抓的是 TUN 网卡），分析阶段的显示过滤会兜底。
+
+口径与 :func:`count_time_exceeded_packets` **互斥**：ICMP 片段排除 type 11，
+因此本函数不会把路径设备回的 time-exceeded（即使内嵌我们的 ``PROBE_ID``）
+算进来；那些包由 ``path_profile.excluded_icmp`` 统一计数。
 
 Args:
     tshark_path: tshark 可执行文件路径（``Path`` 或字符串）。
@@ -3611,7 +3635,7 @@ Args:
     kinds: 本次会发出的探针协议集合。
 
 Returns:
-    int: 命中的探针报文条数；表达式为空 / tshark 失败 / 文件读不了都返回 0
+    int: 命中的标记探针报文条数；表达式为空 / tshark 失败 / 文件读不了都返回 0
         （统计失败不改变诊断结论）。
 ```
 
@@ -3625,8 +3649,10 @@ def count_time_exceeded_packets(tshark_path, pcap) -> int
 统计 pcap 里的 ``ICMP type 11``（TTL 超时）报文数。
 
 MTR 期间设备回的 time-exceeded 认不出探针 id，只能整类排除；这个数字就是
-「已排除 N 个路径探测相关 ICMP」的取数口（同窗口其它流量的 TTL 超时也会被
-算进来 —— 这是残余风险，文档里写明）。
+「本窗口内已从统计剔除的 ICMP 超时包数」的取数口。它**包含非探针流量**的
+TTL 超时，所以报告里写明 N 是上限，不是「路径探测相关」的精确归因。
+与 :func:`count_marked_packets` 互斥（后者显式排除 type 11），两数相加即
+本窗口被两道显示过滤剔除的互不重叠报文数。
 
 Args:
     tshark_path: tshark 可执行文件路径（``Path`` 或字符串）。
@@ -3699,7 +3725,9 @@ TTL 递增路径探测（MTR）：逐跳 RTT/丢包/抖动 + 劣化判定 + ICMP
    ``sr()``；收到目标自己的回复即停；
 4. 若 ICMP **一个响应都没有**而目标端口 TCP 可达 → 判定 ICMP 被策略过滤，
    改用 **TCP SYN 逐跳**重扫（样本减半），结果带 ``icmp_filtered=True`` /
-   ``method="tcp"``；TCP 也不可达 → ``PATH.NO_DATA`` + ``unreachable=True``；
+   ``method="tcp"``，且 ``verdict_key`` 固定为 ``PATH.ICMP_FILTERED``
+   （TCP 有响应只证明端口可达，不能反推「ICMP 路径正常」）；TCP 也不可达 →
+   ``PATH.NO_DATA`` + ``unreachable=True``；
 5. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
 
 Args:
@@ -4301,10 +4329,10 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 343 | ✅ |
-| `save` | function | 609 | ✅ |
-| `render_degraded` | function | 658 | ✅ |
-| `save_degraded` | function | 724 | ✅ |
+| `render_markdown` | function | 358 | ✅ |
+| `save` | function | 627 | ✅ |
+| `render_degraded` | function | 676 | ✅ |
+| `save_degraded` | function | 742 | ✅ |
 
 ### `render_markdown`
 
@@ -4670,27 +4698,27 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 127 | ✅ |
-| `request_quit` | function | 132 | ✅ |
-| `cleanup_pid` | function | 180 | ✅ |
-| `BodyTooLarge` | class | 190 | ✅ |
-| `doctor_cached` | function | 269 | ✅ |
-| `log` | function | 365 | ✅ |
-| `evidence_payload` | function | 460 | ✅ |
-| `start_job` | function | 602 | ✅ |
-| `report_index` | function | 663 | ✅ |
-| `request_elevation` | function | 697 | ✅ |
-| `engine_info` | function | 730 | ✅ |
-| `passive_start` | function | 773 | ✅ |
-| `passive_status` | function | 808 | ✅ |
-| `link_actions` | function | 882 | ✅ |
-| `Handler` | class | 929 | ✅ |
-| `Handler.log_message` | method | 975 | ✅ |
-| `Handler.do_GET` | method | 1113 | ✅ |
-| `Handler.do_POST` | method | 1130 | ✅ |
-| `DiagServer` | class | 1358 | ✅ |
-| `create_server` | function | 1370 | ✅ |
-| `main` | function | 1417 | ✅ |
+| `touch` | function | 128 | ✅ |
+| `request_quit` | function | 133 | ✅ |
+| `cleanup_pid` | function | 181 | ✅ |
+| `BodyTooLarge` | class | 191 | ✅ |
+| `doctor_cached` | function | 270 | ✅ |
+| `log` | function | 366 | ✅ |
+| `evidence_payload` | function | 462 | ✅ |
+| `start_job` | function | 626 | ✅ |
+| `report_index` | function | 687 | ✅ |
+| `request_elevation` | function | 721 | ✅ |
+| `engine_info` | function | 754 | ✅ |
+| `passive_start` | function | 797 | ✅ |
+| `passive_status` | function | 832 | ✅ |
+| `link_actions` | function | 906 | ✅ |
+| `Handler` | class | 953 | ✅ |
+| `Handler.log_message` | method | 999 | ✅ |
+| `Handler.do_GET` | method | 1137 | ✅ |
+| `Handler.do_POST` | method | 1154 | ✅ |
+| `DiagServer` | class | 1382 | ✅ |
+| `create_server` | function | 1394 | ✅ |
+| `main` | function | 1441 | ✅ |
 
 ### `touch`
 
@@ -4787,6 +4815,14 @@ def evidence_payload(result: dict | None, full: bool=False, fmt: str='md') -> di
 ```text
 生成 ``/api/evidence`` 的响应体（纯计算，不写文件、不联网）。
 
+``full=True`` 是**通用空白版**：不依赖 ``JOB["result"]``，还没有诊断结果时
+也返回全 7 维（``result=None`` 等价于空结果）。``full=False`` 才要求最近一次
+诊断结果，并按结论挑相关维度。
+
+为避免 ``dimensions_for`` 在缺 ``verdict`` 时回退去 ``verdict.build``（会读
+copy 表），这里先把判定算好再显式传给 ``build_checklist``；已有
+``result["verdict"]`` 时直接复用，不重复计算。
+
 Args:
     result: 最近一次诊断结果（``JOB["result"]``）；``None`` 表示还没有结果。
     full: ``True`` 输出覆盖 7 维的通用空白版；``False`` 按本次结论取相关维度。
@@ -4795,8 +4831,8 @@ Args:
 
 Returns:
     dict: 成功 ``{"ok": True, "fmt", "full", "dimensions": [维度机器码],
-    "content": str}``；没有结果 / 本次不需要取证时 ``{"ok": False, "error": "..."}``
-    （错误可直接展示给用户）。
+    "content": str}``；``full=False`` 且没有结果 / 本次不需要取证时
+    ``{"ok": False, "error": "..."}``（错误可直接展示给用户）。
 ```
 
 ### `start_job`
@@ -5319,7 +5355,7 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `compute_layers` | function | 198 | ✅ |
-| `build` | function | 616 | ✅ |
+| `build` | function | 631 | ✅ |
 
 ### `compute_layers`
 

@@ -23,8 +23,14 @@
 ```
 网关丢包 40%  vs  对端丢包 0%   → 疑似本地侧/接入链路
 网关丢包 0%   vs  对端丢包 40%  → 疑似对端侧
-两边都拿不到 RTT               → 证据不足（不硬指一侧）
+两侧都丢包（都 ≥ 20%）         → 两侧都可能丢包（需结合路径剖面）
+两侧都不丢 / 只有一侧有样本     → 证据不足（不硬指一侧）
+两侧 sent 都是 0（一条都没发）  → 证据不足
 ```
+
+判据是 **sent / recv / loss**，不是 RTT 样本数 ``n``：一侧 100% 丢包时天然没有
+RTT 样本（``n=0``），但「这一侧丢包」本身已经是明确证据。``n`` 只用于报告展示
+RTT；把 ``n>0`` 当充分性门槛会把「对端 100% 丢包」误判成证据不足。
 
 措辞固定是「疑似」，`confidence < 1.0`；探针数据**不参与**主判定等级
 （`level` / `headline` / 四层状态），只在报告中新增一个区块。
@@ -64,10 +70,11 @@ DNS 响应），只排「源端口」会漏。所以：
 |---|---|---|
 | 抓包 BPF | `ProbeLedger.exclusion_bpf()` | ICMP 固定 id 的 type 8/0 + `tcp/udp src\|dst portrange 39000-39999` |
 | 分析 `-Y` | `ProbeLedger.exclusion_display_filter()` | `icmp.type/icmp.ident` + `tcp/udp srcport/dstport` 判断 |
-| 计数 | `pathprobe.count_marked_packets()` | 用「只匹配探针」的 `-Y` 统计 pcap 里混进多少探针包 |
+| 计数 | `pathprobe.count_marked_packets()` | 用「只匹配探针」的 `-Y` 统计 pcap 里混进多少标记探针包；该表达式**显式排除 ICMP type 11**，避免与路径剖面的「ICMP 超时包」计数重复 |
 
-报告里固定写「探针已从业务统计排除（N 包）」。**N=0 也是证据**：说明抓包 BPF 生效；
-N>0 说明 BPF 没盖住（例如抓的是 TUN 网卡），分析阶段的显示过滤兜住了。
+报告里写「探针标记报文已从业务统计排除（N 包；ICMP 超时包另计）」。**N=0 也是证据**：
+说明抓包 BPF 生效；N>0 说明 BPF 没盖住（例如抓的是 TUN 网卡），分析阶段的显示过滤
+兜住了。ICMP type 11 由路径剖面单独计数，与这里的标记包计数互不重叠。
 
 合成 pcap 回归测试：`tests/test_shadow_probe.py::ProbeIsolationSyntheticTest`
 ——「业务 + 探针」pcap 带过滤分析与纯净业务 pcap **逐字段相同**；不带过滤时统计不同

@@ -41,6 +41,10 @@ COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="ut
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
 EVIDENCE_SOURCE = (ROOT / "core" / "evidence.py").read_text(encoding="utf-8")
 TEMPLATE_TEXT = TEMPLATE_PATH.read_text(encoding="utf-8")
+#: 新增取证文档也要守门（V22）；内容目前干净，扫描目标防后续回归。
+DOC_EVIDENCE = (ROOT / "docs" / "evidence-checklist.md").read_text(encoding="utf-8")
+DOC_PATH_PROBE = (ROOT / "docs" / "path-probe.md").read_text(encoding="utf-8")
+DOC_SHADOW_PROBE = (ROOT / "docs" / "shadow-probe.md").read_text(encoding="utf-8")
 
 #: 用户点名的厂商/产品名（V22）。清单是**通用**取证模板，任何一家都不该出现。
 BANNED_VENDORS = (
@@ -182,12 +186,15 @@ class TemplateSchemaTest(unittest.TestCase):
         self.assertTrue(any("已提供" in item["field"] for item in dim["items"]))
 
     def test_no_vendor_product_names(self):
-        """V22：清单 JSON / evidence.py / UI / copy.evidence_checklist 不得出现厂商名。"""
+        """V22：清单 JSON / evidence.py / UI / copy 与三份取证文档不得出现厂商名。"""
         targets = {
             "evidence_checklist.json": TEMPLATE_TEXT,
             "core/evidence.py": EVIDENCE_SOURCE,
             "ui/index.html": HTML,
             "copy.evidence_checklist": json.dumps(COPY["evidence_checklist"], ensure_ascii=False),
+            "docs/evidence-checklist.md": DOC_EVIDENCE,
+            "docs/path-probe.md": DOC_PATH_PROBE,
+            "docs/shadow-probe.md": DOC_SHADOW_PROBE,
         }
         for name, text in targets.items():
             for vendor in BANNED_VENDORS:
@@ -355,6 +362,15 @@ class BuildChecklistTest(unittest.TestCase):
         checklist = evidence.build_checklist(_normal_result(), full=True)
         self.assertEqual(len(checklist["dimensions"]), 7)
 
+    def test_full_version_without_any_result(self):
+        """通用空白版不依赖 ``JOB["result"]``：空结果也能出全 7 维。"""
+        checklist = evidence.build_checklist({}, full=True)
+        self.assertTrue(checklist["full"])
+        self.assertEqual(_dimension_keys(checklist), list(evidence.DIMENSION_KEYS))
+        self.assertEqual(len(checklist["dimensions"]), 7)
+        for dim in checklist["dimensions"]:
+            self.assertTrue(dim["items"])
+
     def test_broken_template_degrades_to_empty_dimensions(self):
         """模板坏掉时降级为无维度（报告少区块，但不许崩）。"""
         checklist = evidence.build_checklist(_l2_result(), template={"dimensions": {}})
@@ -446,8 +462,17 @@ class ReportIntegrationTest(unittest.TestCase):
         with_block = report.render_markdown(copy.deepcopy(result), vd)
         block = evidence.render_checklist_markdown(
             evidence.build_checklist(result, verdict=vd)).rstrip("\n")
-        self.assertEqual(with_block, without + "\n\n" + block)
+        self.assertEqual(with_block, without + "\n\n" + block + "\n")
         self.assertTrue(with_block.startswith(without))
+
+    def test_markdown_ends_with_exactly_one_newline(self):
+        """R14：与 main 一致，报告以单个 \\n 结尾（含追加区块时）。"""
+        for result in (_l2_result(), _normal_result()):
+            with self.subTest(level=result["verdict"]["level"]):
+                md = report.render_markdown(result, result["verdict"])
+                self.assertTrue(md.endswith("\n"))
+                self.assertFalse(md.endswith("\n\n"))
+                self.assertFalse(md.endswith("\n\n\n"))
 
     def test_save_keeps_five_json_blocks_and_no_evidence(self):
         """JSON 快照仍是 5 块，清单只进 md / UI，不进 JSON。"""
@@ -471,6 +496,36 @@ class EvidenceApiTest(unittest.TestCase):
         payload = server.evidence_payload(None)
         self.assertFalse(payload["ok"])
         self.assertTrue(payload["error"])
+
+    def test_no_result_full_returns_generic_blank(self):
+        """空白版入口不依赖 JOB["result"]：无结果时 full=1 也必须成功。"""
+        payload = server.evidence_payload(None, full=True, fmt="txt")
+        self.assertTrue(payload["ok"], payload)
+        self.assertTrue(payload["full"])
+        self.assertEqual(payload["dimensions"], list(evidence.DIMENSION_KEYS))
+        self.assertIn("字段名", payload["content"])
+
+    def test_full_payload_without_result_is_markdown_too(self):
+        payload = server.evidence_payload(None, full=True, fmt="md")
+        self.assertTrue(payload["ok"])
+        self.assertIn(COPY["evidence_checklist"]["section_title"], payload["content"])
+
+    def test_payload_passes_precomputed_verdict_to_checklist(self):
+        """/api/evidence 必须把判定显式传给 build_checklist，避免回退读 copy 表。"""
+        result = _l2_result()
+        with mock.patch.object(server.evidence, "build_checklist",
+                               return_value={"full": False, "level": "警告",
+                                             "layer": "", "dimensions": []}) as build:
+            server.evidence_payload(result, full=False, fmt="md")
+        self.assertIs(build.call_args.kwargs["verdict"], result["verdict"])
+
+    def test_payload_does_not_rebuild_verdict_when_present(self):
+        """结果里已有 verdict 时不许再调 verdict.build（reviewer 实测 20 次 copy 读）。"""
+        result = _l2_result()
+        with mock.patch.object(server.verdict, "build",
+                               side_effect=AssertionError("不应重复判定")):
+            payload = server.evidence_payload(result, full=False, fmt="txt")
+        self.assertTrue(payload["ok"], payload)
 
     def test_normal_result_returns_error_with_full_hint(self):
         payload = server.evidence_payload(_normal_result())
@@ -528,8 +583,8 @@ class EvidenceUiTest(unittest.TestCase):
     """V23：结果页区块 + 复制/导出按钮接线；文案走 copy 表。"""
 
     def test_render_function_exists_and_reads_payload(self):
-        self.assertIn("function renderEvidenceChecklist(ev, copy, pcapName)", HTML)
-        start = HTML.index("function renderEvidenceChecklist(ev, copy, pcapName)")
+        self.assertIn("function renderEvidenceChecklist(ev, copy)", HTML)
+        start = HTML.index("function renderEvidenceChecklist(ev, copy)")
         body = HTML[start:HTML.index("\nasync function copyPlainText", start)]
         for token in ("ev.dimensions", "dim.items", "it.field", "it.why",
                       "it.where", "it.criteria", "copy.th_field"):
@@ -557,6 +612,32 @@ class EvidenceUiTest(unittest.TestCase):
         self.assertIn("navigator.clipboard", HTML)
         self.assertIn("new Blob([r.content]", body)
         self.assertIn('"-evidence.md"', body)
+
+    def test_generic_blank_entry_independent_of_result(self):
+        """正常结果 / 无结果时也能复制、导出全 7 维空白版（独立入口）。"""
+        for token in ('id="evidence-fixed-copy"', 'id="evidence-fixed-download"',
+                      "function wireFixedEvidenceButtons()",
+                      'evidenceAction("copy-full"', 'evidenceAction("download-full"'):
+            with self.subTest(token=token):
+                self.assertIn(token, HTML)
+        # 静态入口在「报告与导出」页，不依赖 render(res) 的 innerHTML。
+        reports = HTML[HTML.index('id="view-reports"'):HTML.index('id="view-sysinfo"')]
+        self.assertIn('id="evidence-fixed-copy"', reports)
+        self.assertIn('id="evidence-fixed-download"', reports)
+        # 结果页工具条也有独立入口：正常结果 evidenceBlock 为空时仍可用。
+        render = HTML[HTML.index("function render(res, actions)"):
+                      HTML.index("\nfunction ", HTML.index("function render(res, actions)"))]
+        self.assertIn('id="evidence-copy-full-result"', render)
+        self.assertIn('id="evidence-download-full-result"', render)
+        self.assertIn('evidenceAction("copy-full"', render)
+        self.assertIn('evidenceAction("download-full"', render)
+
+    def test_download_full_requests_full_version(self):
+        """通用空白版导出必须请求 full=1，而不是当前结论清单。"""
+        start = HTML.index("async function evidenceAction(kind, pcapName, button)")
+        body = HTML[start:HTML.index("\nfunction ", start)]
+        self.assertIn('kind === "download-full"', body)
+        self.assertIn('kind.indexOf("download") === 0 ? "md" : "txt"', body)
 
     def test_ui_does_not_embed_checklist_body(self):
         """清单正文只在 JSON，页面只搬数据（禁止把一整张表抄进 HTML）。"""

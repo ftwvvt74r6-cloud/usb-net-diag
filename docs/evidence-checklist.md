@@ -35,8 +35,9 @@
 「每个产品一张表」，换设备就失效，也容易把清单写成某家产品的操作手册。
 按来源方组织后，**谁持有数据**决定清单归谁，具体后台叫什么由对方对应即可。
 
-清单模板里因此**不出现任何具体厂商/产品名**（测试用 `-F` 扫描守住，见
-`tests/test_evidence.py::TemplateSchemaTest.test_no_vendor_product_names`）。
+清单模板里因此**不出现任何具体厂商/产品名**（测试用 Python 字符串断言扫描守住，见
+`tests/test_evidence.py::TemplateSchemaTest.test_no_vendor_product_names`；扫描范围还
+包含本文与 path-probe / shadow-probe 两份文档，防止后续回归）。
 
 ---
 
@@ -63,7 +64,9 @@
 
 1. **证据不足**（`verdict.level == 证据不足`，或 `sufficiency.ok is False`，或存在
    `category == 采集有效性` 的条目）→ **全部 7 维**（通用空白版）。
-2. **正常且没有任何 `points`** → **空集合**（报告不出现该区块；界面仍可导出通用空白版）。
+2. **正常且没有任何 `points`** → **空集合**（报告不出现该区块）；界面「报告与导出」
+   页固定提供「复制 / 导出通用取证请求单（全 7 维）」入口，**不依赖本次结果**，
+   诊断结果页的工具条也有同一入口。
 3. 其余情况逐条映射，并且**始终包含终端侧**：
 
 | 结论线索 | 追加维度 |
@@ -79,8 +82,7 @@
 | 安全观察行 | 不参与映射（它不是本次网络故障的证据来源） |
 | 有故障但类别无法识别 | 兜底承载与出口侧（宁可多问一份，不可漏问） |
 
-三个真实故障类型的映射结果（`tests/test_evidence.py` 固化为用例，截图见
-`d-CHECK-WRITER.md`）：
+三个真实故障类型的映射结果（`tests/test_evidence.py` 固化为用例）：
 
 | 场景 | 维度集合 | 条目数（结论驱动） |
 |---|---|---|
@@ -114,8 +116,14 @@
 | 复制通用空白版 | 复制覆盖全 7 维的标准模板（不依赖本次结论） | `GET /api/evidence?full=1&fmt=txt` |
 | 导出 .md | 下载 `*-evidence.md`（与报告区块同款 Markdown） | `GET /api/evidence?full=0&fmt=md` |
 
+**通用空白版还有一个独立入口**：当本次结论不需要取证（正常结果）或还没有任何诊断
+结果时，上面的区块不会渲染；此时仍可在「报告与导出」页使用固定的
+「复制 / 导出通用取证请求单（全 7 维）」按钮，诊断结果页工具条也有同样两个按钮。
+后端对 `full=1` **不要求 `JOB["result"]` 存在**，直接返回全 7 维。
+
 接口是**加法**的：只读最近一次诊断结果（`JOB["result"]`），纯计算、不写文件；
-没有结果时返回可解释错误。旧版前端不调用它，行为不变。
+`full=0` 且没有结果时返回可解释错误，`full=1` 无结果返回通用空白版。
+旧版前端不调用它，行为不变。
 
 ```text
 GET /api/evidence?full=0|1&fmt=md|txt
@@ -162,7 +170,7 @@ GET /api/evidence?full=0|1&fmt=md|txt
 |---|---|
 | `core/copy/evidence_checklist.json` | 清单正文（7 维、每项四字段）——**唯一中文来源** |
 | `core/evidence.py` | 维度机器码、结论→维度映射、`build_checklist`、两种渲染 |
-| `core/copy/zh-CN.json` 的 `evidence` | 报告标题、表头、按钮、纯文本标签（不含清单正文） |
+| `core/copy/zh-CN.json` 的 `evidence_checklist` | 报告标题、表头、按钮、纯文本标签（不含清单正文） |
 | `core/report.py` | 报告末尾追加区块（结论驱动、纯后缀） |
 | `core/server.py` | `GET /api/evidence`；`/api/status` 加法字段 `evidence_checklist` |
 | `ui/index.html` | 结果页区块 + 三个按钮（文案全部来自 copy 表） |

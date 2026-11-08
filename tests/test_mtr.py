@@ -65,22 +65,25 @@ def _row(ttl, responded=True, rtt=None, responder=GW):
 
 
 def _hop(ttl, ip="", sent=3, lost=0, rtts=None):
-    """造一条逐跳统计（测试辅助）。"""
+    """造一条逐跳统计（测试辅助）；状态与 ``build_hop_stats`` 的新口径一致。"""
     rtts = list(rtts or [])
     lost = int(lost)
+    if lost == sent and sent:
+        status = pathprobe.HopStatus.LOSS
+    elif sent and lost / sent * 100.0 >= pathprobe.PATH_LOSS_DEGRADED_PCT:
+        status = pathprobe.HopStatus.DEGRADED
+    else:
+        status = pathprobe.HopStatus.OK
     if not rtts:
         return pathprobe.HopStat(ttl=ttl, ip=ip, sent=sent, lost=lost,
-                                 status=pathprobe.HopStatus.LOSS
-                                 if lost == sent else pathprobe.HopStatus.OK)
+                                 status=status)
     avg = sum(rtts) / len(rtts)
     jitter = (sum((value - avg) ** 2 for value in rtts) / len(rtts)) ** 0.5
     return pathprobe.HopStat(
         ttl=ttl, ip=ip, sent=sent, lost=lost,
         rtt_min_ms=round(min(rtts), 1), rtt_avg_ms=round(avg, 1),
         rtt_max_ms=round(max(rtts), 1), jitter_ms=round(jitter, 1),
-        rtt_n=len(rtts),
-        status=pathprobe.HopStatus.LOSS if lost == sent
-        else pathprobe.HopStatus.OK)
+        rtt_n=len(rtts), status=status)
 
 
 def _profile(**overrides) -> dict:
@@ -99,7 +102,7 @@ def _profile(**overrides) -> dict:
              "jitter_ms": 0.4, "rtt_n": 3, "status": "ok"},
             {"ttl": 2, "ip": ROUTER, "sent": 3, "lost": 2, "loss_pct": 66.7,
              "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
-             "jitter_ms": None, "rtt_n": 0, "status": "loss"},
+             "jitter_ms": None, "rtt_n": 0, "status": "degraded"},
             {"ttl": 3, "ip": TARGET, "sent": 3, "lost": 0, "loss_pct": 0.0,
              "rtt_min_ms": 8.0, "rtt_avg_ms": 9.0, "rtt_max_ms": 10.0,
              "jitter_ms": 0.8, "rtt_n": 3, "status": "ok"},
@@ -195,6 +198,26 @@ class HopStatsTest(unittest.TestCase):
         hop = hops[0]
         self.assertEqual((hop.lost, hop.loss_pct, hop.rtt_n), (1, 50.0, 1))
         self.assertEqual(hop.rtt_avg_ms, 4.0)
+
+    def test_partial_loss_status_is_degraded_not_ok(self):
+        """R6：50% 丢包的跳必须显示「劣化」，不能显示「正常」。"""
+        hop = pathprobe.build_hop_stats([
+            _row(1, rtt=4.0), _row(1, responded=False),
+        ])[0]
+        self.assertIs(hop.status, pathprobe.HopStatus.DEGRADED)
+        profile = _profile(verdict_key=pathprobe.PATH_TRANSPORT_NET,
+                           degraded_ttl=1, hops=[hop.to_dict()])
+        md = report.render_markdown(_result(profile))
+        row = next(line for line in md.splitlines() if line.startswith("| 1 |"))
+        self.assertIn("劣化", row)
+        self.assertNotIn("正常", row, "丢包 ≥ 阈值的跳不能显示成正常")
+
+    def test_rtt_spike_status_is_degraded_not_ok(self):
+        """R6：RTT 突增的跳也不能显示「正常」（与劣化判定同源）。"""
+        hops = pathprobe.build_hop_stats([_row(1, rtt=10.0), _row(2, rtt=60.0)])
+        self.assertIs(hops[0].status, pathprobe.HopStatus.OK)
+        self.assertIs(hops[1].status, pathprobe.HopStatus.DEGRADED)
+        self.assertEqual(pathprobe.degraded_hops(hops), (2,))
 
     def test_ordered_by_ttl_and_ip_from_responder(self):
         hops = pathprobe.build_hop_stats([
@@ -376,6 +399,16 @@ class RunIcmpTest(unittest.TestCase):
                          "目标之后的 TTL 不能重复算成多跳")
         self.assertEqual(result.verdict_key, pathprobe.PATH_OK)
 
+    def test_probes_sent_counts_actual_packets_not_truncated_rows(self):
+        """R4：probes_sent 数实际发出的包，不数截断后的 hops 行。"""
+        sender = self._sender(target_ttl=1)
+        result = self._run(sender)
+        self.assertEqual([hop.ttl for hop in result.hops], [1])
+        # 第一批 4 个 TTL × 2 个样本 = 8 包；到目标即停，但后面的 TTL 也已发出。
+        self.assertEqual(len(sender.calls[0]["ttls"]), 8)
+        self.assertEqual(result.probes_sent, 8)
+        self.assertEqual(result.ledger["probes_sent"], 8)
+
     def test_cancel_returns_partial_and_not_completed(self):
         sender = self._sender()
         result = pathprobe.run(TARGET, max_hops=8, samples=1, timeout_s=0.2,
@@ -465,6 +498,35 @@ class RunFallbackTest(unittest.TestCase):
         self.assertEqual([hop.ttl for hop in result.hops], [1])
         self.assertNotEqual(result.hops[0].rtt_avg_ms, None)
         self.assertEqual(result.samples, 1, "TCP 重扫样本应减半")
+
+    def test_run_icmp_filtered_verdict_end_to_end(self):
+        """R3：ICMP 全丢 + TCP 回退成功 → verdict 必须是 PATH.ICMP_FILTERED。
+
+        报告不能既写「ICMP 被过滤，改用 TCP 探测」又写「整条路径未观察到劣化」。
+        """
+        sender = self._sender("tcp")
+        result = pathprobe.run(TARGET, port=443, max_hops=4, samples=2,
+                               timeout_s=0.2, sender=sender,
+                               tcp_checker=lambda *_a: True)
+        self.assertTrue(result.icmp_filtered)
+        self.assertEqual(result.method, "tcp")
+        self.assertEqual(result.verdict_key, pathprobe.PATH_ICMP_FILTERED)
+        md = report.render_markdown(_result(result.to_dict()))
+        self.assertIn("ICMP 被过滤，改用 TCP 探测", md)
+        self.assertIn("结论：ICMP 被过滤", md)
+        self.assertNotIn("整条路径未观察到劣化", md)
+
+    def test_probes_sent_includes_tcp_fallback_packets(self):
+        """R4：TCP 回退包也必须计入实际发出的探测包数。"""
+        sender = self._sender("tcp")
+        result = pathprobe.run(TARGET, port=443, max_hops=2, samples=2,
+                               timeout_s=0.2, sender=sender,
+                               tcp_checker=lambda *_a: True)
+        # ICMP：2 个 TTL × 2 样本 = 4；TCP 回退样本减半：2 个 TTL × 1 = 2。
+        self.assertEqual(result.probes_sent, 6)
+        self.assertEqual(result.ledger["probes_sent"], 6)
+        self.assertNotEqual(result.probes_sent, len(result.hops),
+                            "不能拿截断后的 hops 行数当发送计数")
 
     def test_icmp_and_tcp_both_lost_is_no_data(self):
         sender = self._sender(None)
@@ -651,10 +713,12 @@ class RunScanInjectionTest(unittest.TestCase):
                         "pcap_file": "x.pcap"},
         }
 
-    def _run(self, cap: dict, profile_patch=None, **kwargs):
+    def _run(self, cap: dict, profile_patch=None, analyze_side_effect=None,
+             logger=None, **kwargs):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(diagnose, "capture_live", return_value=cap), \
                     mock.patch.object(diagnose.analyzer, "analyze",
+                                      side_effect=analyze_side_effect,
                                       return_value=copy.deepcopy(self._ok_result())) as analyze, \
                     mock.patch.object(diagnose.report, "save",
                                       return_value={"markdown": "m", "json": "j"}), \
@@ -665,7 +729,8 @@ class RunScanInjectionTest(unittest.TestCase):
                     mock.patch.object(diagnose.pathprobe,
                                       "count_time_exceeded_packets",
                                       return_value=7) as counted:
-                result = diagnose.run_scan(logger=lambda _m: None, **kwargs)
+                result = diagnose.run_scan(
+                    logger=logger or (lambda _m: None), **kwargs)
         return result, analyze, counted
 
     def _cap(self, profile: dict | None = None) -> dict:
@@ -690,6 +755,32 @@ class RunScanInjectionTest(unittest.TestCase):
         display_filter = analyze.call_args.kwargs.get("display_filter") or ""
         self.assertIn("icmp.type == 11", display_filter)
         self.assertIn("tcp.srcport", display_filter)
+
+    def test_display_filter_failure_always_retries_without_filter(self):
+        """R7：显示过滤失败（错误串不含 filter）也必须无条件回退一次。"""
+        calls = []
+        ok_result = self._ok_result()
+
+        def fake_analyze(*_args, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                # 真实 tshark 对未知字段的报错，不含 "filter"。
+                return {"ok": False,
+                        "error": '解析失败(rc=4): "bogus.field" is not a valid '
+                                 'protocol or protocol field.'}
+            return copy.deepcopy(ok_result)
+
+        logs: list[str] = []
+        result, _analyze, _counted = self._run(
+            self._cap(_profile()), target=TARGET, shadow=True, duration=5,
+            analyze_side_effect=fake_analyze, logger=logs.append)
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(len(calls), 2, "只允许回退一次，不能死循环")
+        self.assertIsNotNone(calls[0].get("display_filter"))
+        self.assertIsNone(calls[1].get("display_filter"),
+                          "第二次分析必须是不带显示过滤的")
+        self.assertIn("本次统计可能包含探针流量", "\n".join(logs))
+        self.assertIn("已退回未过滤分析", "\n".join(logs))
 
     def test_no_hops_does_not_inject(self):
         result, analyze, _ = self._run(self._cap({"hops": []}), target=TARGET,
@@ -736,7 +827,23 @@ class PathReportTest(unittest.TestCase):
         self.assertIn("ICMP", md)
         self.assertIn("已探测到目标", md)
         self.assertIn("ICMP 超时", md)
-        self.assertIn("（6 个）", md)
+        self.assertIn("6 为上限", md)
+
+    def test_mid_hop_loss_with_recovery_adds_rate_limit_hint(self):
+        """R5：中间跳丢包但后续跳/目标恢复 → 提示可能是 ICMP 限速。"""
+        md = report.render_markdown(_result(_profile()))
+        self.assertIn("ICMP 回复限速", md)
+        self.assertIn("不能仅凭中间跳直接断定承载网故障", md)
+        # 目标没回、但更后面的跳 0 丢包：同样算「后续跳恢复」。
+        later_recovered = _profile(reached_target=False)
+        self.assertIn("ICMP 回复限速", report.render_markdown(_result(later_recovered)))
+        # 后面也全丢：没有恢复证据，不该给这句解读。
+        no_recovery = _profile(reached_target=False)
+        no_recovery["hops"][2] = {
+            "ttl": 3, "ip": "", "sent": 3, "lost": 3, "loss_pct": 100.0,
+            "rtt_min_ms": None, "rtt_avg_ms": None, "rtt_max_ms": None,
+            "jitter_ms": None, "rtt_n": 0, "status": "loss"}
+        self.assertNotIn("ICMP 回复限速", report.render_markdown(_result(no_recovery)))
 
     def test_tcp_method_and_icmp_filtered_wording(self):
         md = report.render_markdown(_result(_profile(
@@ -1029,11 +1136,21 @@ class PathIsolationSyntheticTest(unittest.TestCase):
             pathprobe.count_time_exceeded_packets(ts, self.probed_pcap), 3)
         self.assertEqual(
             pathprobe.count_time_exceeded_packets(ts, self.business_pcap), 0)
-        # 6 = 2 个 echo 请求 + 2 个内嵌我们 id 的 time-exceeded + TCP SYN + RST。
+        # 4 = 2 个 echo 请求 + TCP SYN + RST；两个内嵌我们 id 的 type 11 归
+        # excluded_icmp 计数，标记计数显式排除 type 11（R1：两处口径互斥）。
         self.assertEqual(
-            pathprobe.count_marked_packets(ts, self.probed_pcap, self._filters()), 6)
+            pathprobe.count_marked_packets(ts, self.probed_pcap, self._filters()), 4)
         self.assertEqual(
             pathprobe.count_marked_packets(ts, self.business_pcap, self._filters()), 0)
+        # 互斥性程序证明：标记 ∪ type11 = 4 + 3；若重复计数，并集会小于 7。
+        expression = (f"({pathprobe.probe_marker_display_filter(self._filters())}) "
+                      f"or icmp.type == {pathprobe.ICMP_TIME_EXCEEDED}")
+        rc, out, _err = tshark.run(
+            [str(ts), "-r", str(self.probed_pcap), "-Y", expression,
+             "-T", "fields", "-e", "frame.number"], timeout=120)
+        self.assertEqual(rc, 0)
+        union = len([line for line in (out or "").splitlines() if line.strip()])
+        self.assertEqual(union, 7, "标记包与 type 11 必须互不重叠（4 + 3）")
 
 
 # ---------------------------------------------------------------- DNS 角色

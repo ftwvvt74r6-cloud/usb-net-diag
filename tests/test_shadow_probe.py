@@ -569,23 +569,29 @@ class ProbeIsolationSyntheticTest(unittest.TestCase):
 
 def _baseline(gateway_loss=0.0, gateway_recv=2, gateway_n=2,
               target_loss=100.0, target_recv=0, target_n=0,
-              excluded=4) -> dict:
-    """造一份探针基线（文档示例地址；不出现真实 IP）。"""
+              excluded=4, gateway_sent=2, target_sent=1) -> dict:
+    """造一份探针基线（文档示例地址；不出现真实 IP）。
+
+    ``*_sent=0`` 表示该侧一条探针都没发：``loss_pct`` 必须是 ``None``（无样本），
+    不是 0.0 —— 用来钉住「只有两侧都无样本才算证据不足」。
+    """
     return {
-        "probe_count": 3,
-        "sent": 3,
+        "probe_count": gateway_sent + target_sent,
+        "sent": gateway_sent + target_sent,
         "recv": gateway_recv + target_recv,
         "window": {"started_epoch": 1.0, "finished_epoch": 2.0},
         "excluded_packets": excluded,
         "roles": [
             {"role": "gateway", "kind": "icmp", "target": GW,
-             "sent": 2, "recv": gateway_recv, "loss_pct": gateway_loss, "n": gateway_n,
+             "sent": gateway_sent, "recv": gateway_recv,
+             "loss_pct": gateway_loss if gateway_sent else None, "n": gateway_n,
              "rtt_min_ms": 1.0 if gateway_n else None,
              "rtt_avg_ms": 1.5 if gateway_n else None,
              "rtt_max_ms": 2.0 if gateway_n else None,
              "jitter_ms": 0.5 if gateway_n else None, "errors": []},
             {"role": "target", "kind": "tcp_syn", "target": TARGET,
-             "sent": 1, "recv": target_recv, "loss_pct": target_loss, "n": target_n,
+             "sent": target_sent, "recv": target_recv,
+             "loss_pct": target_loss if target_sent else None, "n": target_n,
              "rtt_min_ms": 9.0 if target_n else None,
              "rtt_avg_ms": 9.0 if target_n else None,
              "rtt_max_ms": 9.0 if target_n else None,
@@ -634,7 +640,7 @@ class ProbeReportTest(unittest.TestCase):
         self.assertIn("对端目标", md)
         self.assertIn(GW, md)
         self.assertIn(TARGET, md)
-        self.assertIn("已从业务统计排除（4 包）", md)
+        self.assertIn("探针标记报文已从业务统计排除（4 包", md)
         self.assertIn("1.0/1.5/2.0 ms", md)
 
     def test_zero_samples_show_not_probed_not_zero_ms(self):
@@ -693,12 +699,62 @@ class ProbeContrastTest(unittest.TestCase):
         self.assertIn("疑似", md)
         self.assertIn("对端侧", md)
 
-    def test_insufficient_when_one_side_has_no_rtt(self):
-        vd = self._verdict(_baseline(gateway_n=0, gateway_recv=0,
-                                     target_n=0, target_recv=0))
+    def test_target_side_when_target_100pct_loss_has_no_rtt(self):
+        """R2：单侧 100% 丢包（n=0）必须判「疑似对端侧」，不能判证据不足。"""
+        baseline = _baseline(gateway_loss=0.0, gateway_recv=2, gateway_n=2,
+                             target_loss=100.0, target_recv=0, target_n=0)
+        vd = self._verdict(baseline)
+        self.assertEqual(vd["probe_contrast"]["code"],
+                         "PROBE.CONTRAST.TARGET_SIDE")
+        self.assertLess(vd["probe_contrast"]["confidence"], 1.0)
+        md = report.render_markdown(_result(baseline, transport=True), vd)
+        self.assertIn("疑似对端侧", md)
+
+    def test_local_side_when_gateway_100pct_loss_has_no_rtt(self):
+        """R2：反向单侧 100% 丢包（网关）→ 疑似本地侧。"""
+        baseline = _baseline(gateway_loss=100.0, gateway_recv=0, gateway_n=0,
+                             target_loss=0.0, target_recv=1, target_n=1)
+        vd = self._verdict(baseline)
+        self.assertEqual(vd["probe_contrast"]["code"],
+                         "PROBE.CONTRAST.LOCAL_SIDE")
+        md = report.render_markdown(_result(baseline, transport=True), vd)
+        self.assertIn("疑似本地侧", md)
+
+    def test_both_sides_high_loss_is_both_sides(self):
+        """R2/R16：两侧都高 → BOTH_SIDES（有 copy 文案，不是死映射）。"""
+        baseline = _baseline(gateway_loss=100.0, gateway_recv=0, gateway_n=0,
+                             target_loss=100.0, target_recv=0, target_n=0)
+        vd = self._verdict(baseline)
+        self.assertEqual(vd["probe_contrast"]["code"],
+                         "PROBE.CONTRAST.BOTH_SIDES")
+        self.assertLess(vd["probe_contrast"]["confidence"], 1.0)
+        md = report.render_markdown(_result(baseline, transport=True), vd)
+        self.assertIn(COPY["probe"]["contrast_both_sides"].split("（")[0], md)
+        self.assertIn("两侧都有明显丢包", md)
+
+    def test_insufficient_only_when_both_sides_have_no_samples(self):
+        """R2：只有两侧都一条探针都没发（sent=0）才叫证据不足。"""
+        baseline = _baseline(gateway_sent=0, gateway_recv=0, gateway_n=0,
+                             target_sent=0, target_recv=0, target_n=0)
+        vd = self._verdict(baseline)
+        self.assertEqual(vd["probe_contrast"]["code"],
+                         "PROBE.CONTRAST.INSUFFICIENT")
+
+    def test_low_loss_on_both_sides_is_insufficient(self):
+        """两侧都能通（丢包率都低）→ 无法归因，不硬指一侧。"""
+        baseline = _baseline(gateway_loss=0.0, gateway_recv=2, gateway_n=2,
+                             target_loss=0.0, target_recv=1, target_n=1)
+        vd = self._verdict(baseline)
         self.assertEqual(vd["probe_contrast"]["code"],
                          "PROBE.CONTRAST.INSUFFICIENT")
         self.assertLess(vd["probe_contrast"]["confidence"], 1.0)
+
+    def test_rtt_sample_count_is_not_sufficiency_gate(self):
+        """R2：对端 n=5 但 0% 丢、网关 0% 丢也不是「充分」到能指一侧。"""
+        baseline = _baseline(gateway_loss=0.0, gateway_recv=2, gateway_n=2,
+                             target_loss=0.0, target_recv=5, target_n=5)
+        self.assertEqual(self._verdict(baseline)["probe_contrast"]["code"],
+                         "PROBE.CONTRAST.INSUFFICIENT")
 
     def test_no_contrast_without_direction_finding(self):
         vd = self._verdict(_baseline(), transport=False)
@@ -841,7 +897,7 @@ class ShadowUiTest(unittest.TestCase):
         probe_copy = COPY["probe"]
         for key in ("ui_title", "ui_hint", "excluded", "th_role", "role_gateway",
                     "contrast_local_side", "contrast_target_side",
-                    "contrast_insufficient"):
+                    "contrast_both_sides", "contrast_insufficient"):
             with self.subTest(key=key):
                 self.assertIn(key, probe_copy)
         start = HTML.index("function renderProbeBaseline(pb, copy, contrast)")

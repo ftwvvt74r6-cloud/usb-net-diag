@@ -1210,10 +1210,11 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
     result = analyzer.analyze(cap["pcap"], target=target,
                               ti_key=cfg.get("threat_intel_key", ""), log=logger,
                               display_filter=display_filter or None)
-    if (not result.get("ok") and display_filter
-            and "filter" in str(result.get("error") or "").lower()):
-        # 显示过滤语法/字段问题属于「防御层」故障：退回未过滤分析保证诊断能出结论，
-        # 但要明确告知结果可能含探针流量（不静默）。
+    if not result.get("ok") and display_filter:
+        # 显示过滤属于「防御层」：无论失败原因是不是 filter（未知字段报
+        # '"bogus.field" is not a valid protocol'、语法错误报 'Unexpected end of
+        # filter expression' …），都**无条件**重试一次未过滤分析，保证诊断能出结论。
+        # 只重试一次（不再检查错误文案、不循环），并明确告知结果可能含探针流量。
         logger("[警告] 探针隔离显示过滤不可用，已退回未过滤分析；"
                "本次统计可能包含探针流量")
         result = analyzer.analyze(cap["pcap"], target=target,
@@ -1246,7 +1247,8 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         baseline["excluded_packets"] = excluded
         result["meta"]["probe_baseline"] = baseline
         logger(f"探针基线：发出 {baseline.get('sent', 0)} 个、收到 "
-               f"{baseline.get('recv', 0)} 个；已从业务统计排除 {excluded} 个探针包")
+               f"{baseline.get('recv', 0)} 个；已从业务统计排除 {excluded} 个标记探针包"
+               f"（ICMP 超时包另计）")
 
     # 路径剖面同样只「有数据才注入」：离线路径没有 cap["path"]，一个键都不加。
     profile = path.get("profile")
@@ -1264,7 +1266,8 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         result["meta"]["path_profile"] = profile
         logger(f"路径剖面：{len(profile.get('hops') or [])} 跳（方式 {profile.get('method')}），"
                f"第 {profile.get('degraded_ttl') or '—'} 跳开始劣化；"
-               f"已从业务统计排除 {excluded_icmp} 个 ICMP 超时包")
+               f"已从业务统计剔除 {excluded_icmp} 个 ICMP 超时包"
+               f"（含非探针流量，{excluded_icmp} 为上限）")
 
     if result["meta"]["packets"] == 0:
         result["rows"].insert(0, {

@@ -181,7 +181,7 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 写请求检查 `Origin`（无 Origin 的本机程序放行）；JSON body 上限 8 MB、上传上限 2 GB。
 
 > **路由计数**：**核心 API = 10 个 POST + 2 个 GET**（`/api/ping`、`/api/app`）。
-> `do_GET` 另外还服务 8 个只读端点与静态页，完整清单见 4.2/4.3。
+> `do_GET` 另外还服务 9 个只读端点与静态页，完整清单见 4.2/4.3。
 
 ### 4.1 响应信封的现状（重要）
 
@@ -206,12 +206,12 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `POST /api/ai/analyze` | `{result?, question?}`；省略 result 用最近一次 `JOB.result` | AI 结论 + `model` + `latency_ms` + 可选 `markdown`（写 `reports/<stem>.ai.md`） |
 | `POST /api/passive` | `{interface?, duration, target?, engine?}`（`auto/scapy/tshark`） | `{ok: true, engine}`；后台跑，轮询 `GET /api/passive` |
 | `POST /api/passive/stop` | 无 | `{ok: true}`（置停止标志，后台收尾） |
-| `POST /api/probe` | `{target, port?, count?, timeout?, proto?}` | `probe.run()` 结果（分段耗时/协议/结论） |
-| `POST /api/scan` | `{mode: live/scan/offline, target?, duration?, interface?, pcap?}`；offline 的 pcap 只接受 `captures/` 下文件名 | `{ok: true}`；后台任务，轮询 `/api/status` |
+| `POST /api/probe` | `{target, port?, count?, timeout?, proto?, path?}`（`path` 默认 true，加法字段） | `probe.run()` 结果（分段耗时/协议/结论；`path=true` 时附逐跳路径） |
+| `POST /api/scan` | `{mode: live/scan/offline, target?, duration?, interface?, pcap?, shadow?}`（`shadow` 默认 true，加法字段）；offline 的 pcap 只接受 `captures/` 下文件名 | `{ok: true}`；后台任务，轮询 `/api/status` |
 | `POST /api/diagpack` | `{raw?: bool, include_reports?: bool}` | `{ok: true, path, size, entries}`（默认脱敏） |
 | `POST /api/upload` | 原始字节 + `?name=x.pcap`；只收 `.pcap/.pcapng/.cap` | `{ok: true, file, size}`（落到 `captures/`） |
 
-### 4.3 GET 路由（2 个核心 + 8 个只读 + 静态页）
+### 4.3 GET 路由（2 个核心 + 9 个只读 + 静态页）
 
 | 路由 | 用途 | 响应关键键 |
 |---|---|---|
@@ -225,7 +225,8 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
 | `GET /api/doctor` | 环境自检（缓存 60s） | `bootstrap.check()` 结果 |
 | `GET /api/passive` | 通信观察状态 | `state/result/error/engine/engine_info/elapsed` |
 | `GET /api/ai` | AI 配置（Key 脱敏） | `public_config()` |
-| `GET /api/probe?target=&port=&count=&proto=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果 |
+| `GET /api/probe?target=&port=&count=&proto=&path=` | 连通与速度测试（链路体检，GET 便捷入口） | `probe.run()` 结果；`path=0` 关闭逐跳（默认开） |
+| `GET /api/evidence?full=0\|1&fmt=md\|txt` | 通用取证请求单（只读、纯计算、不写文件） | `ok/fmt/full/dimensions/content`；`full=1` 无结果也返回全 7 维 |
 
 注意 `/api/probe` 同时有 GET 与 POST；两者都受并发闸门 `MAX_CONCURRENT_PROBE = 3` 限制。
 
@@ -259,9 +260,11 @@ core/report.py::render_markdown() / save()      # Markdown + JSON（JSON 只写 
    （`arp_no_reply` / `icmp_unreachable` / `dns_timeout` / `tcp_retransmission` /
    `zero_window_client` / `http_500` / `404_error` / `udp_no_response` / `empty_capture`）。
    当前 demo 期望：`verdict.level=严重`、`layer=L4 传输层｜TCP`、严重 3 / 警告 5。
-2. **`reports/` 零改动**：`reports/faults_demo.md` 与 `.json` 是入库快照；测试/实验用
+2. **`reports/` 仅声明例外、其余零改动**：`reports/faults_demo.md` 与 `.json` 是入库
+   快照；本批唯一例外是 `reports/faults_demo.md` **末尾追加「取证请求单」区块**
+   （纯后缀，`reports/faults_demo.json` 必须逐字节不变）；测试/实验用
    `--report-out` 或临时目录，不要写仓库 `reports/`。
-3. **测试只增不减**：当前 480 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
+3. **测试只增不减**：当前 555 条；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
 4. **自动生成的文档不许手改**：`docs/api-reference.md`、`docs/docstring-gaps.md` 由
    `scripts/gen_api_doc.py` 从源码生成，手改下次就被覆盖，CI 的 doc-sync 会红。
 5. **文案单一来源**：用户可见中文一律 `core/copy/zh-CN.json`，代码里只留 key；
@@ -352,7 +355,8 @@ git worktree remove --force .ci-check
 ```
 
 > 干净 checkout 没有 `tools/`、`config/app-config.json`、历史 `logs/`，所以：
-> 测试数为 480，但 **skip 数会变成 27**（本机完整环境是 skipped=2）。这是正常现象，不是失败。
+> 测试数为 555，但 **skip 数会变成约 27（取决于环境，以 CI 日志为准）**
+> （本机完整环境是 skipped=2）。这是正常现象，不是失败。
 
 ### 6.6 改了 `core/` 就重生成文档
 
@@ -396,14 +400,14 @@ CI 双绿 + 独立审查无阻塞后，才进入合并队列。
 | 步骤 | 命令 | 作用 |
 |---|---|---|
 | Python 语法编译 | `python -m compileall -q core mcp tests` | 全量语法检查 |
-| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 480 条（按环境 skip） |
+| 启动器契约测试 | `python -m unittest discover -s tests -v` | 全套 555 条（按环境 skip） |
 | 密钥泄露扫描 | `git grep -nEI 'sk-...|r8_...|gh[opsu]_...'` | 防止把 Key 提交进 public 仓库 |
 
 ### 7.2 `api-docs`（Ubuntu，最便宜）
 
 | 步骤 | 命令 | 作用 |
 |---|---|---|
-| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 257/257 = 100.0%（30 模块） |
+| 注释覆盖率 ≥ 95% | `python scripts/gen_api_doc.py --check 0.95` | 当前 281/281 = 100.0%（31 模块） |
 | 文档与源码同步 | `python scripts/gen_api_doc.py` + `git diff --exit-code docs/api-reference.md docs/docstring-gaps.md` | 禁止手改生成文档 |
 
 ### 7.3 CI 里会 skip 什么
@@ -412,7 +416,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 | 缺失 | 影响 |
 |---|---|
-| tshark | 需要真 pcap 的用例 `skipUnless`；干净 checkout 共 19 skip |
+| tshark | 需要真 pcap 的用例 `skipUnless`；干净 checkout 约 27 skip（取决于环境） |
 | 管理员 + Npcap + 真实流量 | `tests/selftest.py` §3 通信观察（被动监听） → unittest 里只验证 skip 传播 |
 | openssl | selftest §2b TLS 自检 → skip（Windows runner 可能自带 openssl，skip 数会少 1，以日志为准） |
 | Linux 换行 | 生成器固定写 LF；不要用 `os.linesep`/平台默认编码生成文档 |
@@ -424,7 +428,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 
 ---
 
-## 8. 代码地图（`core/` 29 个 .py + 外围）
+## 8. 代码地图（`core/` 30 个 .py + 外围）
 
 > 每个文件一句话职责。行数/签名细节看 `docs/api-reference.md`（自动生成，签名永远是真的）。
 
@@ -481,7 +485,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `scripts/dump_features.py` | pcap → `Features` fixture（`tests/fixtures/faults_features.json`） |
 | `scripts/make_icon.py` | 生成 `NetDiag.ico` 与 `docs/assets/logo-*.png`（不依赖第三方库） |
 | `ui/index.html` | 单文件控制台（1,451 行；无构建链、无前端框架） |
-| `tests/` | 27 个 `test_*.py`（480 条）+ `tests/selftest.py` 人工自检脚本 |
+| `tests/` | 27 个 `test_*.py`（555 条）+ `tests/selftest.py` 人工自检脚本 |
 | `scaffold/` | v0.1.0 时期的迁移骨架/历史资料；**不要整体覆盖 `core/`**，其中 `gen_pcap.py` 可生成 9 个样本 |
 
 > 目标架构里的 `core/capture/`、`core/egress/`、`core/render/`、`core/api/`、`core/history.py`
@@ -497,10 +501,11 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `AGENTS.md` | 硬约束清单（不推 main、不改模块边界等） | ⚠️ 部分目录表是目标架构 |
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
-| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 30/257 |
+| `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 31/281 |
 | `docs/logging.md` | `logs/` 目录、字段、裁剪规则 | ✅ 当前 |
 | `docs/shadow-probe.md` | 影子探测：目标发现、双过滤隔离、探针基线/方向对照、明确不做的边界 | ✅ 当前（D 批次） |
 | `docs/path-probe.md` | 路径剖面（MTR）：逐跳表怎么读、劣化阈值、ICMP→TCP 降级、TUN 限制、time-exceeded 隔离与残余风险、DNS 角色 | ✅ 当前（D+ 增量 2） |
+| `docs/evidence-checklist.md` | 通用取证请求单：7 个证据来源方、结论→维度映射、报告/界面/API 用法、隐私与回填边界 | ✅ 当前（D+ 增量 3） |
 | `docs/log-collection.md` | 诊断包三个入口、脱敏、raw 警告 | ✅ 当前 |
 | `docs/overview.md` | 一页看懂产品与**目标**分层 | ⚠️ §2 数据流是目标架构，不是 `analyze()` 现状 |
 | `docs/START-HERE.md` | v0.1.0 的历史交接包（54 用例/骨架/COPY-MAP） | ❌ 历史，数字已过期 |
@@ -542,7 +547,7 @@ git remote set-url origin https://github.com/<your-owner>/<your-repo>.git
 #    或设 $env:TSHARK_PATH 指向已有 tshark
 
 # 4) 不配置、不装依赖，直接跑
-python -m unittest discover -s tests        # 期望 480 条，OK (skipped=27)
+python -m unittest discover -s tests        # 期望 555 条，OK (skipped≈27，取决于环境)
 
 # 5) 要发版再改版本号
 #    VERSION（唯一权威）与 core/__init__.py 的 __version__ 两处同步
@@ -636,7 +641,7 @@ python -m unittest discover -s tests        # 期望 480 条，OK (skipped=27)
 ```powershell
 # 1) 全套测试（干净环境；不需要 tshark）
 <python> -m unittest discover -s tests
-# 期望：Ran 480 tests ... OK (skipped=27)
+# 期望：Ran 555 tests ... OK (skipped≈27，取决于环境)
 
 # 2) demo 报告（需要 tshark；没有就跳过这一步）
 #    有 tools\ 时先指路：

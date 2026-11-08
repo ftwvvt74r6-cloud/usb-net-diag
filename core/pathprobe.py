@@ -44,8 +44,11 @@
 3. **ICMP time-exceeded 无法按 id 认领**：路径上设备回的 ICMP type 11 里，外层
    ICMP 的 ident 不是我们的 :data:`PROBE_ID`（原始 id 埋在「原始 IP 头 + 8 字节」
    里）。所以 MTR 期间在**显示过滤**追加 ``not (icmp.type == 11)``，并用
-   :func:`count_time_exceeded_packets` 把「被排除的路径探测相关 ICMP 数」写进报告。
-   残余风险（同一窗口其它流量的 TTL 超时也会被一起排除）写在 ``docs/path-probe.md``。
+   :func:`count_time_exceeded_packets` 把「本窗口内被整类排除的 ICMP 超时包数」
+   写进报告。Wireshark 的 ``icmp.ident`` 会命中 type 11 内嵌的原始报文，因此
+   :func:`probe_marker_display_filter` 显式排除 type 11 —— 两处计数**互斥**，
+   避免同一个包既算「标记探针包」又算「ICMP 超时包」。残余风险（同一窗口其它
+   流量的 TTL 超时也会被一起排除，N 是上限）写在 ``docs/path-probe.md``。
 4. **时钟对齐**：pcap 用系统时钟（``frame.time_epoch``），探测用
    ``time.monotonic()``；两者有偏移。所以只记 ``sent_epoch`` 做区间归属，
    不逐包对齐；逐跳 RTT 用 scapy 自己的 ``sent_time`` 与收包时间之差。
@@ -57,7 +60,7 @@ import socket
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
@@ -125,11 +128,19 @@ class ProbeKind(str, Enum):
 
 
 class HopStatus(str, Enum):
-    """路径探测（MTR）单跳的状态机；本批只用 ``classify()`` 的判定口径。"""
+    """路径探测（MTR）单跳的状态（机器码，中文文案在 copy 表）。
+
+    ``OK`` 与 ``LOSS`` 保留既有语义（正常 / 全部超时）；``DEGRADED`` 是本批新增的
+    「劣化」值，用于「丢包 ≥ 阈值但仍有响应」或「RTT 相对基线突增」的跳 ——
+    这种跳不能再显示成「正常」，否则表格与「第几跳开始劣化」的结论自相矛盾。
+    ``FILTERED`` / ``UNREACHABLE`` / ``NO_TARGET`` 是保留机器码（当前由结论句 /
+    方法标注表达，未逐跳赋值）。
+    """
 
     OK = "ok"
     LOSS = "loss"
-    FILTERED = "filtered"      # 不回 ICMP，但目标端口可达 → 被策略过滤，不是故障
+    DEGRADED = "degraded"      # 丢包 ≥ 阈值但仍有响应，或 RTT 突增
+    FILTERED = "filtered"      # 预留：不回 ICMP，但目标端口可达 → 被策略过滤
     UNREACHABLE = "unreachable"
     NO_TARGET = "no_target"
 
@@ -478,10 +489,14 @@ class PathProbeResult:
 
 def classify(hops: Sequence[HopStat],
              target_port_reachable: bool | None = None) -> tuple[str, bool]:
-    """把逐跳统计翻成「该找谁」。
+    """把逐跳统计翻成「该找谁」（SPEC V7 要求保留的公开 API，主路径用 :func:`summarize_path`）。
 
     四态的关键是**最后一种**：全部都丢但目标端口 TCP 可通 → 这不是故障，是
     ICMP 被策略过滤（企业网常见），不能把「被过滤」误判成「链路故障」。
+
+    本函数只做「按最终响应者定界」的旧口径；它不计算 RTT 突增、不区分「探测未完成」。
+    实时路径 / 报告 / 服务端**主路径一律走 :func:`summarize_path`**，这里保留是为了
+    兼容既有调用方与 SPEC 的公开 API 形状。阈值复用模块常量，避免出现第二套魔数。
 
     Args:
         hops: 逐跳统计（按 TTL 顺序）。
@@ -496,19 +511,23 @@ def classify(hops: Sequence[HopStat],
     if not hops:
         return "PATH.NO_DATA", False
 
-    losing = [h for h in hops if h.status is HopStatus.LOSS or h.loss_pct >= 20.0]
+    losing = [h for h in hops
+              if h.status in (HopStatus.LOSS, HopStatus.DEGRADED)
+              or h.loss_pct >= PATH_LOSS_DEGRADED_PCT]
     if not losing:
         return "PATH.OK", False
 
-    # ICMP 全丢但 TCP 可达 → 过滤
-    if target_port_reachable and all(h.loss_pct >= 90.0 for h in hops):
+    # ICMP 全丢但 TCP 可达 → 过滤（PATH_ICMP_FILTER_LOSS_PCT 只在这里使用；
+    # 主路径的同一判定在 summarize_path / run() 里按「一个响应都没有」表达）。
+    if (target_port_reachable
+            and all(h.loss_pct >= PATH_ICMP_FILTER_LOSS_PCT for h in hops)):
         return "PATH.ICMP_FILTERED", True
 
     first = hops[0]
     last = hops[-1]
-    if first.loss_pct >= 20.0:
+    if first.loss_pct >= PATH_LOSS_DEGRADED_PCT:
         return "PATH.LOCAL_SIDE", False       # 终端侧 / 接入层
-    if last.loss_pct >= 20.0 and len(losing) == 1:
+    if last.loss_pct >= PATH_LOSS_DEGRADED_PCT and len(losing) == 1:
         return "PATH.SERVER_EDGE", False      # 仅末跳丢 → 服务端接入链路
     return "PATH.TRANSPORT_NET", False        # 中间跳丢 → 承载网 / 运营商
 
@@ -572,6 +591,8 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
         ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
         ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
         ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
+        ``status`` 与劣化判定同源：全部超时 → ``LOSS``；丢包 ≥
+        :data:`PATH_LOSS_DEGRADED_PCT` 或 RTT 突增 → ``DEGRADED``；否则 ``OK``。
 
     Example:
         >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
@@ -595,9 +616,15 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
         rtts = [float(item["rtt_ms"]) for item in samples
                 if item.get("responded") and item.get("rtt_ms") is not None]
         lost = sent - sum(1 for item in samples if item.get("responded"))
+        loss_pct = (lost / sent * 100.0) if sent else 0.0
+        if sent and lost == sent:
+            status = HopStatus.LOSS
+        elif sent and loss_pct >= PATH_LOSS_DEGRADED_PCT:
+            status = HopStatus.DEGRADED
+        else:
+            status = HopStatus.OK
         hop = HopStat(ttl=ttl, ip=ip, sent=sent, lost=lost, rtt_n=len(rtts),
-                      status=HopStatus.LOSS if sent and lost == sent
-                      else HopStatus.OK)
+                      status=status)
         if rtts:
             avg = sum(rtts) / len(rtts)
             jitter = (sum((value - avg) ** 2 for value in rtts) / len(rtts)) ** 0.5
@@ -608,7 +635,13 @@ def build_hop_stats(rows: Iterable[Mapping]) -> tuple[HopStat, ...]:
                           rtt_max_ms=round(max(rtts), 1),
                           jitter_ms=round(jitter, 1), rtt_n=len(rtts))
         out.append(hop)
-    return tuple(out)
+    hops = tuple(out)
+    # RTT 突增要拿「整条路径的基线」才能判，所以在聚合完成后统一补一次状态；
+    # 只升级仍为 OK 的跳（全丢 / 部分丢已经由上面的丢包判据标过）。
+    flagged = set(degraded_hops(hops))
+    return tuple(replace(hop, status=HopStatus.DEGRADED)
+                 if hop.status is HopStatus.OK and hop.ttl in flagged else hop
+                 for hop in hops)
 
 
 def degraded_hops(hops: Sequence[HopStat]) -> tuple[int, ...]:
@@ -843,6 +876,11 @@ def exclusion_display_filter(kinds: Iterable[ProbeKind]) -> str:
 def probe_marker_display_filter(kinds: Iterable[ProbeKind]) -> str:
     """生成「只匹配探针报文」的显示过滤（用于统计 pcap 里混进了多少探针包）。
 
+    ICMP 片段**显式排除 type 11**：Wireshark 的 ``icmp.ident`` 对 ICMP 错误报文会
+    命中内嵌的原始报文，不排除就会把我们自己的 time-exceeded 也算成「标记探针包」，
+    与 :func:`count_time_exceeded_packets` 的整类计数重复。两处口径因此互斥：
+    标记包 + type 11 包 = 本窗口被排除的互不重叠的包。
+
     Args:
         kinds: 本次会发出的探针协议集合。
 
@@ -853,7 +891,8 @@ def probe_marker_display_filter(kinds: Iterable[ProbeKind]) -> str:
     parts: list[str] = []
     if ProbeKind.ICMP in kinds:
         parts.append(f"((icmp.type == 8 or icmp.type == 0) "
-                     f"and icmp.ident == {PROBE_ID:#06x})")
+                     f"and icmp.ident == {PROBE_ID:#06x} "
+                     f"and not (icmp.type == {ICMP_TIME_EXCEEDED}))")
     if ProbeKind.TCP_SYN in kinds:
         low, high = PROBE_SRC_PORT_RANGE
         parts.append(f"((tcp.srcport >= {low} and tcp.srcport <= {high}) or "
@@ -1406,10 +1445,14 @@ def _tshark_module():
 
 
 def count_marked_packets(tshark_path, pcap, kinds: Iterable[ProbeKind]) -> int:
-    """用 tshark 显示过滤统计 pcap 里混进了多少**探针报文**。
+    """用 tshark 显示过滤统计 pcap 里混进了多少**标记探针报文**。
 
     这是「已排除 N 个探针包」这句报告文案的取数口：抓包 BPF 生效时应为 0；
     不为 0 说明 BPF 没盖住（例如抓的是 TUN 网卡），分析阶段的显示过滤会兜底。
+
+    口径与 :func:`count_time_exceeded_packets` **互斥**：ICMP 片段排除 type 11，
+    因此本函数不会把路径设备回的 time-exceeded（即使内嵌我们的 ``PROBE_ID``）
+    算进来；那些包由 ``path_profile.excluded_icmp`` 统一计数。
 
     Args:
         tshark_path: tshark 可执行文件路径（``Path`` 或字符串）。
@@ -1417,7 +1460,7 @@ def count_marked_packets(tshark_path, pcap, kinds: Iterable[ProbeKind]) -> int:
         kinds: 本次会发出的探针协议集合。
 
     Returns:
-        int: 命中的探针报文条数；表达式为空 / tshark 失败 / 文件读不了都返回 0
+        int: 命中的标记探针报文条数；表达式为空 / tshark 失败 / 文件读不了都返回 0
             （统计失败不改变诊断结论）。
     """
     expression = probe_marker_display_filter(kinds)
@@ -1440,8 +1483,10 @@ def count_time_exceeded_packets(tshark_path, pcap) -> int:
     """统计 pcap 里的 ``ICMP type 11``（TTL 超时）报文数。
 
     MTR 期间设备回的 time-exceeded 认不出探针 id，只能整类排除；这个数字就是
-    「已排除 N 个路径探测相关 ICMP」的取数口（同窗口其它流量的 TTL 超时也会被
-    算进来 —— 这是残余风险，文档里写明）。
+    「本窗口内已从统计剔除的 ICMP 超时包数」的取数口。它**包含非探针流量**的
+    TTL 超时，所以报告里写明 N 是上限，不是「路径探测相关」的精确归因。
+    与 :func:`count_marked_packets` 互斥（后者显式排除 type 11），两数相加即
+    本窗口被两道显示过滤剔除的互不重叠报文数。
 
     Args:
         tshark_path: tshark 可执行文件路径（``Path`` 或字符串）。
@@ -1693,7 +1738,7 @@ def _truncate_at_target(rows: Sequence[Mapping], ip: str) -> list[dict]:
 def _scan_hops(ip: str, method: str, max_hops: int, samples: int,
                timeout_s: float, port: int | None,
                should_stop: Callable[[], bool] | None,
-               sender: PathSender) -> tuple[list[dict], bool, str]:
+               sender: PathSender) -> tuple[list[dict], bool, str, int]:
     """按批扫 TTL 1..max_hops（内部函数）：到目标即停、可取消、失败只降级。
 
     Args:
@@ -1707,16 +1752,19 @@ def _scan_hops(ip: str, method: str, max_hops: int, samples: int,
         sender: 批量发送器。
 
     Returns:
-        tuple[list[dict], bool, str]: ``(rows, completed, error)``。``completed``
-            为 False 表示被取消/预算耗尽；``error`` 非空表示整条路径探测不可用
-            （每批都抛异常，例如 scapy 未安装）—— 此时 ``rows`` 为空，调用方
-            不应把「没发出包」当成「全部丢包」。
+        tuple[list[dict], bool, str, int]: ``(rows, completed, error, probes_sent)``。
+            ``completed`` 为 False 表示被取消/预算耗尽；``error`` 非空表示整条路径
+            探测不可用（每批都抛异常，例如 scapy 未安装）—— 此时 ``rows`` 为空，
+            调用方不应把「没发出包」当成「全部丢包」。``probes_sent`` 是**实际
+            交给发送器的探测包数**（按批累计，不受 ``_truncate_at_target`` 截断
+            影响）；发送器整批抛异常的那一批计 0（没有证据证明包发出去了）。
     """
     rows: list[dict] = []
     errors: list[str] = []
     batches = 0
     failed = 0
     completed = True
+    probes_sent = 0
     seq = 0
     for start in range(1, max_hops + 1, PATH_BATCH_HOPS):
         ttls = list(range(start, min(start + PATH_BATCH_HOPS, max_hops + 1)))
@@ -1735,14 +1783,15 @@ def _scan_hops(ip: str, method: str, max_hops: int, samples: int,
             failed += 1
             errors.append(f"{type(exc).__name__}: {exc}")
             continue
+        probes_sent += len(probes)
         rows.extend(got)
         reached = any(item.get("responded") and str(item.get("responder")) == ip
                       for item in got)
         if reached:
             break
     if batches and failed == batches:
-        return [], False, (errors[0] if errors else "路径探测不可用")
-    return rows, completed, ""
+        return [], False, (errors[0] if errors else "路径探测不可用"), probes_sent
+    return rows, completed, "", probes_sent
 
 
 def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_HOPS,
@@ -1761,7 +1810,9 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
        ``sr()``；收到目标自己的回复即停；
     4. 若 ICMP **一个响应都没有**而目标端口 TCP 可达 → 判定 ICMP 被策略过滤，
        改用 **TCP SYN 逐跳**重扫（样本减半），结果带 ``icmp_filtered=True`` /
-       ``method="tcp"``；TCP 也不可达 → ``PATH.NO_DATA`` + ``unreachable=True``；
+       ``method="tcp"``，且 ``verdict_key`` 固定为 ``PATH.ICMP_FILTERED``
+       （TCP 有响应只证明端口可达，不能反推「ICMP 路径正常」）；TCP 也不可达 →
+       ``PATH.NO_DATA`` + ``unreachable=True``；
     5. :func:`summarize_path` 给出「第几跳开始劣化 + 该找谁」，TUN/代理再给提示。
 
     Args:
@@ -1817,7 +1868,7 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
             reachable, used_port = None, None
 
     send = sender or _scapy_send_batch
-    rows, completed, scan_error = _scan_hops(
+    rows, completed, scan_error, probes_sent = _scan_hops(
         ip, "icmp", max_hops, samples, timeout_s, None, should_stop, send)
     rows = _truncate_at_target(rows, ip)
     method = "icmp"
@@ -1829,10 +1880,12 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
             # ICMP 全丢但目标端口 TCP 可达 → 被策略过滤，改用 TCP SYN 逐跳重扫。
             icmp_filtered = True
             tcp_samples = max(1, samples // 2)
-            tcp_rows, tcp_completed, tcp_error = _scan_hops(
+            tcp_rows, tcp_completed, tcp_error, tcp_sent = _scan_hops(
                 ip, "tcp", max_hops, tcp_samples, timeout_s, used_port,
                 should_stop, send)
             completed = completed and tcp_completed
+            # TCP 回退包也是实发探测包：即使最终采用 TCP 行，计数都必须包含它们。
+            probes_sent += tcp_sent
             tcp_rows = _truncate_at_target(tcp_rows, ip)
             if tcp_rows:
                 rows = tcp_rows
@@ -1846,20 +1899,25 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
         return PathProbeResult(target=original, target_ip=ip,
                                verdict_key=PATH_NO_DATA, icmp_filtered=icmp_filtered,
                                target_port_reachable=reachable, ledger=dict(
-                                   ledger, probes_sent=len(rows)),
+                                   ledger, probes_sent=probes_sent),
                                method=method, completed=completed,
                                max_hops=max_hops, samples=samples,
-                               timeout_s=timeout_s, probes_sent=len(rows),
+                               timeout_s=timeout_s, probes_sent=probes_sent,
                                error=scan_error)
 
     hops = build_hop_stats(rows)
     summary = summarize_path(hops, reachable, method=method, target_ip=ip)
+    # ICMP 扫描全丢、TCP 回退成功时，结论必须是「ICMP 被过滤」而不是「整条路径
+    # 未观察到劣化」：TCP 有响应是**降级探测**的结果，不能反过来证明 ICMP 正常。
+    # 若 TCP 路径本身也劣化，degraded_ttl / baseline 仍保留，报告两条都写。
+    verdict_key = (PATH_ICMP_FILTERED if icmp_filtered
+                   else str(summary["verdict_key"]))
     result = PathProbeResult(
         target=original, target_ip=ip, hops=hops,
-        verdict_key=str(summary["verdict_key"]),
+        verdict_key=verdict_key,
         icmp_filtered=icmp_filtered,
         target_port_reachable=reachable,
-        ledger=dict(ledger, probes_sent=len(rows), method=method),
+        ledger=dict(ledger, probes_sent=probes_sent, method=method),
         method=method,
         degraded_ttl=summary["degraded_ttl"],
         baseline_ms=summary["baseline_ms"],
@@ -1868,7 +1926,7 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
         tun_suspected=bool(summary["tun_suspected"]),
         unreachable=bool(summary["unreachable"]),
         max_hops=max_hops, samples=samples, timeout_s=timeout_s,
-        probes_sent=len(rows), error=note)
+        probes_sent=probes_sent, error=note)
     return result
 
 

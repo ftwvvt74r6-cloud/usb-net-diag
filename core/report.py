@@ -118,10 +118,10 @@ def _path_method_text(profile: dict) -> str:
 
 
 def _path_status_text(status: str) -> str:
-    """单跳状态机器码（ok/loss/filtered/...）→ 中文文案。
+    """单跳状态机器码（ok/degraded/loss/...）→ 中文文案。
 
     Args:
-        status: ``HopStatus`` 的机器码。
+        status: ``HopStatus`` 的机器码（``ok`` / ``degraded`` / ``loss`` ……）。
 
     Returns:
         str: 可直接展示的状态名；未知值原样返回。
@@ -188,6 +188,18 @@ def _render_path_profile(profile: dict) -> list[str]:
     verdict = _path_verdict_text(profile)
     if verdict:
         lines.append(verdict)
+    # 中间跳丢包但后续跳恢复（目标响应，或更后面的跳 0 丢包）：这在企业网里常是
+    # 「路由设备对 TTL 回复限速」，不能仅凭中间跳直接断言承载网故障。
+    degraded_ttl = profile.get("degraded_ttl")
+    recovered = bool(profile.get("reached_target"))
+    if degraded_ttl is not None:
+        recovered = recovered or any(
+            int(hop.get("ttl") or 0) > int(degraded_ttl)
+            and int(hop.get("sent") or 0) > 0
+            and float(hop.get("loss_pct") or 0.0) == 0.0
+            for hop in hops)
+    if str(profile.get("verdict_key") or "") == "PATH.TRANSPORT_NET" and recovered:
+        lines.append(_pa("mid_hop_loss_hint"))
     if profile.get("degraded_ttl") is not None:
         lines.append(_pa("degraded_line", ttl=profile.get("degraded_ttl")))
         if profile.get("baseline_ms") is not None:
@@ -277,6 +289,7 @@ def _probe_contrast_text(contrast: dict) -> str:
 
     Returns:
         str: 可直接展示的中文（措辞含「疑似」由 copy 表保证）；未知 code 返回空串。
+            ``loss_pct`` 为 ``None``（该侧没有探针样本）时显示 ``-``，不写 ``None``。
     """
     code = str(contrast.get("code") or "")
     keys = {
@@ -288,8 +301,10 @@ def _probe_contrast_text(contrast: dict) -> str:
     key = keys.get(code)
     if not key:
         return ""
-    return _p(key, gateway=contrast.get("gateway_loss_pct", "-"),
-              target=contrast.get("target_loss_pct", "-"),
+    gateway = contrast.get("gateway_loss_pct")
+    target = contrast.get("target_loss_pct")
+    return _p(key, gateway="-" if gateway is None else gateway,
+              target="-" if target is None else target,
               confidence=contrast.get("confidence", "-"))
 
 
@@ -596,7 +611,10 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     evidence_block = evidence_mod.render_checklist_markdown(checklist)
     if evidence_block:
         L += ["", evidence_block.rstrip("\n")]
-    return "\n".join(L)
+    # 与 main 的报告保持一致：输出总以单个 \n 结尾（追加区块后尤其容易漏，
+    # 会让 git diff 出现 "\ No newline at end of file" 的额外噪声）。
+    text = "\n".join(L)
+    return text if text.endswith("\n") else text + "\n"
 
 
 def _rcode_text(code: str) -> str:
