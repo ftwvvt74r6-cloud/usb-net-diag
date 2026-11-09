@@ -37,6 +37,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "core"))
 
 import analyzer  # noqa: E402
@@ -46,9 +47,10 @@ import report  # noqa: E402
 import server  # noqa: E402
 import tshark  # noqa: E402
 import verdict  # noqa: E402
+import _uisrc  # noqa: E402
 from core.platform import winapi  # noqa: E402
 
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+HTML = _uisrc.html()
 COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
 
 #: 文档示例地址（RFC 5737），仓库里不出现真实 IP。

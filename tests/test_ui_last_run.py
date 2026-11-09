@@ -27,10 +27,12 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+sys.path.insert(0, str(ROOT / "tests"))
+import _uisrc  # noqa: E402
+HTML = _uisrc.html()
 #: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
 #: 断言内容与严格程度与拆分前完全一致（不是放宽）。
-CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
+CSS = _uisrc.css()
 COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
 LAST_RUN_COPY = COPY["last_run"]
 SETTINGS_COPY = COPY["settings"]
