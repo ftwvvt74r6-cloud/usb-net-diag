@@ -7,9 +7,9 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**33** 个（有模块说明 33 个）
-- 公开符号：**314** 个（有 docstring 314 个，合格 314 个）
-- 合格率：**100.0%**（目标 ≥ 95%，见 `docs/api-style.md`）
+- 扫描模块：**34** 个（有模块说明 34 个）
+- 公开符号：**317** 个（有 docstring 317 个，合格 315 个）
+- 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
 
@@ -5351,32 +5351,63 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `touch` | function | 152 | ✅ |
-| `request_quit` | function | 157 | ✅ |
-| `cleanup_pid` | function | 205 | ✅ |
-| `BodyTooLarge` | class | 215 | ✅ |
-| `doctor_cached` | function | 294 | ✅ |
-| `log` | function | 411 | ✅ |
-| `evidence_payload` | function | 507 | ✅ |
-| `conclusion_report_id` | function | 631 | ✅ |
-| `build_status_conclusion` | function | 662 | ✅ |
-| `start_job` | function | 1018 | ✅ |
-| `report_index` | function | 1079 | ✅ |
-| `request_elevation` | function | 1113 | ✅ |
-| `preflight_payload` | function | 1151 | ✅ |
-| `engine_info` | function | 1195 | ✅ |
-| `passive_start` | function | 1238 | ✅ |
-| `passive_status` | function | 1273 | ✅ |
-| `link_actions` | function | 1347 | ✅ |
-| `Handler` | class | 1428 | ✅ |
-| `Handler.handle_one_request` | method | 1454 | ✅ |
-| `Handler.log_message` | method | 1499 | ✅ |
-| `Handler.do_GET` | method | 1637 | ✅ |
-| `Handler.do_POST` | method | 1659 | ✅ |
-| `DiagServer` | class | 1970 | ✅ |
-| `DiagServer.handle_error` | method | 1981 | ✅ |
-| `create_server` | function | 2009 | ✅ |
-| `main` | function | 2056 | ✅ |
+| `static_asset` | function | 102 | ✅ |
+| `touch` | function | 209 | ✅ |
+| `request_quit` | function | 214 | ✅ |
+| `cleanup_pid` | function | 262 | ✅ |
+| `BodyTooLarge` | class | 272 | ✅ |
+| `doctor_cached` | function | 351 | ✅ |
+| `log` | function | 468 | ✅ |
+| `evidence_payload` | function | 564 | ✅ |
+| `conclusion_report_id` | function | 688 | ✅ |
+| `build_status_conclusion` | function | 719 | ✅ |
+| `start_job` | function | 1075 | ✅ |
+| `report_index` | function | 1136 | ✅ |
+| `request_elevation` | function | 1170 | ✅ |
+| `preflight_payload` | function | 1208 | ✅ |
+| `engine_info` | function | 1252 | ✅ |
+| `passive_start` | function | 1295 | ✅ |
+| `passive_status` | function | 1330 | ✅ |
+| `link_actions` | function | 1404 | ✅ |
+| `Handler` | class | 1485 | ✅ |
+| `Handler.handle_one_request` | method | 1511 | ✅ |
+| `Handler.log_message` | method | 1556 | ✅ |
+| `Handler.do_GET` | method | 1694 | ✅ |
+| `Handler.do_POST` | method | 1716 | ✅ |
+| `DiagServer` | class | 2036 | ✅ |
+| `DiagServer.handle_error` | method | 2047 | ✅ |
+| `create_server` | function | 2075 | ✅ |
+| `main` | function | 2122 | ✅ |
+
+### `static_asset`
+
+```python
+def static_asset(path: str)
+```
+
+```text
+把请求路径解析成 ``ui/`` 下可安全读取的白名单文件。
+
+Args:
+    path: ``urlparse`` 得到的原始 path（可能含 ``%2e`` / ``%2f`` 之类编码）。
+
+Returns:
+    Path | None: 通过全部检查的文件；不合法一律返回 ``None``，由调用方回 404
+    —— 刻意不回 403，以免告诉探测者「这个路径存在」。
+
+Note:
+    四道关，缺一不可：
+
+    1. 先 ``unquote`` 解码**再**判断 —— 不先解码就挡不住 ``%2e%2e``；
+    2. 逐段拒绝 ``..`` / ``.`` / 反斜杠 / NUL。反斜杠在 POSIX 语义里不是分隔符，
+       但在 Windows 上是，``\..\`` 会变成真实穿越；
+    3. 白名单：只认 ``/app.css`` 与 ``/js/<名字>.js``，``ui/`` 下其余文件不开放；
+    4. ``resolve()`` 后 ``relative_to(UI_DIR)`` 二次校验，挡符号链接与
+       「解析后跑出 ui/」的边界情况。
+
+    不做内容缓存：本地环回上每次只是几 KB 读盘，而开发期改完样式刷新即见，
+    比多一层失效逻辑更省心。
+```
 
 ### `touch`
 
@@ -5853,6 +5884,35 @@ def main() -> int
 
 Returns:
     int: 进程退出码。0 正常退出；1 端口全被占用。
+```
+
+## `core/startmsg.py`
+
+**职责**：启动脚本的中文提示（``start.bat`` 必须保持纯 ASCII，中文只能从 Python 侧输出）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `render` | function | 68 | ⚠️ 缺参数说明、缺返回值说明 |
+| `main` | function | 74 | ⚠️ 缺参数说明、缺返回值说明 |
+
+### `render`
+
+```python
+def render(key: str, args: list[str] | None=None) -> str
+```
+
+```text
+按 key 生成消息文本；未知 key 抛 ``KeyError``（调用方据此回退出码 2）。
+```
+
+### `main`
+
+```python
+def main(argv: list[str] | None=None) -> int
+```
+
+```text
+把消息以 UTF-8 字节写进 stdout（不经 locale 转码）。
 ```
 
 ## `core/tshark.py`
