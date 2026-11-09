@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**34** 个（有模块说明 34 个）
-- 公开符号：**318** 个（有 docstring 318 个，合格 316 个）
+- 公开符号：**323** 个（有 docstring 323 个，合格 321 个）
 - 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -673,12 +673,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `read_json` | function | 63 | ✅ |
-| `load_app` | function | 87 | ✅ |
-| `load_ai` | function | 115 | ✅ |
-| `load_thresholds` | function | 126 | ✅ |
-| `load_copy` | function | 136 | ✅ |
-| `config_sha256` | function | 148 | ✅ |
+| `read_json` | function | 75 | ✅ |
+| `load_app` | function | 99 | ✅ |
+| `load_ai` | function | 127 | ✅ |
+| `load_paths` | function | 138 | ✅ |
+| `save_paths` | function | 150 | ✅ |
+| `load_thresholds` | function | 173 | ✅ |
+| `load_copy` | function | 183 | ✅ |
+| `config_sha256` | function | 195 | ✅ |
 
 ### `read_json`
 
@@ -729,6 +731,41 @@ Returns:
     dict: 键见 :data:`AI_DEFAULTS`（``provider`` / ``base_url`` / ``api_key`` /
         ``model`` / ``temperature`` / ``timeout`` / ``verify_ssl``）。
         文件缺失时返回默认值，``api_key`` 为空表示未配置。
+```
+
+### `load_paths`
+
+```python
+def load_paths() -> dict
+```
+
+```text
+加载用户手填的组件路径 ``config/paths.json``（``POST /api/selfcheck/path`` 写入）。
+
+与 :func:`load_ai` 同源：缺文件 / 损坏一律回退默认值（空串），绝不让自检
+因一个坏文件崩掉。空串表示「未手填」，自检回落到自动查找。
+
+Returns:
+    dict: 键 ``tshark_path`` / ``python_path``，值为字符串（可能为空）。
+```
+
+### `save_paths`
+
+```python
+def save_paths(patch: dict) -> dict
+```
+
+```text
+把用户手填的组件路径合并进 ``config/paths.json`` 并原子落盘。
+
+只接受白名单内的键（``tshark_path`` / ``python_path``），其余键丢弃 ——
+避免前端误传把配置写脏。``None`` 值跳过（同 :func:`read_json` 的口径）。
+
+Args:
+    patch: 只含需要改的键（如 ``{"tshark_path": "C:\\...\\tshark.exe"}``）。
+
+Returns:
+    dict: 写回后的完整路径配置。
 ```
 
 ### `load_thresholds`
@@ -5068,20 +5105,20 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `ui_copy` | function | 100 | ✅ |
-| `marker_path` | function | 113 | ✅ |
-| `is_first_run` | function | 126 | ✅ |
-| `ack_first_run` | function | 141 | ✅ |
-| `check_python` | function | 219 | ✅ |
-| `check_tshark` | function | 238 | ✅ |
-| `check_npcap` | function | 277 | ✅ |
-| `check_port` | function | 290 | ✅ |
-| `check_admin` | function | 318 | ✅ |
-| `check_scapy` | function | 346 | ✅ |
-| `capabilities` | function | 373 | ✅ |
-| `collect` | function | 460 | ✅ |
-| `invalidate_cache` | function | 504 | ✅ |
-| `collect_cached` | function | 517 | ✅ |
+| `ui_copy` | function | 109 | ✅ |
+| `marker_path` | function | 122 | ✅ |
+| `is_first_run` | function | 135 | ✅ |
+| `ack_first_run` | function | 150 | ✅ |
+| `check_python` | function | 228 | ✅ |
+| `check_tshark` | function | 287 | ✅ |
+| `check_npcap` | function | 332 | ✅ |
+| `check_port` | function | 346 | ✅ |
+| `check_admin` | function | 374 | ✅ |
+| `check_scapy` | function | 402 | ✅ |
+| `capabilities` | function | 433 | ✅ |
+| `collect` | function | 520 | ✅ |
+| `invalidate_cache` | function | 578 | ✅ |
+| `collect_cached` | function | 591 | ✅ |
 
 ### `ui_copy`
 
@@ -5154,11 +5191,18 @@ Returns:
 ### `check_python`
 
 ```python
-def check_python() -> dict
+def check_python(override: Path | None=None) -> dict
 ```
 
 ```text
 检查 Python 版本是否 ≥ 3.11（实时抓包与离线分析都依赖它）。
+
+手填路径（``POST /api/selfcheck/path``）时，用指定解释器跑 ``-V`` 读版本；
+否则用当前解释器（``sys.version_info``）。手填路径失效（不存在/不可执行/
+读不到版本）时不抛异常，回落到当前解释器并照常报告。
+
+Args:
+    override: 用户手填的 python 可执行文件路径；``None`` 用当前解释器。
 
 Returns:
     dict: 通过时 ``detail`` 形如 ``Python 3.11.9（64 位，便携运行时）``；
@@ -5168,16 +5212,22 @@ Returns:
 ### `check_tshark`
 
 ```python
-def check_tshark() -> dict
+def check_tshark(override: Path | None=None) -> dict
 ```
 
 ```text
-检查 tshark 是否存在，并读一次版本（失败时给 Wireshark 下载页与网卡命令）。
+检查 tshark 是否存在，并读一次版本（失败时给 Wireshark 下载页与便携版说明）。
+
+手填路径（``POST /api/selfcheck/path``）时优先用指定路径；否则走
+:func:`tshark.find_tshark` 的自动查找。手填路径失效时回落到自动查找。
+
+Args:
+    override: 用户手填的 tshark 可执行文件路径；``None`` 走自动查找。
 
 Returns:
     dict: 找到时 ``detail`` 含版本号（如 ``已找到 tshark 4.7.4``）；
         找不到时 ``ok=False``、``fix_url`` 指向 Wireshark 下载页、
-        ``fix_command`` 是列出网卡的 ``--interfaces`` 命令。
+        ``fix_command`` 是便携版放置路径说明。
 ```
 
 ### `check_npcap`
@@ -5234,15 +5284,16 @@ def check_scapy() -> dict
 ```
 
 ```text
-检查 scapy 是否可导入（缺了只降级，不是「不可用」）。
+检查 scapy 是否可导入（缺了只降级，不是「不可用」，但给可选安装入口）。
 
 scapy 是可选加速引擎：它让逐跳样本更准（批量 ``sr()``、TCP 回退）。lite 包
-**不内置 scapy**，所以这一项失败时不给下载链接、不引导安装，只说明「逐跳会
-降级为系统 tracert（样本少、精度低）」。
+**不内置 scapy**。这一项失败时给 ``fix_url``（scapy.net 官网）与
+``fix_command``（``pip install scapy``）作为**可选**加速手段，但 ``impact``
+仍说明「逐跳会降级为系统 tracert」—— 不装也能用，不是必须项。
 
 Returns:
     dict: 可导入时 ``detail`` 说明逐跳使用 scapy；不可导入时 ``ok=False``、
-        ``fix_kind="none"``，``impact`` 来自 copy 的 ``impact_scapy``。
+        ``fix_kind="url"``，给官网链接 + pip 安装命令。
 ```
 
 ### `capabilities`
@@ -5351,34 +5402,37 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `static_asset` | function | 102 | ✅ |
-| `ui_entry` | function | 173 | ✅ |
-| `touch` | function | 295 | ✅ |
-| `request_quit` | function | 300 | ✅ |
-| `cleanup_pid` | function | 348 | ✅ |
-| `BodyTooLarge` | class | 358 | ✅ |
-| `doctor_cached` | function | 437 | ✅ |
-| `log` | function | 554 | ✅ |
-| `evidence_payload` | function | 650 | ✅ |
-| `conclusion_report_id` | function | 774 | ✅ |
-| `build_status_conclusion` | function | 805 | ✅ |
-| `start_job` | function | 1231 | ✅ |
-| `report_index` | function | 1292 | ✅ |
-| `request_elevation` | function | 1326 | ✅ |
-| `preflight_payload` | function | 1364 | ✅ |
-| `engine_info` | function | 1408 | ✅ |
-| `passive_start` | function | 1451 | ✅ |
-| `passive_status` | function | 1486 | ✅ |
-| `link_actions` | function | 1560 | ✅ |
-| `Handler` | class | 1641 | ✅ |
-| `Handler.handle_one_request` | method | 1667 | ✅ |
-| `Handler.log_message` | method | 1719 | ✅ |
-| `Handler.do_GET` | method | 1857 | ✅ |
-| `Handler.do_POST` | method | 1879 | ✅ |
-| `DiagServer` | class | 2220 | ✅ |
-| `DiagServer.handle_error` | method | 2231 | ✅ |
-| `create_server` | function | 2259 | ✅ |
-| `main` | function | 2306 | ✅ |
+| `static_asset` | function | 105 | ✅ |
+| `ui_entry` | function | 176 | ✅ |
+| `touch` | function | 298 | ✅ |
+| `request_quit` | function | 303 | ✅ |
+| `cleanup_pid` | function | 351 | ✅ |
+| `BodyTooLarge` | class | 361 | ✅ |
+| `doctor_cached` | function | 440 | ✅ |
+| `log` | function | 557 | ✅ |
+| `evidence_payload` | function | 653 | ✅ |
+| `conclusion_report_id` | function | 777 | ✅ |
+| `build_status_conclusion` | function | 808 | ✅ |
+| `start_job` | function | 1234 | ✅ |
+| `report_index` | function | 1295 | ✅ |
+| `request_elevation` | function | 1329 | ✅ |
+| `preflight_payload` | function | 1367 | ✅ |
+| `validate_component_path` | function | 1421 | ✅ |
+| `log_files` | function | 1461 | ✅ |
+| `resolve_log_file` | function | 1519 | ✅ |
+| `engine_info` | function | 1552 | ✅ |
+| `passive_start` | function | 1595 | ✅ |
+| `passive_status` | function | 1630 | ✅ |
+| `link_actions` | function | 1704 | ✅ |
+| `Handler` | class | 1785 | ✅ |
+| `Handler.handle_one_request` | method | 1811 | ✅ |
+| `Handler.log_message` | method | 1863 | ✅ |
+| `Handler.do_GET` | method | 2039 | ✅ |
+| `Handler.do_POST` | method | 2061 | ✅ |
+| `DiagServer` | class | 2443 | ✅ |
+| `DiagServer.handle_error` | method | 2454 | ✅ |
+| `create_server` | function | 2482 | ✅ |
+| `main` | function | 2529 | ✅ |
 
 ### `static_asset`
 
@@ -5690,6 +5744,61 @@ Example:
     >>> payload = preflight_payload()
     >>> [item["key"] for item in payload["checks"]][:2]
     ['python', 'tshark']
+```
+
+### `validate_component_path`
+
+```python
+def validate_component_path(key: str, path: str) -> tuple[bool, str, str]
+```
+
+```text
+校验手填组件路径：存在 / 是文件 / 可执行（跑对应探测命令）。
+
+这是纯函数：不做写盘、不读全局，方便单测。校验三关顺序固定，第一处失败即返回，
+返回的 ``code`` 供前端区分展示（``not_found`` / ``not_a_file`` / ``not_executable``）。
+
+Args:
+    key: 组件 key（``python`` / ``tshark``，调用方须先过 :data:`SAVE_PATH_KEYS`）。
+    path: 用户填的路径串（可能为空 / 带引号 / 相对路径）。
+
+Returns:
+    tuple[bool, str, str]: ``(是否通过, code, 错误说明)``。通过时 ``code`` 为
+        ``""``、说明为空；失败时 code 是稳定的机器码，说明是给人看的一句话。
+```
+
+### `log_files`
+
+```python
+def log_files() -> list[dict]
+```
+
+```text
+列出 ``logs/`` 直属的 app / diag / startup 日志文件（不含子目录、env.json、
+netdiag.pid 等）。返回结构匹配前端 logs.js 的 ``normalize``：``name`` / ``kind`` /
+``size`` / ``mtime`` / ``epoch``。
+
+Returns:
+    list[dict]: 按 mtime 降序；读取失败返回空列表。
+```
+
+### `resolve_log_file`
+
+```python
+def resolve_log_file(name: str) -> Path | None
+```
+
+```text
+把 ``?name=`` 解析成 ``logs/`` 直属的可安全读取日志文件。
+
+复用 :func:`static_asset` 的四道关思路（白名单 + 拒绝穿越 + 符号链接二次校验）：
+只接受 ``logs/`` 直属文件、``app/diag/startup`` 前缀、非符号链接。
+
+Args:
+    name: 查询参数 ``name`` 的值（可能含 ``../`` / 绝对路径 / 编码穿越）。
+
+Returns:
+    Path | None: 通过全部检查的文件；不合法一律 ``None``（调用方 404）。
 ```
 
 ### `engine_info`

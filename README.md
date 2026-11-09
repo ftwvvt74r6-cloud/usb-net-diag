@@ -138,8 +138,8 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 ### ② 公开 lite 包（lite 包要求）
 
 当前已发布的是 **v0.3.3**：从 [Release v0.3.3](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.3)
-下载 `NetDiag-0.3.3-lite.zip`（**204 个文件 / 1,264,357 B / 解压后 3,438,452 B /
-SHA-256 `da0c69b8b05eb52517c0550040cb5feef7d19b2580a335ed17a60f8a898e2e0e`**，同页附
+下载 `NetDiag-0.3.3-lite.zip`（**204 个文件 / 1,264,353 B / 解压后 3,438,452 B /
+SHA-256 `71dd972f26dfa03e65ad04ad6296bd4600e8aea22cf86bf02ffa7f2e9a345822`**，同页附
 `SHA256SUMS.txt`）。解压后**推荐直接双击 `NetDiag.exe`**
 （启动时显示 splash 并做六项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
 

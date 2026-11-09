@@ -66,7 +66,16 @@ MARKER_REL = Path("config") / "ui-first-run.json"
 PYTHON_DOWNLOAD_URL = "https://www.python.org/downloads/windows/"
 WIRESHARK_DOWNLOAD_URL = "https://www.wireshark.org/download.html"
 NPCAP_DOWNLOAD_URL = "https://npcap.com/#download"
+SCAPY_DOWNLOAD_URL = "https://scapy.net"
 INTERFACES_COMMAND = "python core\\diagnose.py --interfaces"
+#: 缺组件时的修复命令（fix_command 字段，前端「复制命令」按钮直接取用）。
+#: tshark 走便携版放置说明（不是命令）：把 WiresharkPortable 放到 tools/ 下即可被
+#: find_tshark 的便携目录扫描命中，无需改环境变量、无需重启。
+TSHARK_FIX_COMMAND = "将便携版 Wireshark 解压到 tools\\WiresharkPortable\\，使其包含 App\\Wireshark\\tshark.exe"
+SCAPY_FIX_COMMAND = "python -m pip install scapy"
+#: Npcap 只能用安装器装（驱动级，不可能靠手填路径）；fix_command 是导入/安装引导，
+#: 绝不静默执行安装 —— 前端只是「复制命令」，真正装不装由用户自己决定。
+NPCAP_FIX_COMMAND = "运行 tools\\_internal\\npcap-*.exe（或从 https://npcap.com 下载安装器）"
 
 #: 缺组件修复说明的文档位置（相对仓库根；界面可复制/展示，不写死本机盘符）。
 DOCS_STARTUP = "docs/startup.md"
@@ -216,17 +225,32 @@ def _python_runtime() -> str:
     return _t("runtime_system")
 
 
-def check_python() -> dict:
+def check_python(override: Path | None = None) -> dict:
     """检查 Python 版本是否 ≥ 3.11（实时抓包与离线分析都依赖它）。
+
+    手填路径（``POST /api/selfcheck/path``）时，用指定解释器跑 ``-V`` 读版本；
+    否则用当前解释器（``sys.version_info``）。手填路径失效（不存在/不可执行/
+    读不到版本）时不抛异常，回落到当前解释器并照常报告。
+
+    Args:
+        override: 用户手填的 python 可执行文件路径；``None`` 用当前解释器。
 
     Returns:
         dict: 通过时 ``detail`` 形如 ``Python 3.11.9（64 位，便携运行时）``；
             版本过低时 ``ok=False`` 并给出升级入口（Python 官网）。
     """
-    info = tuple(sys.version_info[:3])
-    text = ".".join(str(part) for part in info)
+    info: tuple[int, int, int] | None = None
+    text = ""
     bits = 64 if sys.maxsize > 2 ** 32 else 32
     runtime = _python_runtime()
+    if override is not None:
+        text, info = _probe_python(override)
+        if info is not None:
+            # 手填的是另一个解释器：说明文字标「手填路径」，不再套用当前运行时文案。
+            runtime = _t("runtime_manual")
+    if info is None:
+        info = tuple(sys.version_info[:3])
+        text = ".".join(str(part) for part in info)
     ok = info >= (3, 11)
     detail = _t("python_ok" if ok else "python_low",
                 version=text, bits=bits, runtime=runtime)
@@ -235,19 +259,50 @@ def check_python() -> dict:
                   fix_url="" if ok else PYTHON_DOWNLOAD_URL)
 
 
-def check_tshark() -> dict:
-    """检查 tshark 是否存在，并读一次版本（失败时给 Wireshark 下载页与网卡命令）。
+def _probe_python(exe: Path) -> tuple[str, tuple[int, int, int] | None]:
+    """跑 ``<exe> -V`` 读版本串与 ``(major, minor, micro)``。
+
+    任何失败（不存在/不可执行/读不到版本）都返回 ``(说明串, None)``，调用方
+    据此回落。绝不抛异常 —— 手填路径失效不该拖垮整个自检。
+
+    Args:
+        exe: 用户手填的 python 可执行文件路径。
+
+    Returns:
+        tuple[str, tuple | None]: ``(版本文本, 版本三元组或 None)``。
+    """
+    try:
+        rc, out, err = tshark.run([str(exe), "-V"], timeout=15)
+    except Exception:  # noqa: BLE001
+        return "", None
+    raw = (out or err or "").strip()
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", raw)
+    if rc != 0 or not m:
+        return raw or f"无法读取版本 (rc={rc})", None
+    parts = [int(m.group(i)) for i in (1, 2)]
+    parts.append(int(m.group(3) or 0))
+    return raw, tuple(parts)  # type: ignore[return-value]
+
+
+def check_tshark(override: Path | None = None) -> dict:
+    """检查 tshark 是否存在，并读一次版本（失败时给 Wireshark 下载页与便携版说明）。
+
+    手填路径（``POST /api/selfcheck/path``）时优先用指定路径；否则走
+    :func:`tshark.find_tshark` 的自动查找。手填路径失效时回落到自动查找。
+
+    Args:
+        override: 用户手填的 tshark 可执行文件路径；``None`` 走自动查找。
 
     Returns:
         dict: 找到时 ``detail`` 含版本号（如 ``已找到 tshark 4.7.4``）；
             找不到时 ``ok=False``、``fix_url`` 指向 Wireshark 下载页、
-            ``fix_command`` 是列出网卡的 ``--interfaces`` 命令。
+            ``fix_command`` 是便携版放置路径说明。
     """
-    path = tshark.find_tshark()
+    path = override if override is not None and override.is_file() else tshark.find_tshark()
     if not path:
         return _check("tshark", False, _t("tshark_missing"),
                       fix_kind="url", fix_url=WIRESHARK_DOWNLOAD_URL,
-                      fix_command=INTERFACES_COMMAND)
+                      fix_command=TSHARK_FIX_COMMAND)
     raw = tshark.version(path)
     match = re.search(r"\d+\.\d+\.\d+", str(raw or ""))
     text = match.group(0) if match else str(raw or "").strip()
@@ -284,7 +339,8 @@ def check_npcap() -> dict:
     ok = _npcap_installed()
     return _check("npcap", ok, _t("npcap_ok" if ok else "npcap_missing"),
                   fix_kind="none" if ok else "url",
-                  fix_url="" if ok else NPCAP_DOWNLOAD_URL)
+                  fix_url="" if ok else NPCAP_DOWNLOAD_URL,
+                  fix_command="" if ok else NPCAP_FIX_COMMAND)
 
 
 def check_port() -> dict:
@@ -344,18 +400,22 @@ def _scapy_available() -> bool:
 
 
 def check_scapy() -> dict:
-    """检查 scapy 是否可导入（缺了只降级，不是「不可用」）。
+    """检查 scapy 是否可导入（缺了只降级，不是「不可用」，但给可选安装入口）。
 
     scapy 是可选加速引擎：它让逐跳样本更准（批量 ``sr()``、TCP 回退）。lite 包
-    **不内置 scapy**，所以这一项失败时不给下载链接、不引导安装，只说明「逐跳会
-    降级为系统 tracert（样本少、精度低）」。
+    **不内置 scapy**。这一项失败时给 ``fix_url``（scapy.net 官网）与
+    ``fix_command``（``pip install scapy``）作为**可选**加速手段，但 ``impact``
+    仍说明「逐跳会降级为系统 tracert」—— 不装也能用，不是必须项。
 
     Returns:
         dict: 可导入时 ``detail`` 说明逐跳使用 scapy；不可导入时 ``ok=False``、
-            ``fix_kind="none"``，``impact`` 来自 copy 的 ``impact_scapy``。
+            ``fix_kind="url"``，给官网链接 + pip 安装命令。
     """
     ok = _scapy_available()
-    return _check("scapy", ok, _t("scapy_ok" if ok else "scapy_missing"))
+    return _check("scapy", ok, _t("scapy_ok" if ok else "scapy_missing"),
+                  fix_kind="none" if ok else "url",
+                  fix_url="" if ok else SCAPY_DOWNLOAD_URL,
+                  fix_command="" if ok else SCAPY_FIX_COMMAND)
 
 
 def _tracert_available() -> bool:
@@ -481,10 +541,24 @@ def collect(root: Path | None = None) -> dict:
         ("port", check_port),
         ("admin", check_admin),
     )
+    # 手填路径（config/paths.json，POST /api/selfcheck/path 写入）：python / tshark
+    # 两项优先用用户指定的可执行文件探测；其它项不受影响。路径失效（文件被删 /
+    # 不可执行）时 check_* 内部会回落到自动查找，不会因一个旧路径把该项判成失败。
+    overrides: dict[str, Path] = {}
+    try:
+        from core.config import load_paths  # 延迟导入：config 走 core 包相对导入
+        paths = load_paths()
+    except Exception:  # noqa: BLE001  paths.json 损坏/导入失败也不该拖垮自检
+        paths = {}
+    for key, field in (("tshark", "tshark_path"), ("python", "python_path")):
+        raw = str((paths or {}).get(field) or "").strip()
+        if raw:
+            overrides[key] = Path(raw)
     checks: list[dict] = []
     for key, func in funcs:
         try:
-            item = func()
+            # 只有 python / tshark 支持手填路径覆盖；其余 check 函数无参调用。
+            item = func(overrides[key]) if key in overrides else func()
             if not isinstance(item, dict):
                 raise TypeError(f"检查项 {key} 没有返回 dict")
         except Exception as exc:  # noqa: BLE001  单项失败只降级该项，整体响应照常返回

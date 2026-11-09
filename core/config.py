@@ -24,6 +24,10 @@ from .platform import paths
 
 APP_CONFIG = paths.PATHS.config / "app-config.json"
 AI_CONFIG = paths.PATHS.config / "ai-config.json"
+#: 用户手填的组件路径（``POST /api/selfcheck/path`` 写入）：tshark / python 各一条。
+#: 不写 .env、不把绝对路径提交进仓库 —— 这是 U 盘便携场景下「这台机器上的路径」，
+#: 属于本地 config，与 ai-config 同一类。
+PATHS_CONFIG = paths.PATHS.config / "paths.json"
 THRESHOLDS = paths.PATHS.core / "rules" / "thresholds.json"
 COPY_DIR = paths.PATHS.core / "copy"
 
@@ -57,6 +61,14 @@ AI_DEFAULTS: dict[str, Any] = {
     "timeout": 90,
     "verify_ssl": True,
     "updated_at": "",
+}
+
+#: 手填路径的默认值：空串 = 未指定（走自动查找）。只有 ``tshark_path`` 与
+#: ``python_path`` 两个键 —— scapy / npcap 不能靠路径指定（scapy 需 pip 安装、
+#: npcap 需运行安装器），前端提交这两项会拿到 400 unsupported_key。
+PATH_DEFAULTS: dict[str, Any] = {
+    "tshark_path": "",
+    "python_path": "",
 }
 
 
@@ -123,6 +135,41 @@ def load_ai() -> dict:
     return read_json(AI_CONFIG, AI_DEFAULTS)
 
 
+def load_paths() -> dict:
+    """加载用户手填的组件路径 ``config/paths.json``（``POST /api/selfcheck/path`` 写入）。
+
+    与 :func:`load_ai` 同源：缺文件 / 损坏一律回退默认值（空串），绝不让自检
+    因一个坏文件崩掉。空串表示「未手填」，自检回落到自动查找。
+
+    Returns:
+        dict: 键 ``tshark_path`` / ``python_path``，值为字符串（可能为空）。
+    """
+    return read_json(PATHS_CONFIG, PATH_DEFAULTS)
+
+
+def save_paths(patch: dict) -> dict:
+    """把用户手填的组件路径合并进 ``config/paths.json`` 并原子落盘。
+
+    只接受白名单内的键（``tshark_path`` / ``python_path``），其余键丢弃 ——
+    避免前端误传把配置写脏。``None`` 值跳过（同 :func:`read_json` 的口径）。
+
+    Args:
+        patch: 只含需要改的键（如 ``{"tshark_path": "C:\\\\...\\\\tshark.exe"}``）。
+
+    Returns:
+        dict: 写回后的完整路径配置。
+    """
+    cfg = load_paths()
+    for key in PATH_DEFAULTS:
+        value = patch.get(key)
+        if value is not None:
+            cfg[key] = str(value)
+    PATHS_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    PATHS_CONFIG.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return cfg
+
+
 def load_thresholds() -> dict:
     """加载规则阈值 ``core/rules/thresholds.json``（随代码走，不属于用户配置）。
 
@@ -161,7 +208,8 @@ def config_sha256() -> str:
 
 
 __all__ = [
-    "APP_CONFIG", "AI_CONFIG", "THRESHOLDS", "COPY_DIR",
-    "APP_DEFAULTS", "AI_DEFAULTS", "read_json",
-    "load_app", "load_ai", "load_thresholds", "load_copy", "config_sha256",
+    "APP_CONFIG", "AI_CONFIG", "PATHS_CONFIG", "THRESHOLDS", "COPY_DIR",
+    "APP_DEFAULTS", "AI_DEFAULTS", "PATH_DEFAULTS", "read_json",
+    "load_app", "load_ai", "load_paths", "save_paths",
+    "load_thresholds", "load_copy", "config_sha256",
 ]
