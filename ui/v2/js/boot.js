@@ -35,6 +35,8 @@
     { id: "settings", icon: "gear", href: "#/settings", text: C.nav.settings }
   ];
 
+  var MODES = { scan: 1, live: 1, passive: 1, probe: 1, offline: 1 };
+
   var PAGES = {
     home: function () { return ND.home; },
     logs: function () { return ND.logs; },
@@ -178,15 +180,33 @@
   }
 
   /* ------------------------------------------------------------ 路由 */
+  var active = null;   /* { id, cleanup } —— 切页前必须先拆掉上一页的订阅与轮询 */
+
+  function teardown() {
+    if (!active) return;
+    try { if (active.cleanup) active.cleanup(); } catch (e) { /* 拆不干净也不能卡住换页 */ }
+    active = null;
+  }
+
   function route(first) {
     var id = currentId();
     setActive(id);
+
+    /* 换页：先释放上一页占用的轮询（否则后台空闲退出永远等不到） */
+    if (!first || !active || active.id !== id) teardown();
+
     var view = document.getElementById("view");
     if (!view) return;
 
-    var page = PAGES[id] ? PAGES[id]() : null;
-    if (page && page.render) page.render(view);
-    else renderStub(view, id);
+    if (MODES[id] && ND.modes) {
+      ND.modes.render(view, id);
+      active = { id: id, cleanup: ND.modes.cleanup };
+    } else {
+      var page = PAGES[id] ? PAGES[id]() : null;
+      if (page && page.render) page.render(view);
+      else renderStub(view, id);
+      active = { id: id, cleanup: page && page.cleanup };
+    }
 
     if (!first) {
       window.scrollTo(0, 0);
@@ -212,15 +232,14 @@
     route(true);
     window.addEventListener("hashchange", function () { route(false); });
 
-    /* 环境状态全站共用一次请求：顶栏徽章 + 入口置灰 + 首页依赖卡的兜底数据。
-       页面自己的「重新检测」走 /api/selfcheck，回来后覆盖同一份缓存。 */
-    ND.api.app().then(function (res) {
-      if (!res.ok) return;
-      ND.appCache = res.data || {};
-      var checks = ND.appCache.checks || [];
-      if (checks.length) paintChips(checks);
-      applyCapabilities(ND.appCache.capabilities || null);
+    /* 环境状态全站共用一份（state 里那份）：顶栏徽章 + 入口置灰 + 首页依赖卡。
+       页面自己的「重新检测」回来后也写回同一处，不需要各自再发请求。 */
+    ND.state.subscribe(function (S, evt) {
+      if (evt !== "app" && evt !== "checks") return;
+      if ((S.checks || []).length) paintChips(S.checks);
+      applyCapabilities(S.caps);
     });
+    ND.state.loadApp();
   }
 
   ND.boot = {

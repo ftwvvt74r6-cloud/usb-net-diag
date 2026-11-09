@@ -9,6 +9,7 @@
 
   var U = ND.ui;
   var C = ND.copy || {};
+  var R = ND.render;
 
   /* AI 配置是本地 JSON（core/ai.py 的 AI_CONFIG），配置入口就是「告诉你它在哪」 */
   var AI_CONFIG_REL = "config/ai-config.json";
@@ -43,24 +44,13 @@
     });
   }
 
+  /* 卡片与骨架块统一用 render.js 那一套：设置页不该有第二份卡片实现 */
   function card(title) {
-    var section = U.el("section", "card");
-    var hd = U.el("div", "card-hd");
-    hd.appendChild(U.el("h2", "", title));
-    section.appendChild(hd);
-    var body = U.el("div", "card-bd");
-    section.appendChild(body);
-    return { section: section, body: body, hd: hd };
+    return R.card(title);
   }
 
   function skeleton(n) {
-    var box = U.el("div", "stack");
-    for (var i = 0; i < n; i++) {
-      var s = U.el("div", "sk");
-      s.style.setProperty("--w", (62 + i * 9) + "%");
-      box.appendChild(s);
-    }
-    return box;
+    return R.skeleton(n, 62);
   }
 
   /* ------------------------------------------------------------ 后台服务 */
