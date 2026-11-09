@@ -5362,23 +5362,23 @@ Example:
 | `evidence_payload` | function | 650 | ✅ |
 | `conclusion_report_id` | function | 774 | ✅ |
 | `build_status_conclusion` | function | 805 | ✅ |
-| `start_job` | function | 1195 | ✅ |
-| `report_index` | function | 1256 | ✅ |
-| `request_elevation` | function | 1290 | ✅ |
-| `preflight_payload` | function | 1328 | ✅ |
-| `engine_info` | function | 1372 | ✅ |
-| `passive_start` | function | 1415 | ✅ |
-| `passive_status` | function | 1450 | ✅ |
-| `link_actions` | function | 1524 | ✅ |
-| `Handler` | class | 1605 | ✅ |
-| `Handler.handle_one_request` | method | 1631 | ✅ |
-| `Handler.log_message` | method | 1683 | ✅ |
-| `Handler.do_GET` | method | 1821 | ✅ |
-| `Handler.do_POST` | method | 1843 | ✅ |
-| `DiagServer` | class | 2175 | ✅ |
-| `DiagServer.handle_error` | method | 2186 | ✅ |
-| `create_server` | function | 2214 | ✅ |
-| `main` | function | 2261 | ✅ |
+| `start_job` | function | 1231 | ✅ |
+| `report_index` | function | 1292 | ✅ |
+| `request_elevation` | function | 1326 | ✅ |
+| `preflight_payload` | function | 1364 | ✅ |
+| `engine_info` | function | 1408 | ✅ |
+| `passive_start` | function | 1451 | ✅ |
+| `passive_status` | function | 1486 | ✅ |
+| `link_actions` | function | 1560 | ✅ |
+| `Handler` | class | 1641 | ✅ |
+| `Handler.handle_one_request` | method | 1667 | ✅ |
+| `Handler.log_message` | method | 1719 | ✅ |
+| `Handler.do_GET` | method | 1857 | ✅ |
+| `Handler.do_POST` | method | 1879 | ✅ |
+| `DiagServer` | class | 2220 | ✅ |
+| `DiagServer.handle_error` | method | 2231 | ✅ |
+| `create_server` | function | 2259 | ✅ |
+| `main` | function | 2306 | ✅ |
 
 ### `static_asset`
 

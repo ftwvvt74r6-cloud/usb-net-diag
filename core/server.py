@@ -953,7 +953,11 @@ def _remember_last_run(mode: str, target: str, started_at: float,
         except (TypeError, ValueError):
             size = LAST_RUN_MAX_BYTES + 1
         if size <= LAST_RUN_MAX_BYTES:
-            full = payload
+            # 打上 schema 版本标记再入内存（浅拷贝，不污染 payload 引用）：
+            # /api/last-run/result 恢复时据此判定是否 legacy，而不是靠
+            # conclusion 是否存在（后者会被 _attach_conclusion 现算补齐，误判）。
+            full = dict(payload)
+            full["record_schema"] = diagnose.RUN_RECORD_SCHEMA
         else:
             summary["trimmed"] = True
     summary["full_result"] = full is not None
@@ -1041,6 +1045,38 @@ def _last_run_view() -> dict | None:
     if cleared_at:
         return None
     return _last_run_from_runs()
+
+
+def _is_legacy_result(result: dict | None) -> tuple[bool, str]:
+    """判定一份诊断结果是否「旧版本」：缺结论边界信息，UI 只能显示横幅。
+
+    依据（任一满足即**非** legacy）：
+
+    1. 结果带 ``record_schema``（int）或 ``ui_contract_version``（str）—— 新版本
+       的 run 结果会被打上这两个版本标记；
+    2. ``verdict`` 里含 ``basis`` / ``coverage`` / ``not_covered`` 任一边界字段。
+
+    **刻意不看 ``conclusion`` 是否存在**：``/api/last-run/result`` 恢复时会用
+    :func:`_attach_conclusion` 现算一份 conclusion 补进去，旧结果因此也会「有
+    conclusion」。只看 conclusion 会把旧结果误判成新结果，前端据此渲染四层
+    「未知」卡（issue: last-run/result 旧记录兼容）。
+
+    Args:
+        result: 待判定的诊断结果字典；``None`` / 非 dict 一律按 legacy。
+
+    Returns:
+        tuple[bool, str]: ``(是否 legacy, 原因说明)``。非 legacy 时原因为空串。
+    """
+    if not isinstance(result, dict):
+        return True, "结果缺失或不是对象"
+    if (isinstance(result.get("record_schema"), int)
+            or isinstance(result.get("ui_contract_version"), str)):
+        return False, ""
+    verdict_data = result.get("verdict")
+    if isinstance(verdict_data, dict) and any(
+            key in verdict_data for key in ("basis", "coverage", "not_covered")):
+        return False, ""
+    return True, "记录缺少 record_schema 版本标记，且 verdict 无结论边界字段"
 
 
 def _last_run_result() -> dict | None:
@@ -1954,11 +1990,20 @@ class Handler(BaseHTTPRequestHandler):
                     {"ok": False,
                      "error": "内存里没有上次的完整结果（服务可能已重启，或只有历史摘要）"},
                     404)
+            # 旧记录兼容：判定依据是 record_schema / verdict 边界字段，而不是
+            # conclusion 是否存在（_attach_conclusion 会现算补齐，只看它会误判）。
+            legacy, legacy_reason = _is_legacy_result(stored)
             enriched = _attach_probe_ui_copy(stored)
             block = build_status_conclusion(enriched)
             enriched = _attach_conclusion(enriched, block)
+            # 把 legacy 标记一并下发：前端据此只渲染「旧版本结果」横幅 + 重新诊断，
+            # 不渲染四层「未知」卡、不给导出按钮。原因说明随响应返回便于排查。
+            enriched["legacy"] = legacy
+            enriched["legacy_reason"] = legacy_reason
             return self._json({"ok": True, "result": enriched,
                                "summary": _last_run_view(),
+                               "legacy": legacy,
+                               "legacy_reason": legacy_reason,
                                "link_actions": link_actions(enriched, _gateway_now())})
         if path == "/api/interfaces":
             ifaces = [{**i, "short": tshark.short_name(i["name"])} for i in tshark.list_interfaces()]

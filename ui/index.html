@@ -3022,6 +3022,15 @@ function conclusionData(res) {
   const legacy = copy.fallback_unknown || "未知（原因：旧数据缺少边界字段）";
   const lowKey = (copy.key_limit && copy.key_limit.low) || "本次无有效样本或采样异常";
   const clean = (v) => (Array.isArray(v) ? v : []).map((x) => String(x == null ? "" : x).trim()).filter(Boolean);
+  /* 旧记录兼容：优先信服务端下发的 legacy 标记（/api/last-run/result 会显式返回）。
+     判定依据是 record_schema / verdict 边界字段，而不是 conclusion 是否存在 ——
+     _attach_conclusion 会现算补齐 conclusion，只看它会把旧结果误判成新结果。 */
+  if (res && res.legacy === true) {
+    return {
+      conclusion: legacy, basis: [legacy], coverage: [legacy], not_covered: [legacy],
+      confidence: 0.3, confidence_level: "低", key_limit: lowKey, legacy: true,
+    };
+  }
   const c = res && res.conclusion;
   if (c && typeof c === "object" && typeof c.conclusion === "string" && c.conclusion.trim()) {
     const conf = Number(c.confidence);
