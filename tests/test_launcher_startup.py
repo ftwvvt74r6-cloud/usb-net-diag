@@ -346,6 +346,18 @@ class LauncherStartupBinaryTest(unittest.TestCase):
         if url:
             raise unittest.SkipTest(
                 f"本机已有真实产品实例在运行（{url}），端口被占（环境抖动，非产品失败）")
+        # 端口残留检测（含 TIME_WAIT）：connect 探测不到 TIME_WAIT 端口，但 launcher
+        # 的 bind 会被它拒绝（SO_REUSEADDR=false）导致顺延，进而 mode/port 断言漂移。
+        # 用 bind 探测 8787 是否真能自由占用 —— 不能则说明有监听或 TIME_WAIT 残留，
+        # 这是环境抖动，整类 skip，绝不让它把产品测试判红。
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", 8787))
+        except OSError:
+            raise unittest.SkipTest(
+                "8787 端口有监听或 TIME_WAIT 残留（环境抖动，非产品失败），稍后重试")
+        finally:
+            probe.close()
         cls.csc = build_launcher.find_csc()
         if cls.csc is None:
             raise unittest.SkipTest("本机没有 csc.exe，跳过编译/运行用例")
