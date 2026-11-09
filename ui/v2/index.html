@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NetDiag · 网络矩阵</title>
+<link rel="icon" href="/v2/img/favicon.ico" />
+<link rel="stylesheet" href="/v2/css/tokens.css" />
+<link rel="stylesheet" href="/v2/css/base.css" />
+<link rel="stylesheet" href="/v2/css/layout.css" />
+<link rel="stylesheet" href="/v2/css/components.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================================================ 左轨道 -->
+  <aside class="rail" aria-label="主导航">
+    <a class="brand" href="#/home" aria-label="NetDiag 网络矩阵" title="NetDiag 网络矩阵">
+      <img src="/v2/img/logo.svg" alt="NetDiag 网络矩阵" width="32" height="32" />
+      <span class="brand-t"><b>NetDiag</b></span>
+    </a>
+
+    <nav class="railnav" id="railnav"></nav>
+    <nav class="railfoot" id="railfoot"></nav>
+  </aside>
+
+  <!-- ============================================================ 主区 -->
+  <main class="main">
+    <header class="topbar">
+      <h1 id="page-title"></h1>
+      <div class="chips" id="env-chips"></div>
+    </header>
+
+    <div class="scroll">
+      <div class="wrap">
+
+        <dl class="kpis">
+          <div class="kpi">
+            <dt data-copy="kpi.health"></dt>
+            <dd class="kpi-v na" data-copy="na"></dd>
+            <dd class="kpi-sub" data-kpi-sub="health"></dd>
+          </div>
+          <div class="kpi">
+            <dt data-copy="kpi.latency"></dt>
+            <dd class="kpi-v na" data-copy="na"></dd>
+            <dd class="kpi-sub" data-kpi-sub="latency"></dd>
+          </div>
+          <div class="kpi">
+            <dt data-copy="kpi.loss"></dt>
+            <dd class="kpi-v na" data-copy="na"></dd>
+            <dd class="kpi-sub" data-kpi-sub="loss"></dd>
+          </div>
+          <div class="kpi">
+            <dt data-copy="kpi.session"></dt>
+            <dd class="kpi-v na" data-copy="na"></dd>
+            <dd class="kpi-sub" data-kpi-sub="session"></dd>
+          </div>
+        </dl>
+
+        <div class="cols">
+          <section class="card">
+            <div class="card-hd"><h2 data-copy="card.lastRun"></h2></div>
+            <div class="card-bd">
+              <div class="empty">
+                <span class="ic" data-icon="report"></span>
+                <b data-copy="empty.lastRun"></b>
+                <p data-copy="empty.lastRunHint"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-hd"><h2 data-copy="card.env"></h2></div>
+            <div class="card-bd">
+              <div class="chips" id="env-list"></div>
+              <div class="stack mt-4">
+                <div class="sk" style="--w:78%"></div>
+                <div class="sk" style="--w:56%"></div>
+                <div class="sk" style="--w:64%"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="application/json" id="ui-config">
+{
+  "locked_modes": [
+    "scan",
+    "live",
+    "passive"
+  ],
+  "cards": {
+    "fault": {
+      "kicker": "结论",
+      "title": "发现问题：四层结论与问题清单"
+    },
+    "normal": {
+      "kicker": "结论",
+      "title": "四层均正常"
+    },
+    "empty_sessions": {
+      "kicker": "降级",
+      "title": "未观察到任何 TCP/IP 会话"
+    },
+    "target_unreachable": {
+      "kicker": "降级",
+      "title": "目标不可达"
+    },
+    "no_npcap": {
+      "kicker": "无法开始",
+      "title": "无法抓包：缺少抓包驱动"
+    },
+    "no_admin": {
+      "kicker": "无法开始",
+      "title": "权限不足"
+    },
+    "no_interface": {
+      "kicker": "无法开始",
+      "title": "网卡不可用"
+    },
+    "bad_file": {
+      "kicker": "无法分析",
+      "title": "无法解析该文件"
+    },
+    "internal": {
+      "kicker": "无法分析",
+      "title": "分析失败"
+    }
+  },
+  "modes": {
+    "scan": {
+      "label": "全网体检",
+      "tech": "全网扫描",
+      "display": "全网体检（全网扫描）",
+      "nav_desc": "抓本机所有流量，看整体状况",
+      "needs_admin": true,
+      "shadow": true,
+      "fields": [
+        "duration",
+        "iface"
+      ],
+      "btn": "开始体检",
+      "title": "全网体检（全网扫描）",
+      "sub": "抓本机所有流量，看整体状况",
+      "guide": "抓本机所有流量，看整体状况；完全不知道问题在哪时，先做一次全网体检。",
+      "question": "这台电脑整体上网状况如何？问题出在哪一层？",
+      "points": [
+        "抓本机全部流量，不设目标、不填过滤条件",
+        "按 L2 链路 → L3 网络 → L4 传输 → L7 应用四层给结论",
+        "适合「不知道问题在哪」时先做一次基线"
+      ],
+      "example": "例：用户反馈「整层楼都上不了网」→ 全网体检 → 报告会指出是本机网卡、网关，还是某个外部服务在拖慢。",
+      "term": "术语：实时抓包 = 从网卡现抓；这里不设目标，目标框被有意隐藏，填了也会被后端忽略。",
+      "hint": "全网体检不设目标过滤，建议 30~60 秒；运行中可以切到「连通与速度测试」但建议等结果。",
+      "idle_desc": "不设目标，抓本机网卡上的全部流量，再从 L2 到 L7 分层分析。适合完全不知道问题在哪的第一步。"
+    },
+    "live": {
+      "label": "单目标诊断",
+      "tech": "定向抓包",
+      "display": "单目标诊断（定向抓包）",
+      "nav_desc": "只看我和某个 IP/网站的通信，判断卡在哪一环",
+      "needs_admin": true,
+      "shadow": true,
+      "fields": [
+        "target",
+        "duration",
+        "iface"
+      ],
+      "btn": "开始诊断",
+      "title": "单目标诊断（定向抓包）",
+      "sub": "只看我和某个 IP/网站的通信，判断卡在哪一环",
+      "guide": "已经怀疑某个 IP / 网段 / 域名，想看「我和它之间卡在哪一环」时用它。",
+      "question": "我和这个 IP/网站之间到底通不通？慢在哪一环（DNS/TCP/TLS/HTTP）？",
+      "points": [
+        "只保留与目标相关的流量，逐层判断卡在 DNS、TCP、TLS 还是 HTTP",
+        "域名会先解析；私网 / fake-ip 目标自动抓全网，再在分析阶段筛",
+        "适合「只有某个网站或系统打不开」的定向排查"
+      ],
+      "example": "例：用户反馈「打不开 OA」→ 单目标诊断 → 报告会指出卡在 DNS 解析、TCP 建连还是 TLS 握手。",
+      "term": "术语：定向抓包 = 只保留跟目标有关的报文；私网 IP / 私网网段不设抓包过滤（抓全网后在分析阶段筛），避免漏抓。",
+      "hint": "私网 IP / 私网网段不下抓包过滤（先抓全网，分析阶段再筛）；域名解析到 fake-ip 时也会自动抓全网。",
+      "idle_desc": "只盯一个目标 IP / 网段 / 域名。域名会先解析；解析到 fake-ip / 私网时自动改为抓全网，避免 0 包。"
+    },
+    "passive": {
+      "label": "通信观察",
+      "tech": "被动监听",
+      "display": "通信观察（被动监听）",
+      "nav_desc": "不发包，只看谁在和谁通信",
+      "needs_admin": true,
+      "fields": [
+        "duration",
+        "iface",
+        "engine"
+      ],
+      "btn": "开始观察",
+      "title": "通信观察（被动监听）",
+      "sub": "不发包，只看谁在和谁通信",
+      "guide": "想知道「现在谁在跟谁通信」、又不希望自己发包时用它：只旁听，把流量按会话聚合。",
+      "question": "现在谁在和谁通信？用什么协议？有没有可疑外联？",
+      "points": [
+        "不发任何报文，只读网卡旁听",
+        "把流量聚合成「源 IP:端口 → 目标 IP:端口」的会话表",
+        "适合查后台在连谁、有没有异常外联"
+      ],
+      "example": "例：怀疑电脑在偷偷上传 → 通信观察 → 会话表会列出目标 IP/端口、协议和识别依据。",
+      "term": "术语：被动监听 = 只读网卡，不发任何探测报文；目标框被隐藏，默认看全部会话。",
+      "hint": "通信观察不发任何报文：只监听网卡，把流量按会话聚合，用端口和首包特征识别协议。",
+      "idle_desc": "不发包，只旁听本机网卡流量，按「源 IP:端口 → 目标 IP:端口」聚合成会话表。"
+    },
+    "probe": {
+      "label": "连通与速度测试",
+      "tech": "链路体检",
+      "display": "连通与速度测试（链路体检）",
+      "nav_desc": "主动探测，10 秒给出通不通、多快",
+      "needs_admin": false,
+      "fields": [],
+      "btn": "开始测试",
+      "title": "连通与速度测试（链路体检）",
+      "sub": "主动探测，10 秒给出通不通、多快",
+      "guide": "不想抓包、只想确认一条链路通不通、慢在哪一段时用它。会依次测 DNS → TCP → 协议首包。",
+      "question": "到这个目标通不通？慢在哪一段（DNS/TCP/TLS/应用）？",
+      "points": [
+        "主动发少量探测报文，约 10 秒出结果",
+        "拆成 DNS → TCP → 协议首包（TLS/HTTP/SMB/SSH）分段计时",
+        "不需要管理员权限，也不产生 pcap"
+      ],
+      "example": "例：用户说「网页很慢」→ 连通与速度测试 → 报告会指出是 DNS 慢、建连慢，还是服务端响应慢。",
+      "term": "术语：链路体检 = 主动发少量探测报文，不产生 pcap，不需要管理员权限。",
+      "hint": "",
+      "idle_desc": ""
+    },
+    "offline": {
+      "label": "分析抓包文件",
+      "tech": "离线分析",
+      "display": "分析抓包文件（离线分析）",
+      "nav_desc": "别人抓的/之前存的 pcap，导入分析",
+      "needs_admin": false,
+      "fields": [
+        "offline"
+      ],
+      "btn": "开始分析",
+      "title": "分析抓包文件（离线分析）",
+      "sub": "别人抓的/之前存的 pcap，导入分析",
+      "guide": "手上已经有一个 pcap 文件（别人给的，或之前抓的）时用它：只分析文件，不碰网卡。",
+      "question": "这个 pcap 里到底发生了什么？问题出在哪一层？",
+      "points": [
+        "只读文件，不访问网卡、不需要管理员权限",
+        "支持 .pcap / .pcapng / .cap 格式",
+        "适合现场没权限抓包，或复盘历史故障"
+      ],
+      "example": "例：对方发来一个 pcap → 分析抓包文件 → 直接得到四层结论、问题清单和处理建议。",
+      "term": "术语：离线分析 = 分析已有的 pcap 文件，不访问网卡、不需要管理员权限；和上面的「实时抓包」是两回事。",
+      "hint": "分析抓包文件只读取 pcap 文件，不需要管理员权限，适合权限受限的目标机器。",
+      "idle_desc": "选择或拖入一个已有 pcap / pcapng 文件，直接离线分析；不会碰网卡。"
+    }
+  }
+}
+</script>
+<script src="/v2/js/copy.js"></script>
+<script src="/v2/js/icons.js"></script>
+<script src="/v2/js/boot.js"></script>
+</body>
+</html>

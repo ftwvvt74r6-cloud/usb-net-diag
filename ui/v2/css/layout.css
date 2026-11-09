@@ -1,0 +1,190 @@
+/* ============================================================================
+   layout.css · 深色轨道 + 主内容列
+   ----------------------------------------------------------------------------
+   232px 轨道（≤1100px 收成 64px 纯图标）＋ 右侧单列内容，内容列最大 1120px。
+   ========================================================================== */
+
+.app {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ---------------------------------------------------------------- 左轨道 */
+.rail {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  height: 100vh;
+  padding: var(--sp-4) var(--sp-2) var(--sp-3);
+  /* 兜底：不支持毛玻璃时就是纯 --n-900 */
+  background: var(--n-900);
+  color: var(--rail-icon);
+}
+
+/* 毛玻璃：半透明层叠在**不透明** --n-900 之上。
+   若只用 --rail-bg 单层，它会和页面白底混成 #454547，
+   --rail-icon(#A1A1A6) 在白底化后的轨道上只剩 2.3:1。 */
+@supports ((-webkit-backdrop-filter: blur(8px)) or (backdrop-filter: blur(8px))) {
+  .rail {
+    background: linear-gradient(var(--rail-bg), var(--rail-bg)), var(--n-900);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  transition: background var(--dur) var(--ease);
+}
+.brand:hover { background: rgba(255, 255, 255, .06); }
+.brand img {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--r-sm);
+  /* 深色轨道上给 1px 描边，否则深蓝方块会糊成一片 */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .16);
+}
+.brand-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.brand-t b {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--rail-icon-hover);
+  letter-spacing: .01em;
+}
+
+.railnav { display: flex; flex-direction: column; gap: 2px; }
+
+.rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  color: var(--rail-icon);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.rail-item .lbl {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rail-item .ic { display: grid; flex: none; place-items: center; }
+.rail-item .ic svg { display: block; width: 24px; height: 24px; }
+.rail-item:hover { background: rgba(255, 255, 255, .07); color: var(--rail-icon-hover); }
+
+/* 选中态：主色淡底 + 图标转 --accent-on-dark + 左侧 3px 实条。
+   实条用 inset box-shadow 而不是定位伪元素：会跟着 10px 圆角走，
+   不会出现「一条离高亮块 8px、贴在窗口边缘的竖线」。 */
+.rail-item[aria-current="page"] {
+  background: var(--rail-active-bg);
+  color: var(--rail-icon-hover);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.rail-item[aria-current="page"] .ic { color: var(--rail-active-icon); }
+
+.railfoot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+.railfoot .rail-item { font-size: var(--fs-sm); font-weight: 400; }
+.railfoot .rail-item .ic svg { width: 20px; height: 20px; }
+
+/* ---------------------------------------------------------------- 主区 */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 56px;
+  padding: 0 var(--sp-5);
+  background: var(--n-25);
+  border-bottom: 1px solid var(--line);
+}
+.topbar h1 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.topbar .tb-right { display: flex; gap: var(--sp-2); margin-left: auto; }
+
+.scroll { flex: 1 1 auto; min-height: 0; }
+
+/* 内容列：单列、最大 1120px、居中 */
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--sp-6) var(--sp-5) 96px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.pagehead { display: flex; flex-direction: column; gap: var(--sp-1); }
+.pagehead p { color: var(--text-2); font-size: var(--fs-base); }
+
+/* 指标行：四列；栅格定义放 layout 里，避免被后加载的 components 覆盖 */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+/* 主区两栏：左侧结论/列表宽一些，右侧环境窄一些；≤1100px 并成一栏 */
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+/* ---------------------------------------------------------------- 断点 */
+@media (max-width: 1100px) {
+  .app { grid-template-columns: 64px minmax(0, 1fr); }
+  .rail { padding: var(--sp-4) var(--sp-2) var(--sp-3); align-items: center; }
+
+  /* 只收文字，不收图标；全称靠 title + CSS 气泡 */
+  .brand { justify-content: center; padding: var(--sp-1) 0 var(--sp-4); }
+  .brand img { width: 28px; height: 28px; }
+  .brand-t,
+  .rail-item .lbl { display: none; }
+
+  .railnav, .railfoot { width: 100%; }
+  .rail-item { justify-content: center; padding: var(--sp-2) 0; }
+
+  .topbar { padding: 0 var(--sp-4); }
+  .wrap { padding: var(--sp-5) var(--sp-4) 80px; gap: var(--sp-4); }
+
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .app { grid-template-columns: 56px minmax(0, 1fr); }
+  .wrap { padding: var(--sp-4) var(--sp-3) 80px; }
+}
