@@ -86,9 +86,13 @@
     lastRun: function () { return request("/api/last-run"); },
     lastRunResult: function () { return request("/api/last-run/result"); },
     interfaces: function () { return request("/api/interfaces"); },
+    captures: function () { return request("/api/captures"); },
     ai: function () { return request("/api/ai"); },
 
     /* 走 POST 的写操作 */
+    scan: function (payload) {
+      return request("/api/scan", { method: "POST", body: payload || {} });
+    },
     quit: function () { return request("/api/quit", { method: "POST", body: {} }); },
     elevate: function () { return request("/api/elevate", { method: "POST", body: {} }); },
     diagpack: function (body) { return request("/api/diagpack", { method: "POST", body: body || {} }); },
