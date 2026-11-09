@@ -29,16 +29,18 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "core"))
 
 import evidence  # noqa: E402
 import report  # noqa: E402
 import server  # noqa: E402
 import verdict  # noqa: E402
+import _uisrc  # noqa: E402
 
 TEMPLATE_PATH = ROOT / "core" / "copy" / "evidence_checklist.json"
 COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+HTML = _uisrc.html()
 EVIDENCE_SOURCE = (ROOT / "core" / "evidence.py").read_text(encoding="utf-8")
 TEMPLATE_TEXT = TEMPLATE_PATH.read_text(encoding="utf-8")
 #: 新增取证文档也要守门（V22）；内容目前干净，扫描目标防后续回归。

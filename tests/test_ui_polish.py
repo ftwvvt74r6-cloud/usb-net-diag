@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import re
 import unittest
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+sys.path.insert(0, str(ROOT / "tests"))
+import _uisrc  # noqa: E402
+CSS = _uisrc.css()
+HTML = _uisrc.html()
 
 ALLOWED_FS = {"--fs-xs": 12, "--fs-sm": 13, "--fs-base": 14, "--fs-md": 16, "--fs-lg": 20, "--fs-xl": 24}
 ALLOWED_SP = {"--sp-1": 4, "--sp-2": 8, "--sp-3": 12, "--sp-4": 16, "--sp-5": 24}

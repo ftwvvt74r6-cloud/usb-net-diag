@@ -17,13 +17,15 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "core"))
 
 import diagnose  # noqa: E402
 import report  # noqa: E402
 import server  # noqa: E402
+import _uisrc  # noqa: E402
 
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+HTML = _uisrc.html()
 CONFIG_RE = re.compile(
     r'<script type="application/json" id="ui-config">(.*?)</script>', re.S)
 
