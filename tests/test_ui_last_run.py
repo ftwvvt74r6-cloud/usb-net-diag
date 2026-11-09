@@ -28,6 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+#: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
+#: 断言内容与严格程度与拆分前完全一致（不是放宽）。
+CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
 COPY = json.loads((ROOT / "core" / "copy" / "zh-CN.json").read_text(encoding="utf-8"))
 LAST_RUN_COPY = COPY["last_run"]
 SETTINGS_COPY = COPY["settings"]
@@ -129,8 +132,8 @@ class LastRunBannerMarkupTest(unittest.TestCase):
                            HTML.index('<div class="main-scroll" id="main-scroll">'))
 
     def test_banner_has_neutral_notice_style(self):
-        css = HTML[HTML.index("/* 上次结果提示条（G5）"):
-                   HTML.index("/* 侧栏固定在底部")]
+        css = CSS[CSS.index("/* 上次结果提示条（G5）"):
+                  CSS.index("/* 侧栏固定在底部")]
         self.assertIn(".lastrun", css)
         self.assertIn("display:flex", css)
         self.assertIn(".lastrun .lr-note", css)

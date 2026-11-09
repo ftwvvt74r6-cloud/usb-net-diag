@@ -22,6 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+#: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
+#: 断言内容与严格程度与拆分前完全一致（不是放宽）。
+CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
 
 NODE = shutil.which("node")
 LOG_PURE_START = "/* ---------- 运行日志增量：纯函数"
@@ -92,22 +95,22 @@ class UnifiedPanelStructureTest(unittest.TestCase):
         self.assertIn('id="consolepanel"', _workpanel())
 
     def test_no_black_console_or_json_block(self):
-        self.assertNotIn("background:#0b1220", HTML,
+        self.assertNotIn("background:#0b1220", CSS,
                          "H4 起禁止黑色 console 块；机器可读 JSON 也改成浅灰面")
-        self.assertIn(".console{background:#f8fafc", HTML)
-        self.assertIn(".json{background:#f8fafc", HTML)
+        self.assertIn(".console{background:#f8fafc", CSS)
+        self.assertIn(".json{background:#f8fafc", CSS)
 
     def test_console_is_mono_with_prefix_and_light_neutral_rows(self):
-        self.assertIn(".console{background:#f8fafc", HTML)
-        self.assertIn('content:"›"', HTML)
-        self.assertIn("var(--mono)", HTML)
+        self.assertIn(".console{background:#f8fafc", CSS)
+        self.assertIn('content:"›"', CSS)
+        self.assertIn("var(--mono)", CSS)
         # 颜色语义：info 灰白 / success 青绿 / warn 琥珀 / 仅真错误红
         for token in (".console .l.i span{color:#475569}",
                       ".console .l.s span{color:#0f766e}",
                       ".console .l.w span{color:#b45309}",
                       ".console .l.e span{color:#b91c1c}"):
             with self.subTest(token=token):
-                self.assertIn(token, HTML)
+                self.assertIn(token, CSS)
 
     def test_progress_header_has_phase_count_and_attempt(self):
         panel = _workpanel()

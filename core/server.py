@@ -84,6 +84,63 @@ UI_DIR = ROOT / "ui"
 CAPTURES = ROOT / "captures"
 REPORTS = ROOT / "reports"
 
+#: 前端静态资源的 MIME 表（键是小写扩展名，值是完整的 ``Content-Type``）。
+#:
+#: 为什么不用 ``mimetypes.guess_type``：Windows 上它会读注册表，``.js`` 常被猜成
+#: ``text/plain``；浏览器拿到 ``text/plain`` 的脚本会拒绝执行（控制台报
+#: 「MIME type ... is not executable」），现场表现就是白屏。显式表不受宿主环境影响。
+STATIC_MIME = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
+
+
+def static_asset(path: str):
+    """把请求路径解析成 ``ui/`` 下可安全读取的白名单文件。
+
+    Args:
+        path: ``urlparse`` 得到的原始 path（可能含 ``%2e`` / ``%2f`` 之类编码）。
+
+    Returns:
+        Path | None: 通过全部检查的文件；不合法一律返回 ``None``，由调用方回 404
+        —— 刻意不回 403，以免告诉探测者「这个路径存在」。
+
+    Note:
+        四道关，缺一不可：
+
+        1. 先 ``unquote`` 解码**再**判断 —— 不先解码就挡不住 ``%2e%2e``；
+        2. 逐段拒绝 ``..`` / ``.`` / 反斜杠 / NUL。反斜杠在 POSIX 语义里不是分隔符，
+           但在 Windows 上是，``\\..\\`` 会变成真实穿越；
+        3. 白名单：只认 ``/app.css`` 与 ``/js/<名字>.js``，``ui/`` 下其余文件不开放；
+        4. ``resolve()`` 后 ``relative_to(UI_DIR)`` 二次校验，挡符号链接与
+           「解析后跑出 ui/」的边界情况。
+
+        不做内容缓存：本地环回上每次只是几 KB 读盘，而开发期改完样式刷新即见，
+        比多一层失效逻辑更省心。
+    """
+    raw = urllib.parse.unquote(path or "")
+    if "\x00" in raw or "\\" in raw or not raw.startswith("/"):
+        return None
+    parts = [seg for seg in raw.split("/") if seg]
+    if not parts or any(seg in (".", "..") for seg in parts):
+        return None
+    if parts == ["app.css"]:
+        candidate = UI_DIR / "app.css"
+    elif len(parts) == 2 and parts[0] == "js" and parts[1].endswith(".js"):
+        candidate = UI_DIR / "js" / parts[1]
+    else:
+        return None
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(UI_DIR.resolve())
+    except (OSError, ValueError):
+        return None
+    return resolved if resolved.is_file() else None
+
 LOCK = threading.Lock()
 JOB = {
     "state": "idle",      # idle | running | done | error
@@ -1819,6 +1876,15 @@ class Handler(BaseHTTPRequestHandler):
             want_path = _to_bool((q.get("path") or [None])[0], True)
             return self._json(_probe_guarded(target, port, count, None, proto,
                                              path=want_path))
+        # 前端静态资源：样式/脚本拆成独立文件后浏览器会以子资源方式请求它们。
+        # 位置必须在所有 /api/* 之后、404 兜底之前 —— 静态路由不许抢 API 的路径。
+        asset = static_asset(path)
+        if asset is not None:
+            ctype = STATIC_MIME.get(asset.suffix.lower())
+            if ctype is None:
+                # 白名单里冒出未登记扩展名：宁可 404，也不猜一个 MIME 出去。
+                return self._send(404, b"not found", "text/plain; charset=utf-8")
+            return self._send(200, asset.read_bytes(), ctype)
         return self._send(404, b"not found", "text/plain; charset=utf-8")
 
     def _route_post(self):

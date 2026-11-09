@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 from core.version import read_version  # noqa: E402
 
 START_BAT = ROOT / "start.bat"
+STARTMSG = ROOT / "core" / "startmsg.py"
 
 # 便携运行环境不进仓库，跳过不校验
 SKIP_PREFIX = ("tools", "harness")
@@ -87,22 +88,33 @@ class LauncherContract(unittest.TestCase):
 
     # ------------------------------------------------ S1：缺 tshark 不阻塞
     def test_missing_tshark_block_warns_and_continues(self):
-        """start.bat 是 lite 回退入口：缺 tshark 只提示，不 pause、不 exit。"""
+        """start.bat 是 lite 回退入口：缺 tshark 只提示，不 pause、不 exit。
+
+        P1 起 ``start.bat`` 必须**纯 ASCII**：``chcp 65001`` 之后 cmd 仍按字节偏移
+        续读批处理，多字节字符落在行边界会把行尾劈成一条命令（GBK 控制台里就是
+        ``'...' 不是内部或外部命令`` 的乱码）。所以中文提示搬进 ``core/startmsg.py``，
+        这里改为钉住「该分支调用的消息 key」+ 直接校验那段文案本身 —— 严格程度不变：
+        仍然要求「提示 + 继续 + 不阻塞」，只是文案的位置变了。
+        """
         text = START_BAT.read_text(encoding="utf-8", errors="replace")
         self.assertIn("if errorlevel 3 goto :no_tshark", text,
                       "bootstrap 的缺 tshark 退出码必须仍被识别")
         begin = text.index(":no_tshark")
         end = text.index("\n:check_npcap", begin)
         block = text[begin:end]
-        self.assertIn("未找到 tshark", block)
-        self.assertIn("其余功能照常", block)
+        self.assertIn("call :say no_tshark", block,
+                      "缺 tshark 分支必须调用 no_tshark 提示块")
         self.assertIn("goto :check_npcap", block,
                       "提示后必须继续走 Npcap 检测与启动流程")
         self.assertNotRegex(block, r"(?im)^\s*pause\b", "缺 tshark 不许 pause")
         self.assertNotRegex(block, r"(?im)^\s*exit\s+/b\b", "缺 tshark 不许硬退出")
+        # 文案本身（现在住在 startmsg.py）仍然必须说明「只降级、其余照常」。
+        msg = STARTMSG.read_text(encoding="utf-8")
+        self.assertIn("未找到 tshark", msg)
+        self.assertIn("其余功能照常", msg)
         # 旧的开发者硬路径提示已删除（S4 文案红线）。
-        self.assertNotIn("请将 Wireshark 便携版解压到", block)
-        self.assertNotIn("WiresharkPortable", block)
+        self.assertNotIn("请将 Wireshark 便携版解压到", msg)
+        self.assertNotIn("WiresharkPortable", msg)
 
     @unittest.skipUnless(os.name == "nt" and shutil.which("python"),
                          "需要 Windows + 可用的 Python 才能真实执行 start.bat")
@@ -117,6 +129,8 @@ class LauncherContract(unittest.TestCase):
             root = Path(tmp)
             shutil.copyfile(START_BAT, root / "start.bat")
             (root / "core").mkdir()
+            # :say 的文案来源：临时 harness 必须带上，否则缺 tshark 那行没人打印
+            shutil.copyfile(STARTMSG, root / "core" / "startmsg.py")
             (root / "core" / "bootstrap.py").write_text(
                 "import sys\n"
                 "raise SystemExit(0 if '--npcap' in sys.argv else 3)\n",

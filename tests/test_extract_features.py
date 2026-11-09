@@ -20,6 +20,7 @@ import json
 import re
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,37 @@ NO_TSHARK = find_tshark() is None
 #: 完整版本串含构建哈希（``4.7.4 (v4.7.4-0-g...).``），同一主次版本的不同补丁／
 #: 不同构建之间数字也可能不变 —— 比整行会让正常升级误报，不是我们要守的东西。
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)")
+
+
+def _version_skip_reason(recorded: str, current: str) -> str | None:
+    """判断「现跑 tshark 与 fixture 记录的主次版本是否一致」。
+
+    Args:
+        recorded: fixture 里记录的 ``tshark_version`` 首行。
+        current: 当前机器上 ``tshark --version`` 的首行。
+
+    Returns:
+        str | None: 主次版本不一致时返回**跳过原因**（含两边完整版本号）；
+        一致、或 fixture 压根没记版本时返回 ``None``（照常执行原断言）。
+
+    Note:
+        这里区分的是「环境不符」与「产品回归」：换了一台机器 / 升级了 tshark，
+        现跑数字当然会和 golden 不同，那不是代码坏了；而 fixture 丢版本字段
+        属于 fixture 被改坏，必须继续 fail（所以那种情况返回 ``None``）。
+    """
+    recorded_mm = _major_minor(recorded)
+    if not recorded_mm:
+        return None
+    current_mm = _major_minor(current)
+    if recorded_mm == current_mm:
+        return None
+    return (
+        "tshark 主次版本与 fixture 不一致，跳过现跑比对（不是产品回归）："
+        f"fixture 记录 {recorded or '(空)'}（主次 {recorded_mm}） / "
+        f"当前检测到 {current or '(空)'}（主次 {current_mm or '未知'}）。"
+        "确认要跟随新版本时，用 `python scripts/dump_features.py "
+        "--pcap captures/faults_demo.pcap --out tests/fixtures/faults_features.json` 重生成。"
+    )
 
 
 def _major_minor(version_text: str) -> str:
@@ -132,6 +164,15 @@ class FeaturesFixtureTest(unittest.TestCase):
 class FeaturesLiveTest(unittest.TestCase):
     """装了 tshark 时现跑一遍，确认 fixture 没被手改坏。"""
 
+    def setUp(self) -> None:
+        """版本不一致时整类跳过：否则同一份 pcap 会因 tshark 升级而被判「回归」。"""
+        if not FIXTURE.is_file():
+            return
+        data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        reason = _version_skip_reason(data.get("tshark_version", ""), version())
+        if reason:
+            self.skipTest(reason)
+
     def test_live_run_matches_fixture(self):
         """现跑 demo pcap 的特征必须与 fixture 逐项一致。"""
         self.assertTrue(SAMPLE.is_file(), f"缺少示例抓包：{SAMPLE}")
@@ -141,7 +182,11 @@ class FeaturesLiveTest(unittest.TestCase):
         _assert_golden(self, feats.tcp.to_dict())
 
     def test_tshark_version_matches_fixture(self):
-        """现跑 tshark 的主次版本必须与 golden 记录一致（不一致时给重生成命令）。"""
+        """兜底断言：走到这里说明 setUp 的版本门已判定一致。
+
+        版本不一致时 ``setUp`` 会 ``skipTest`` 并打印两边版本；这一条留着是为了
+        「fixture 丢字段 / 有人删掉 setUp」时仍然 fail，而不是静默放过。
+        """
         self.assertTrue(FIXTURE.is_file(), f"缺少特征样本：{FIXTURE}")
         data = json.loads(FIXTURE.read_text(encoding="utf-8"))
         recorded = data.get("tshark_version", "")
@@ -162,6 +207,54 @@ class FeaturesLiveTest(unittest.TestCase):
                 f"fixture 记录 {recorded_mm} / 当前 {current_mm} / {hint}"
                 f"（当前完整版本：{current}）"
             )
+
+
+class TsharkVersionGateTest(unittest.TestCase):
+    """钉住版本门的两条分支：同版本必须执行、不同版本必须跳过。
+
+    这一组用**注入假版本**的方式验证，不依赖本机装的是哪个 tshark：
+    否则「跳过逻辑写反了」在一台恰好版本一致的机器上永远发现不了。
+    """
+
+    RECORDED_DIFF_PATCH = "TShark (Wireshark) 9.9.9 (v9.9.9-0-gdeadbeef)."
+
+    def test_same_major_minor_does_not_skip(self):
+        self.assertIsNone(_version_skip_reason(
+            "TShark (Wireshark) 4.7.4 (v4.7.4-0-gabc).",
+            "TShark (Wireshark) 4.7.0 (v4.7.0-0-gdef)."),
+            "主次版本相同（4.7）时不许跳过，否则现跑比对会被永久绕过")
+
+    def test_different_major_minor_skips_with_both_versions(self):
+        reason = _version_skip_reason("TShark (Wireshark) 4.7.4 (v4.7.4-0-gabc).",
+                                      "TShark (Wireshark) 4.6.8 (v4.6.8-0-gxyz).")
+        self.assertIsNotNone(reason, "主次版本不同必须跳过")
+        self.assertIn("4.7.4", reason, "跳过原因要打印 fixture 记录的版本")
+        self.assertIn("4.6.8", reason, "跳过原因要打印当前检测到的版本")
+
+    def test_missing_recorded_version_still_fails_the_assertion(self):
+        """fixture 丢版本字段属「fixture 被改坏」，必须继续 fail，不能变成 skip。"""
+        self.assertIsNone(_version_skip_reason("", "TShark (Wireshark) 4.6.8."))
+
+    def test_setup_skips_on_injected_mismatch(self):
+        data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        recorded = data.get("tshark_version", "")
+        if not _major_minor(recorded):
+            self.skipTest("fixture 没有可用的 tshark_version，本用例无意义")
+        case = FeaturesLiveTest("test_live_run_matches_fixture")
+        with mock.patch.object(sys.modules[__name__], "version",
+                               return_value=self.RECORDED_DIFF_PATCH):
+            with self.assertRaises(unittest.SkipTest) as ctx:
+                case.setUp()
+        self.assertIn("9.9.9", str(ctx.exception))
+
+    def test_setup_runs_when_versions_match(self):
+        data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        recorded = data.get("tshark_version", "")
+        if not _major_minor(recorded):
+            self.skipTest("fixture 没有可用的 tshark_version，本用例无意义")
+        case = FeaturesLiveTest("test_live_run_matches_fixture")
+        with mock.patch.object(sys.modules[__name__], "version", return_value=recorded):
+            case.setUp()  # 不抛 SkipTest 就代表会真的执行原断言
 
 
 if __name__ == "__main__":

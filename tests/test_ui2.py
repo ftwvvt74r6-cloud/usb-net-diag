@@ -28,6 +28,9 @@ import app  # noqa: E402
 import server  # noqa: E402
 
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+#: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
+#: 断言内容与严格程度与拆分前完全一致（不是放宽）。
+CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
 
 CONFIG_RE = re.compile(
     r'<script type="application/json" id="ui-config">(.*?)</script>', re.S)
@@ -137,26 +140,26 @@ class VisualContractTest(unittest.TestCase):
         self.assertIn("第 ", HTML)
 
     def test_stat_cards_use_auto_fill_and_nowrap_value(self):
-        self.assertIn("grid-template-columns:repeat(auto-fill,minmax(160px,1fr))", HTML)
-        self.assertIn(".statgrid .stat span{display:block;white-space:normal", HTML)
-        self.assertIn(".statgrid .stat b{white-space:nowrap", HTML)
-        self.assertIn("padding-right:6px", HTML)
+        self.assertIn("grid-template-columns:repeat(auto-fill,minmax(160px,1fr))", CSS)
+        self.assertIn(".statgrid .stat span{display:block;white-space:normal", CSS)
+        self.assertIn(".statgrid .stat b{white-space:nowrap", CSS)
+        self.assertIn("padding-right:6px", CSS)
 
     def test_console_is_light_mono_with_prefix(self):
         """H4：运行日志改为浅灰中性面（禁止黑色块），等宽 + `›` 前缀保持不变。"""
-        self.assertIn(".console{background:#f8fafc", HTML,
+        self.assertIn(".console{background:#f8fafc", CSS,
                       "运行日志必须是浅灰中性面，不能恢复黑底 console 块")
-        self.assertNotIn("background:#0b1220", HTML,
+        self.assertNotIn("background:#0b1220", CSS,
                          "H4 起页面不允许再出现黑色块（含旧的 JSON 黑底）")
-        self.assertIn('content:"›"', HTML)
-        self.assertIn("var(--mono)", HTML)
+        self.assertIn('content:"›"', CSS)
+        self.assertIn("var(--mono)", CSS)
 
     def test_console_color_semantics(self):
         """info 灰白 / success 青绿 / warn 琥珀 / 红仅真正错误（浅底上的语义色）。"""
-        self.assertIn(".console .l.i span{color:#475569}", HTML)
-        self.assertIn(".console .l.s span{color:#0f766e}", HTML)
-        self.assertIn(".console .l.w span{color:#b45309}", HTML)
-        self.assertIn(".console .l.e span{color:#b91c1c}", HTML)
+        self.assertIn(".console .l.i span{color:#475569}", CSS)
+        self.assertIn(".console .l.s span{color:#0f766e}", CSS)
+        self.assertIn(".console .l.w span{color:#b45309}", CSS)
+        self.assertIn(".console .l.e span{color:#b91c1c}", CSS)
         classify_fn = HTML.split("function classifyLog", 1)[1].split("function appendLog", 1)[0]
         self.assertIn("0 包", classify_fn, "0 包必须落到 warn，不能落到 error")
 

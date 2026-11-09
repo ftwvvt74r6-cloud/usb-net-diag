@@ -188,7 +188,12 @@ class LauncherSourceContractTest(unittest.TestCase):
                          "Npcap 安装又带上了 /S（免费版立刻失败）")
         self.assertIn('start /wait "" "%%~f"', text,
                       "Npcap 安装应改为交互式 start /wait")
-        self.assertIn("请在向导里完成安装", text,
+        # P1 起 start.bat 必须纯 ASCII，中文提示在 core/startmsg.py；
+        # 这里钉住「安装前必须提示走向导」这条语义仍然存在。
+        self.assertIn("call :say npcap_hint", text,
+                      "Npcap 交互式安装缺少「请在向导里完成安装」提示")
+        msg = (ROOT / "core" / "startmsg.py").read_text(encoding="utf-8")
+        self.assertIn("请在向导里完成安装", msg,
                       "Npcap 交互式安装缺少「请在向导里完成安装」提示")
 
 

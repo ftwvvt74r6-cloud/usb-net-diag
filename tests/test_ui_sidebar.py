@@ -20,17 +20,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+#: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
+#: 断言内容与严格程度与拆分前完全一致（不是放宽）。
+CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
 
 TOP_LEVEL_GROUPS = ["realtime", "probe", "offline", "reports"]
 
 
-def _slice(start: str, end: str, label: str) -> str:
-    if start not in HTML:
+def _slice(start: str, end: str, label: str, src: str | None = None) -> str:
+    """截取 ``src`` 中 ``start`` 到 ``end`` 之间的片段（默认在 HTML 里截）。
+
+    P1 把样式搬进 ``ui/app.css`` 后，样式片段要传 ``src=CSS``；DOM 片段仍用默认值。
+    """
+    text = HTML if src is None else src
+    if start not in text:
         raise AssertionError(f"{label}: 找不到起点 {start!r}")
-    begin = HTML.index(start)
-    if end not in HTML[begin:]:
+    begin = text.index(start)
+    if end not in text[begin:]:
         raise AssertionError(f"{label}: 找不到终点 {end!r}")
-    return HTML[begin:begin + HTML[begin:].index(end)]
+    return text[begin:begin + text[begin:].index(end)]
 
 
 def _aside() -> str:
@@ -157,18 +165,18 @@ class SidebarLayoutStaticTest(unittest.TestCase):
     """左栏更窄、可滚动、不横向溢出；1024 仍可用。"""
 
     def test_shell_uses_narrower_flexible_columns(self):
-        self.assertIn("grid-template-columns:276px minmax(0,1fr)", HTML)
-        self.assertIn("grid-template-columns:244px minmax(0,1fr)", HTML)
-        self.assertNotIn("grid-template-columns:300px", HTML)
-        self.assertNotIn("grid-template-columns:264px", HTML)
-        self.assertIn("@media (max-width:1150px)", HTML)
+        self.assertIn("grid-template-columns:276px minmax(0,1fr)", CSS)
+        self.assertIn("grid-template-columns:244px minmax(0,1fr)", CSS)
+        self.assertNotIn("grid-template-columns:300px", CSS)
+        self.assertNotIn("grid-template-columns:264px", CSS)
+        self.assertIn("@media (max-width:1150px)", CSS)
 
     def test_side_scrolls_vertically_and_does_not_overflow(self):
         side = _slice("  .side{background:#fff", "  /* ---------------- 一级 / 二级菜单",
-                      "side")
+                      "side", src=CSS)
         self.assertIn("min-height:0", side)
         self.assertIn("overflow:hidden", side)
-        scroll = _slice("  .side-scroll{", "  .sidehead", "side-scroll")
+        scroll = _slice("  .side-scroll{", "  .sidehead", "side-scroll", src=CSS)
         self.assertIn("overflow:auto", scroll)
         self.assertIn("min-height:0", scroll)
 
@@ -178,16 +186,16 @@ class SidebarLayoutStaticTest(unittest.TestCase):
             with self.subTest(id=element_id):
                 self.assertIn(f'id="{element_id}"', HTML)
         self.assertIn("input[type=text],input[type=number],input[type=password],select{",
-                      HTML)
-        self.assertIn("width:100%", HTML)
+                      CSS)
+        self.assertIn("width:100%", CSS)
 
     def test_1024_breakpoint_keeps_main_fluid(self):
         # CI 没有布局引擎：这里钉住「左侧固定 ≤276 / 主区 minmax(0,1fr)」的规则，
         # 真实 1024×768 的 scrollWidth 断言由 headless 证据（h-samples/ui）补足。
-        self.assertIn("minmax(0,1fr)", HTML)
+        self.assertIn("minmax(0,1fr)", CSS)
         self.assertIn(".side{background:#fff;border-right:1px solid var(--line);"
-                      "display:flex;flex-direction:column;", HTML)
-        self.assertIn("min-width:0", HTML)
+                      "display:flex;flex-direction:column;", CSS)
+        self.assertIn("min-width:0", CSS)
 
 
 if __name__ == "__main__":
