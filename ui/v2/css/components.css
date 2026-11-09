@@ -488,3 +488,318 @@
 
 /* 程序化聚焦（换页后把焦点交给内容容器）不画环 */
 .wrap:focus { outline: none; }
+
+/* ==========================================================================
+   S3：运行态（进度 / 控制台）、结论卡、证据与建议、技术详情、模式页表单
+   全部走 token；不新增颜色字面量。动画只碰 opacity / transform。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- 小件 */
+.stack-lg { display: flex; flex-direction: column; gap: var(--sp-4); }
+.result-zone:empty { display: none; }
+.chip.info { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.chip.info::before { background: var(--accent); }
+
+/* 运行中：数值位置放 spinner，不显示旧值 */
+.kpi.is-running .kpi-v { color: var(--text-2); font-size: var(--fs-base); font-weight: 400; }
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: var(--sp-2);
+  vertical-align: -2px;
+  border: 2px solid var(--n-300);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: var(--n-400); }
+}
+
+/* ---------------------------------------------------------------- 模式页表单 */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+}
+/* 目标通常最长，独占一行（其余字段两列并排） */
+.form-grid > .field:first-child { grid-column: 1 / -1; }
+.field-hint { font-size: var(--fs-xs); color: var(--text-2); }
+.input-num { max-width: 180px; }
+.form-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-5); }
+.checkline {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  margin-top: var(--sp-4);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.checkline input { margin-top: 2px; flex: none; }
+
+/* ---------------------------------------------------------------- 进度 */
+.run-progress:empty { display: none; }
+.runbar { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.runbar-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.run-phase { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-sm); color: var(--text-2); }
+.run-phase b {
+  font-size: var(--fs-md);
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.run-time { font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.run-track {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--n-100);
+  overflow: hidden;
+}
+/* 只动 transform：宽度变化会触发布局，进度条每秒都在动，不能这么干 */
+.run-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  transform-origin: left center;
+  transform: scaleX(var(--s, 0));
+  transition: transform var(--dur) var(--ease);
+}
+.runbar-foot {
+  display: flex;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- 控制台 */
+.console {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--n-50);
+}
+.console-hd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--n-0);
+}
+.console-hd h3 { font-size: var(--fs-sm); font-weight: 600; }
+.console-tools { margin-left: auto; display: flex; gap: var(--sp-2); align-items: center; }
+.console-live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--accent); }
+.console-live .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s var(--ease) infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .console-live .dot { animation: none; } }
+
+.console-bd { max-height: 240px; overflow: auto; padding: var(--sp-2) var(--sp-3); }
+.console-bd:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.console-pre {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.62;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.console-ft {
+  padding: 4px var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.console-collapsed {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  background: var(--n-0);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.console-collapsed:hover { color: var(--text); }
+.console-collapsed .mini svg { width: 16px; height: 16px; }
+.console-more { margin-left: auto; color: var(--accent); }
+
+/* ---------------------------------------------------------------- 结论卡 */
+/* 整块阅读、不可折叠：这里没有任何折叠控件，结论与边界在同一张卡里 */
+.concl .concl-say {
+  margin-bottom: var(--sp-4);
+  padding-left: var(--sp-3);
+  border-left: 3px solid var(--accent);
+}
+.concl-kicker { font-size: var(--fs-xs); color: var(--text-2); letter-spacing: .02em; }
+.concl-text {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--text);
+}
+.concl-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+}
+.concl-blk { min-width: 0; }
+.concl-h {
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-2);
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.concl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.concl-conf {
+  margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--n-50);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.concl-conf b { color: var(--text); font-weight: 600; }
+.concl-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.concl-count { font-size: var(--fs-xs); color: var(--text-2); font-weight: 400; }
+.concl-ft { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
+.concl-id { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-3); }
+
+/* 证据 */
+.evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.ev-item { padding-left: var(--sp-3); border-left: 2px solid var(--line); }
+.ev-top { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.ev-layer, .ev-proto { font-size: var(--fs-xs); color: var(--text-2); }
+.ev-title { margin-top: 2px; font-size: var(--fs-base); color: var(--text); }
+.ev-proof { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-2); }
+
+/* 建议 */
+.advice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: 1.3em;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- 技术详情 */
+.tech {
+  margin-top: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--n-0);
+}
+.tech > summary {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+}
+.tech > summary::-webkit-details-marker { display: none; }
+.tech > summary::before { content: "▸ "; }
+.tech[open] > summary::before { content: "▾ "; }
+.tech > summary:hover { color: var(--text); }
+.tech-bd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.tech-bd h4 { margin-top: var(--sp-3); font-size: var(--fs-sm); font-weight: 600; }
+.tech-pre {
+  margin: 0;
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--n-50);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tech-note, .tech-dim { font-size: var(--fs-xs); color: var(--text-2); }
+.tech-todo {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  padding-left: var(--sp-2);
+  border-left: 2px solid var(--n-300);
+}
+.tech-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); }
+.tech-list li { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }
+.tech-err { font-size: var(--fs-xs); color: var(--crit); }
+
+/* 逐跳表：原始行，等宽数字对齐 */
+.hop-table { display: flex; flex-direction: column; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.hop-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 68px 60px 80px;
+  gap: var(--sp-2);
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.hop-row:first-child { border-top: 0; }
+.hop-head { color: var(--text-2); }
+
+/* 体检分段 */
+.seglist { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: flex; flex-direction: column; }
+.segrow {
+  display: grid;
+  grid-template-columns: 120px 96px minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+.seglist .segrow:first-child { border-top: 0; }
+.seg-name { font-weight: 600; }
+.seg-ms { color: var(--text-2); }
+.seg-note { font-size: var(--fs-xs); color: var(--text-2); }
+.segrow.bad .seg-name { color: var(--crit); }
+.segrow.warn .seg-name { color: var(--warn); }
+.segrow.ok .seg-name { color: var(--ok); }
+
+/* ---------------------------------------------------------------- 窄屏 */
+@media (max-width: 1100px) {
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .concl-grid { grid-template-columns: minmax(0, 1fr); }
+  .segrow { grid-template-columns: 96px 84px minmax(0, 1fr); }
+  .console-bd { max-height: 200px; }
+}

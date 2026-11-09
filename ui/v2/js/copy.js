@@ -80,7 +80,9 @@
       thin: "样本不足，不给数值",
       failed: "上次任务失败，没有指标",
       noData: "还没有诊断数据",
-      summaryOnly: "只剩摘要"
+      summaryOnly: "只剩摘要",
+      running: "诊断中…",
+      runningSub: "任务正在运行，完成后这里会更新"
     },
 
     /* 数据来源（必须让用户知道不是实时值） */
@@ -88,7 +90,8 @@
       label: "数据来源",
       line: "{when} · {mode}{target} · {packets} 个报文，不是实时值",
       summary: "{when} · {mode}{target} · 只有摘要，没有明细指标",
-      none: "还没有可用的诊断数据；完成一次诊断后这里才会出现数字。"
+      none: "还没有可用的诊断数据；完成一次诊断后这里才会出现数字。",
+      running: "本次任务正在运行（{mode} · {phase}），结束后这里会更新为这次的结果。"
     },
 
     /* 卡片标题 */
@@ -237,6 +240,132 @@
       kindStartup: "启动",
       kindOther: "其他",
       viewerTitle: "{name}"
+    },
+
+    /* ---------------------------------------------------------- 模式页表单 */
+    form: {
+      target: "诊断目标",
+      targetPh: "域名、IP 或网段，例如 oa.example.com",
+      targetHint: "只抓和这个目标相关的流量；留空等于不过滤，等于看全部流量。",
+      duration: "抓包时长（秒）",
+      durationHint: "窗口越短越容易只看到零星流量；排查建议 30~60 秒。",
+      iface: "网卡",
+      ifaceAuto: "自动选择（推荐）",
+      ifaceHint: "自动选择会先探测哪块网卡真有流量，再开始抓包。",
+      ifaceEmpty: "没有读到网卡列表，先到「总览 → 环境与依赖」看一眼 Npcap。",
+      engine: "采集引擎",
+      engineAuto: "自动（优先 Scapy，失败回落 tshark）",
+      engineScapy: "Scapy（Python 逐包解析）",
+      engineTshark: "tshark（Wireshark 自带）",
+      engineHint: "通信观察只读不发包；会话表按「端口 + 首包特征」识别协议。",
+      pcap: "已有抓包文件",
+      pcapPh: "— 选择 captures 目录中的文件 —",
+      pcapEmpty: "captures 目录里还没有 pcap 文件：先用实时模式抓一次再来。",
+      port: "端口",
+      portHint: "留空按协议画像自动选（HTTPS 443 / HTTP 80）。",
+      path: "同时做逐跳路径（MTR / tracert）",
+      shadow: "抓包同时做路径剖面与探针基线（每 5 秒，少量探测包）",
+      shadowHint: "探针只发少量 ICMP / TCP SYN / DNS 查询，并做一次 TTL 递增的逐跳探测；都已从业务统计里排除。",
+      needTarget: "请先填写要诊断的域名或 IP",
+      needPcap: "请先选择一个 pcap 文件",
+      startFail: "启动失败：{reason}",
+      starting: "正在启动…",
+      noAdmin: "当前不是管理员：抓包类模式需要关掉页面，右键启动器选「以管理员身份运行」后再试。",
+      locked: "这个模式现在不可用：环境里缺依赖，到「总览 → 环境与依赖」补齐。"
+    },
+
+    /* ---------------------------------------------------------- 运行态 */
+    run: {
+      phase: "当前阶段",
+      remain: "剩余 {remain} 秒 / 共 {total} 秒",
+      elapsed: "已用 {elapsed} 秒 / 共 {total} 秒",
+      openEnded: "已用 {elapsed} 秒",
+      attempt: "第 {n}/{m} 块网卡",
+      percent: "{percent}%",
+      consoleTitle: "采集控制台",
+      consoleHint: "采集层的原样输出，等宽字体；结束时自动折叠成一行。",
+      consoleEmpty: "还没有输出…",
+      consoleDone: "采集结束 · {count} 行输出",
+      consoleExpand: "展开输出",
+      consoleCollapse: "收起输出",
+      consoleFollow: "自动滚到底",
+      live: "实时追加",
+      noJob: "还没有开始。填好参数后点下面的按钮。",
+      starting: "正在启动…",
+      runningLabel: "运行中…",
+      cardTitle: "运行"
+    },
+
+    /* ---------------------------------------------------------- 技术详情 */
+    tech: {
+      title: "技术详情",
+      hint: "原始参数与中间结果，报问题时连同截图一起给对方最快。",
+      command: "抓包命令",
+      commandNote: "按本次下发参数推算；实际命令行由采集层拼装（需求单 R6-1 会直接下发）。",
+      runningNote: "任务还在运行，这些数据结束后才会出现。",
+      bpf: "BPF 过滤器",
+      iface: "网卡",
+      window: "抓包窗口",
+      tshark: "tshark",
+      pcap: "原始 pcap",
+      openWireshark: "在 Wireshark 打开",
+      openWiresharkTodo: "需要后端提供「用 Wireshark 打开」接口（需求单 R6-4）",
+      stats: "统计口径",
+      statsWindow: "采样窗口",
+      statsSamples: "样本数",
+      statsPackets: "报文数 / TCP 会话",
+      statsProbe: "探针：发出 {sent} · 收到 {recv} · 超时 {timeout} · 已排除 {excluded}",
+      statsProbeNone: "本次没有发探针",
+      ifaces: "每块网卡探测结果",
+      ifacesTodo: "后端还没有按网卡下发探测结果（需求单 R6-2）",
+      ifaceRow: "第 {n} 块 · {name}",
+      ifaceRowDetail: "{seconds} 秒 · {packets} 个报文",
+      probe: "探针明细",
+      probeRole: "{role}（{kind} → {target}）",
+      probeRoleDetail: "发出 {sent} · 收到 {recv} · 丢包 {loss}%",
+      probeError: "错误：{reason}",
+      path: "逐跳路径",
+      hopCols: ["TTL", "地址", "发/丢", "丢包", "RTT"],
+      pathRow: "第 {hop} 跳 · {addr}",
+      pathRowDetail: "{rtt} · 丢包 {loss}%",
+      pathEngine: "引擎：{engine}",
+      timing: "阶段耗时",
+      timingTodo: "后端还没有下发阶段耗时分解（需求单 R6-3）",
+      timingRow: "{phase} · {seconds} 秒",
+      params: "采集参数",
+      commandTodo: "这次没有下发网卡和过滤条件（离线分析 / 旧记录），给不出可复制命令。",
+      valueMissing: "未记录",
+      empty: "本次没有这项数据。",
+      valueEmpty: "—"
+    },
+
+    /* ---------------------------------------------------------- 结果态 */
+    result: {
+      title: "诊断结果",
+      kicker: "四层结论",
+      layersHeading: "四层",
+      evidenceHeading: "证据",
+      adviceHeading: "建议",
+      evidenceEmpty: "本次没有可列出的证据条目。",
+      adviceEmpty: "本次没有给出建议条目。",
+      evidenceCount: "{count} 条",
+      exportMd: "导出报告（.md）",
+      exportJson: "导出结果（.json）",
+      exportFail: "导出失败：{reason}",
+      exportNone: "这次结果没有可导出的正文。",
+      rerun: "再测一次",
+      boundary: "适用范围与边界",
+      confidence: "置信度",
+      basis: "依据",
+      coverage: "本次覆盖",
+      notCovered: "明确未覆盖",
+      conclusion: "结论",
+      reportId: "报告标识：{id}",
+      copyOk: "已复制 ✓",
+      copyFail: "复制失败，请手动选择文本",
+      copy: "复制给协作方",
+      reportPath: "报告文件",
+      legacyNoExport: "旧记录没有边界信息，不提供含边界的导出。"
     },
 
     /* 还没接数据的页面（S3 起逐页替换） */

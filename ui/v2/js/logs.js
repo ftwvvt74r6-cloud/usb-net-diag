@@ -10,6 +10,7 @@
 
   var U = ND.ui;
   var C = ND.copy || {};
+  var R = ND.render;
 
   var files = [];
   var query = "";
@@ -90,13 +91,7 @@
 
   /* 列表占位：读取期间先用灰块撑住高度，避免整页跳一下 */
   function skeleton(n) {
-    var box = U.el("div", "stack");
-    for (var i = 0; i < n; i++) {
-      var s = U.el("div", "sk");
-      s.style.setProperty("--w", (58 + i * 8) + "%");
-      box.appendChild(s);
-    }
-    return box;
+    return R.skeleton(n, 58);
   }
 
   function normalize(data) {
