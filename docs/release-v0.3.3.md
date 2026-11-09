@@ -5,9 +5,9 @@
 | 项 | 值 |
 |---|---|
 | Tag | `v0.3.3` |
-| 资产 | `NetDiag-0.3.3-lite.zip`（1,264,357 B）+ `SHA256SUMS.txt` |
-| sha256 | `f28bb6d27bb2a9fbdee283a5540ddffb09bd072bfdc4d875d8034322b3c5d270` |
-| 包内文件 | 203 个，解压后 3,438,452 B |
+| 资产 | `NetDiag-0.3.3-lite.zip`（1,264,353 B）+ `SHA256SUMS.txt` |
+| sha256 | `71dd972f26dfa03e65ad04ad6296bd4600e8aea22cf86bf02ffa7f2e9a345822` |
+| 包内文件 | 204 个，解压后 3,438,452 B |
 | 启动器 | `NetDiag.exe` 70,144 B（构建时用系统 csc 编译） |
 | 内容 | 源码 + NetDiag.exe + 文档；**不含** Wireshark / Npcap / 便携 Python（合规要求） |
 

@@ -16,12 +16,12 @@
 
 | 模式 | 命令（仓库根目录） | 产物 | zip 体积 | 解压后 | 包内第三方二进制 | 能发给谁 |
 |---|---|---|---|---|---|---|
-| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **1,264,357 B**（v0.3.3 实测） | **3,438,452 B**（v0.3.2 实测） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
+| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **1,264,353 B**（v0.3.3 实测） | **3,438,452 B**（v0.3.3 实测） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-<VERSION>-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
 | **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅限组织内部使用**，禁止公开 |
 
 > `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.3`）。
-> 表中 **lite 行是 v0.3.3 实测**（2026-11-09 发布件：204 文件 / 1,264,357 B / 解压后 3,438,452 B）；
+> 表中 **lite 行是 v0.3.3 实测**（2026-11-09 发布件：204 文件 / 1,264,353 B / 解压后 3,438,452 B / sha256 `71dd972f26dfa03e65ad04ad6296bd4600e8aea22cf86bf02ffa7f2e9a345822`）；
 > v0.3.1 历史值为 174 文件 / 1,031,112 B / 解压后 2,771,469 B；
 > v0.3.0 历史值为 169 文件 / 974,570 B / 解压后 2,590,174 B。
 > **internal 两行仍是 v0.2.0 历史实测**（v0.3.0 / v0.3.1 / v0.3.2 均未重建内部包，不作为当前版本预期值）。
@@ -446,3 +446,39 @@ v0.3.2 用 `v0.3.2`）不存在（`git ls-remote --tags origin`）；
 - 把 `--with-npcap` 包发给相关方 = 组织内部分发，是否合规由你们与 IT/法务确认。
 
 完整说明见 [`licensing.md`](licensing.md)。
+
+---
+
+## 12. UI 入口与版本切换口径
+
+### 12.1 `/v2/index.html` 的双语义
+
+`/v2/**` 在服务里有两个不同职责，边界必须分清：
+
+- **入口路由**：命中 `/v2/index.html`（以及根 `/`）时，走 `ui_entry` 的版本判定，
+  返回完整的 HTML 页面（HTTP 200），这是「打开界面」。
+- **静态白名单**（`static_asset`）：只服务 `ui/v2/**` 下的 `css` / `js` / `img`
+  资源（段数 2 或 3、`parts[0] == "v2"`、3 段时 `parts[1]` 必须是 `css`/`js`/`img`、
+  扩展名须在 `STATIC_MIME` 内）。
+
+因此 **`/v2/index.html` 走入口路由，不作为静态资源开放**：静态白名单只认
+`css`/`js`/`img` 三类目录，`index.html` 不在白名单内，`static_asset` 对它会返回
+`None`（继续交给入口路由处理），而入口路由先拦截并返回 200。两者语义不冲突：
+入口路由负责「页面」，静态白名单负责「资源」。
+
+### 12.2 Cookie 优先级与回滚
+
+UI 版本判定的优先级（高 → 低）固定为：
+
+1. `?ui=v1|v2` 查询参数；
+2. Cookie `nd_ui`（上一次 `?ui=` 回写的选择）；
+3. `config/ui-version.json` 的 `.default`；
+4. 内置 `v1`。
+
+由此带来的两个实际操作要点：
+
+- `python scripts/ui_switch.py v1` 只改写 `config/ui-version.json`，**不影响已种下
+  `nd_ui` Cookie 的浏览器**——这些标签页仍按 Cookie 继续走 v2（Cookie 优先级高于
+  config）。
+- 要真正回滚这些标签页，需**再访问一次 `/?ui=v1`**（用 `?ui=` 覆盖并回写 Cookie），
+  或手动清除 `nd_ui` Cookie。`?ui=` 是唯一能覆盖 Cookie 的入口。
