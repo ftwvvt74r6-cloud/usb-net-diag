@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**34** 个（有模块说明 34 个）
-- 公开符号：**317** 个（有 docstring 317 个，合格 315 个）
+- 公开符号：**318** 个（有 docstring 318 个，合格 316 个）
 - 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -5352,32 +5352,33 @@ Example:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `static_asset` | function | 102 | ✅ |
-| `touch` | function | 210 | ✅ |
-| `request_quit` | function | 215 | ✅ |
-| `cleanup_pid` | function | 263 | ✅ |
-| `BodyTooLarge` | class | 273 | ✅ |
-| `doctor_cached` | function | 352 | ✅ |
-| `log` | function | 469 | ✅ |
-| `evidence_payload` | function | 565 | ✅ |
-| `conclusion_report_id` | function | 689 | ✅ |
-| `build_status_conclusion` | function | 720 | ✅ |
-| `start_job` | function | 1110 | ✅ |
-| `report_index` | function | 1171 | ✅ |
-| `request_elevation` | function | 1205 | ✅ |
-| `preflight_payload` | function | 1243 | ✅ |
-| `engine_info` | function | 1287 | ✅ |
-| `passive_start` | function | 1330 | ✅ |
-| `passive_status` | function | 1365 | ✅ |
-| `link_actions` | function | 1439 | ✅ |
-| `Handler` | class | 1520 | ✅ |
-| `Handler.handle_one_request` | method | 1546 | ✅ |
-| `Handler.log_message` | method | 1591 | ✅ |
-| `Handler.do_GET` | method | 1729 | ✅ |
-| `Handler.do_POST` | method | 1751 | ✅ |
-| `DiagServer` | class | 2071 | ✅ |
-| `DiagServer.handle_error` | method | 2082 | ✅ |
-| `create_server` | function | 2110 | ✅ |
-| `main` | function | 2157 | ✅ |
+| `ui_entry` | function | 173 | ✅ |
+| `touch` | function | 295 | ✅ |
+| `request_quit` | function | 300 | ✅ |
+| `cleanup_pid` | function | 348 | ✅ |
+| `BodyTooLarge` | class | 358 | ✅ |
+| `doctor_cached` | function | 437 | ✅ |
+| `log` | function | 554 | ✅ |
+| `evidence_payload` | function | 650 | ✅ |
+| `conclusion_report_id` | function | 774 | ✅ |
+| `build_status_conclusion` | function | 805 | ✅ |
+| `start_job` | function | 1195 | ✅ |
+| `report_index` | function | 1256 | ✅ |
+| `request_elevation` | function | 1290 | ✅ |
+| `preflight_payload` | function | 1328 | ✅ |
+| `engine_info` | function | 1372 | ✅ |
+| `passive_start` | function | 1415 | ✅ |
+| `passive_status` | function | 1450 | ✅ |
+| `link_actions` | function | 1524 | ✅ |
+| `Handler` | class | 1605 | ✅ |
+| `Handler.handle_one_request` | method | 1631 | ✅ |
+| `Handler.log_message` | method | 1683 | ✅ |
+| `Handler.do_GET` | method | 1821 | ✅ |
+| `Handler.do_POST` | method | 1843 | ✅ |
+| `DiagServer` | class | 2175 | ✅ |
+| `DiagServer.handle_error` | method | 2186 | ✅ |
+| `create_server` | function | 2214 | ✅ |
+| `main` | function | 2261 | ✅ |
 
 ### `static_asset`
 
@@ -5395,18 +5396,48 @@ Returns:
     Path | None: 通过全部检查的文件；不合法一律返回 ``None``，由调用方回 404
     —— 刻意不回 403，以免告诉探测者「这个路径存在」。
 
-Note:
+    Note:
     四道关，缺一不可：
 
     1. 先 ``unquote`` 解码**再**判断 —— 不先解码就挡不住 ``%2e%2e``；
     2. 逐段拒绝 ``..`` / ``.`` / 反斜杠 / NUL。反斜杠在 POSIX 语义里不是分隔符，
        但在 Windows 上是，``\..\`` 会变成真实穿越；
-    3. 白名单：只认 ``/app.css`` 与 ``/js/<名字>.js``，``ui/`` 下其余文件不开放；
+    3. 白名单：
+       * v1：只认 ``/app.css`` 与 ``/js/<名字>.js``，``ui/`` 下其余文件不开放；
+       * v2（ui/v2/**）：段数 2 或 3；``parts[0] == "v2"``；3 段时
+         ``parts[1]`` 必须是 ``css`` / ``js`` / ``img`` 之一。扩展名必须已在
+         :data:`STATIC_MIME`（不新增扩展名）。
     4. ``resolve()`` 后 ``relative_to(UI_DIR)`` 二次校验，挡符号链接与
        「解析后跑出 ui/」的边界情况。
 
     不做内容缓存：本地环回上每次只是几 KB 读盘，而开发期改完样式刷新即见，
     比多一层失效逻辑更省心。
+```
+
+### `ui_entry`
+
+```python
+def ui_entry(parsed, cookie: str | None) -> str
+```
+
+```text
+按优先级决定本次请求用哪个入口版本（返回 ``"v1"`` 或 ``"v2"``）。
+
+优先级（高 → 低）：
+
+1. ``?ui=v1|v2`` 查询参数；
+2. Cookie ``nd_ui``（上次 ``?ui=`` 回写的选择）；
+3. ``config/ui-version.json`` 的 ``.default``；
+4. 内置 ``"v1"``。
+
+这是纯函数：只做字符串判断，不碰文件、不抛异常、不读全局 —— 方便单测。
+
+Args:
+    parsed: ``urllib.parse.urlparse(self.path)`` 的返回值。
+    cookie: ``Cookie`` 请求头里 ``nd_ui`` 的值（已由调用方解析，可为 ``None``）。
+
+Returns:
+    str: ``"v1"`` 或 ``"v2"``；任何非法值都回落，绝不返回白名单外的东西。
 ```
 
 ### `touch`

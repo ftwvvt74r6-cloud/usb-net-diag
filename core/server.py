@@ -109,13 +109,17 @@ def static_asset(path: str):
         Path | None: 通过全部检查的文件；不合法一律返回 ``None``，由调用方回 404
         —— 刻意不回 403，以免告诉探测者「这个路径存在」。
 
-    Note:
+        Note:
         四道关，缺一不可：
 
         1. 先 ``unquote`` 解码**再**判断 —— 不先解码就挡不住 ``%2e%2e``；
         2. 逐段拒绝 ``..`` / ``.`` / 反斜杠 / NUL。反斜杠在 POSIX 语义里不是分隔符，
            但在 Windows 上是，``\\..\\`` 会变成真实穿越；
-        3. 白名单：只认 ``/app.css`` 与 ``/js/<名字>.js``，``ui/`` 下其余文件不开放；
+        3. 白名单：
+           * v1：只认 ``/app.css`` 与 ``/js/<名字>.js``，``ui/`` 下其余文件不开放；
+           * v2（ui/v2/**）：段数 2 或 3；``parts[0] == "v2"``；3 段时
+             ``parts[1]`` 必须是 ``css`` / ``js`` / ``img`` 之一。扩展名必须已在
+             :data:`STATIC_MIME`（不新增扩展名）。
         4. ``resolve()`` 后 ``relative_to(UI_DIR)`` 二次校验，挡符号链接与
            「解析后跑出 ui/」的边界情况。
 
@@ -132,6 +136,13 @@ def static_asset(path: str):
         candidate = UI_DIR / "app.css"
     elif len(parts) == 2 and parts[0] == "js" and parts[1].endswith(".js"):
         candidate = UI_DIR / "js" / parts[1]
+    elif 2 <= len(parts) <= 3 and parts[0] == "v2":
+        # v2 子目录：/v2/index.html 由入口路由（_route_get）单独处理，这里只管
+        # 静态子资源。段数 2 时是 /v2/<file>（img/favicon 等），3 时是
+        # /v2/<css|js|img>/<file>。
+        if len(parts) == 3 and parts[1] not in ("css", "js", "img"):
+            return None
+        candidate = UI_DIR / "v2" / Path(*parts[1:])
     else:
         return None
     try:
@@ -139,7 +150,81 @@ def static_asset(path: str):
         resolved.relative_to(UI_DIR.resolve())
     except (OSError, ValueError):
         return None
+    # 扩展名必须已在 STATIC_MIME：v2 的 index.html / secret.txt 这类非静态
+    # 子资源，宁可在这里返回 None（404），也不交给调用方猜一个 MIME 出去。
+    if resolved.suffix.lower() not in STATIC_MIME:
+        return None
     return resolved if resolved.is_file() else None
+
+#: 入口版本 → 入口 HTML 的相对路径（相对 ``UI_DIR``）。
+#: 用映射而非 if/elif 硬编码，是为了以后加 v3 只改这里一处。
+UI_ENTRY = {
+    "v1": "index.html",
+    "v2": "v2/index.html",
+}
+
+#: 版本选择的 Cookie 名（?ui= 命中时回写，之后无参访问仍保持同版本）。
+UI_COOKIE = "nd_ui"
+
+#: 版本选择的 config 文件（一键回滚脚本写它；缺省时回内置 v1）。
+UI_VERSION_CONFIG = ROOT / "config" / "ui-version.json"
+
+
+def ui_entry(parsed, cookie: str | None) -> str:
+    """按优先级决定本次请求用哪个入口版本（返回 ``"v1"`` 或 ``"v2"``）。
+
+    优先级（高 → 低）：
+
+    1. ``?ui=v1|v2`` 查询参数；
+    2. Cookie ``nd_ui``（上次 ``?ui=`` 回写的选择）；
+    3. ``config/ui-version.json`` 的 ``.default``；
+    4. 内置 ``"v1"``。
+
+    这是纯函数：只做字符串判断，不碰文件、不抛异常、不读全局 —— 方便单测。
+
+    Args:
+        parsed: ``urllib.parse.urlparse(self.path)`` 的返回值。
+        cookie: ``Cookie`` 请求头里 ``nd_ui`` 的值（已由调用方解析，可为 ``None``）。
+
+    Returns:
+        str: ``"v1"`` 或 ``"v2"``；任何非法值都回落，绝不返回白名单外的东西。
+    """
+    q = urllib.parse.parse_qs(parsed.query)
+    want = (q.get("ui") or [None])[0]
+    if want in ("v1", "v2"):
+        return want
+    if cookie in ("v1", "v2"):
+        return cookie
+    try:
+        if UI_VERSION_CONFIG.is_file():
+            cfg = json.loads(UI_VERSION_CONFIG.read_text(encoding="utf-8"))
+            default = cfg.get("default")
+            if default in ("v1", "v2"):
+                return default
+    except (OSError, ValueError):
+        pass
+    return "v1"
+
+
+def _parse_ui_cookie(headers) -> str | None:
+    """从请求头里取 ``nd_ui`` 的值（不存在/非法一律 ``None``）。
+
+    Args:
+        headers: ``BaseHTTPRequestHandler.headers``（``email.message`` 风格）。
+
+    Returns:
+        str | None: 白名单内的 ``"v1"`` / ``"v2"``，否则 ``None``。
+    """
+    raw = headers.get("Cookie") or ""
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        if k.strip() == UI_COOKIE and v.strip() in ("v1", "v2"):
+            return v.strip()
+    return None
+
 
 LOCK = threading.Lock()
 JOB = {
@@ -1558,13 +1643,18 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             _log_connection_noise(exc)
 
-    def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8") -> None:
+    def _send(self, code: int, body: bytes, ctype: str = "application/json; charset=utf-8",
+              extra_headers: tuple[tuple[str, str], ...] = ()) -> None:
         """写一个完整响应；客户端提前断开在这里降级，**绝不**把栈冒到调用方。
 
         整个「状态行 + 头 + body」必须放在同一个 ``try`` 里：``end_headers()``
         会把头部缓冲真正写进 socket，大响应（``GET /``）时客户端 RST 恰好落在这里
         —— 只包 ``wfile.write(body)`` 会漏掉 ``end_headers``，异常冒到
         ``do_GET`` 的宽泛 ``except`` 就会先写一整段 traceback（B1 真机复现）。
+
+        Args:
+            extra_headers: 追加的头（``(名字, 值)`` 二元组序列）。向后兼容：旧调用
+                不传即不加任何头；入口路由用它在 ``?ui=`` 命中时回写 ``Set-Cookie``。
         """
         try:
             self.send_response(code)
@@ -1576,6 +1666,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
             self.send_header("Cache-Control", "no-store")
             for k, v in self.SECURITY_HEADERS:
+                self.send_header(k, v)
+            for k, v in extra_headers:
                 self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
@@ -1807,11 +1899,23 @@ class Handler(BaseHTTPRequestHandler):
                                "checks": snap["checks"],
                                "capabilities": snap["capabilities"],
                                "auto_open_browser": bool(cfg.get("auto_open_browser", True))})
-        if path in ("/", "/index.html"):
-            f = UI_DIR / "index.html"
+        if path in ("/", "/index.html", "/v2/", "/v2/index.html"):
+            # 入口路由：按 ui_entry() 的优先级决定发 v1 还是 v2 的 index.html。
+            # 覆盖四个入口别名（v1 的 /、/index.html；v2 的 /v2/、/v2/index.html），
+            # 但发出去的始终是 ui_entry 选定的那份 HTML（不按 URL 别名各自固定）。
+            version = ui_entry(parsed, _parse_ui_cookie(self.headers))
+            rel = UI_ENTRY.get(version, UI_ENTRY["v1"])
+            f = UI_DIR / rel
             if not f.is_file():
-                return self._send(500, b"ui/index.html missing", "text/plain; charset=utf-8")
-            return self._send(200, f.read_bytes(), "text/html; charset=utf-8")
+                # 目标入口文件缺失：宁可 500 并写明缺哪个文件，绝不静默回退到另一版。
+                return self._send(500, f"ui/{rel} missing".encode("utf-8"),
+                                  "text/plain; charset=utf-8")
+            extra = ()
+            q = urllib.parse.parse_qs(parsed.query)
+            if (q.get("ui") or [None])[0] in ("v1", "v2"):
+                # ?ui= 命中时回写 Cookie，之后无参访问仍保持该版本。
+                extra = (("Set-Cookie", f"{UI_COOKIE}={version}; Path=/; SameSite=Lax"),)
+            return self._send(200, f.read_bytes(), "text/html; charset=utf-8", extra)
 
         if path == "/api/status":
             with LOCK:
