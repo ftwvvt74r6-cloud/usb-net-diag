@@ -23,11 +23,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+
+import _uisrc  # noqa: E402
+
 COPY_DIR = ROOT / "core" / "copy"
 COPY_PATH = COPY_DIR / "zh-CN.json"
-UI_PATH = ROOT / "ui" / "index.html"
 COPY = json.loads(COPY_PATH.read_text(encoding="utf-8"))
-HTML = UI_PATH.read_text(encoding="utf-8")
+HTML = _uisrc.html()
 
 #: 行业内部称谓：用户可见范围必须为 0（``-F`` 纯子串）。
 LEGACY_TERMS = ("一线", "二线", "同事")

@@ -24,14 +24,15 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
+sys.path.insert(0, str(ROOT / "tests"))
 
+import _uisrc   # noqa: E402
 import diagnose   # noqa: E402
 import diagpack   # noqa: E402
 import logstore   # noqa: E402
 import server     # noqa: E402
 
 BAT = ROOT / "导出诊断包.bat"
-UI = ROOT / "ui" / "index.html"
 NAME_RE = re.compile(r"^NetDiag-diag-[0-9a-f]{8}-\d{8}-\d{4}(?:-\d+)?\.zip$")
 NETWORK_MODULES = ("socket", "urllib", "http", "ftplib", "smtplib", "telnetlib",
                    "xmlrpc", "requests", "asyncio", "ssl")
@@ -425,7 +426,7 @@ class EntryPointTests(_TempLogCase):
 
     def test_ui_has_diagpack_button_and_handler(self):
         """入口③：UI 顶部有 ``#diagpack`` 按钮，点击 POST ``/api/diagpack``。"""
-        text = UI.read_text(encoding="utf-8")
+        text = _uisrc.html()
         self.assertIn('id="diagpack"', text)
         self.assertIn("导出诊断包", text)
         self.assertIn("/api/diagpack", text)

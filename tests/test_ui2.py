@@ -22,15 +22,17 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "core"))
 
 import app  # noqa: E402
 import server  # noqa: E402
+import _uisrc  # noqa: E402
 
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+HTML = _uisrc.html()
 #: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
 #: 断言内容与严格程度与拆分前完全一致（不是放宽）。
-CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
+CSS = _uisrc.css()
 
 CONFIG_RE = re.compile(
     r'<script type="application/json" id="ui-config">(.*?)</script>', re.S)

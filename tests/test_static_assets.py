@@ -28,7 +28,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
+sys.path.insert(0, str(ROOT / "tests"))
 
+import _uisrc  # noqa: E402
 import logstore  # noqa: E402
 import server  # noqa: E402
 
@@ -165,14 +167,14 @@ class UiSplitContract(unittest.TestCase):
     """样式搬出去之后，HTML 侧必须真的引用它（否则拆分等于丢样式）。"""
 
     def test_index_links_app_css_and_has_no_inline_style_block(self):
-        html = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
-        css = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
+        html = _uisrc.html()
+        css = _uisrc.css()
         self.assertIn('<link rel="stylesheet" href="/app.css"', html)
         self.assertNotIn("<style>", html, "样式必须只在 app.css 里，避免两份真源")
         self.assertGreater(len(css.splitlines()), 400, "app.css 像是没搬全")
 
     def test_app_css_keeps_the_design_tokens(self):
-        css = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
+        css = _uisrc.css()
         for token in ("--accent:#2563eb", "--muted:", "--mono:", "--r:12px"):
             with self.subTest(token=token):
                 self.assertIn(token, css)

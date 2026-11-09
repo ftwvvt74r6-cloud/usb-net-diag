@@ -16,13 +16,16 @@ CI 没有浏览器，这里用源码/结构断言钉住接线；Node 只跑纯�
 from __future__ import annotations
 
 import unittest
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HTML = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+sys.path.insert(0, str(ROOT / "tests"))
+import _uisrc  # noqa: E402
+HTML = _uisrc.html()
 #: P1 起样式搬进 ``ui/app.css``；样式类断言改读这个文件，
 #: 断言内容与严格程度与拆分前完全一致（不是放宽）。
-CSS = (ROOT / "ui" / "app.css").read_text(encoding="utf-8")
+CSS = _uisrc.css()
 
 TOP_LEVEL_GROUPS = ["realtime", "probe", "offline", "reports"]
 
