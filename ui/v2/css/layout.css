@@ -108,6 +108,16 @@
 .railfoot .rail-item { font-size: var(--fs-sm); font-weight: 400; }
 .railfoot .rail-item .ic svg { width: 20px; height: 20px; }
 
+/* 缺依赖的入口：仍留在原位（功能存在这件事要看得见），但不可进入。
+   用降一档的中性色而不是 opacity —— 半透明会把图标背景一起洗掉，
+   反而让「禁用」看起来像「故障」。 */
+.rail-item.locked,
+.rail-item.locked:hover {
+  background: transparent;
+  color: var(--n-600);
+}
+.rail-item.locked[aria-current="page"] { box-shadow: none; background: transparent; }
+
 /* ---------------------------------------------------------------- 主区 */
 .main {
   display: flex;

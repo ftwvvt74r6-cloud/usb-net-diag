@@ -4,12 +4,21 @@
    规则：除本文件与 #ui-config（v1 既有文案块）之外，js/html 里不许出现中文。
    五个模式的名称不在这里重复 —— 一律取 #ui-config 的 modes[*].label，
    避免同一句话有两个来源。
+
+   关于占位符：字符串里的 {name} 由 ND.ui.tpl() 替换；缺值时整段留空而不是
+   显示 {name}，避免把模板语法漏到界面上。
    ========================================================================== */
 (function (ND) {
   "use strict";
 
   ND.copy = {
-    /* 五个模式之外的三级入口 */
+    /* 品牌与读屏标签 */
+    app: {
+      name: "NetDiag 网络矩阵",
+      railLabel: "主导航"
+    },
+
+    /* 五个模式之外的入口 */
     nav: {
       home: "总览",
       reports: "报告与导出",
@@ -17,25 +26,246 @@
       settings: "设置"
     },
 
-    /* 骨架期先占位，S2 接真实数据后只换值不换标签 */
+    /* 通用 */
+    common: {
+      loading: "正在读取…",
+      na: "暂无数据"
+    },
+
+    /* 后端 severity 词表（core/analyzer.py 的 SEV_ORDER）——
+       前端只做查表比较，不在代码里硬写中文 */
+    sev: {
+      critical: "严重",
+      warning: "警告",
+      info: "提示",
+      ok: "正常",
+      na: "无样本"
+    },
+
+    /* 通用动词 */
+    act: {
+      retry: "重试",
+      recheck: "重新检测",
+      rechecking: "正在检测…",
+      copy: "复制",
+      copied: "已复制",
+      copyFail: "复制失败，请手动选中后复制",
+      openSite: "打开官网",
+      copyCmd: "复制安装命令",
+      havePath: "我有路径",
+      close: "关闭",
+      cancel: "取消",
+      save: "保存",
+      saving: "正在保存…",
+      refresh: "刷新",
+      download: "下载",
+      view: "查看",
+      rerun: "重新诊断",
+      logs: "查看日志",
+      confirm: "确定"
+    },
+
+    /* 指标卡 */
     kpi: {
       health: "健康度",
       latency: "平均延迟",
       loss: "丢包",
-      session: "会话数"
+      session: "会话数",
+      healthSub: "来自四层结论",
+      healthSubLegacy: "旧记录只有等级，没有四层结论",
+      latencySub: "TCP 往返均值",
+      lossSub: "按 TCP 重传率估算",
+      sessionSub: "本次抓到的会话数",
+      noSample: "本次没有样本",
+      thin: "样本不足，不给数值",
+      failed: "上次任务失败，没有指标",
+      noData: "还没有诊断数据",
+      summaryOnly: "只剩摘要"
     },
 
+    /* 数据来源（必须让用户知道不是实时值） */
+    source: {
+      label: "数据来源",
+      line: "{when} · {mode}{target} · {packets} 个报文，不是实时值",
+      summary: "{when} · {mode}{target} · 只有摘要，没有明细指标",
+      none: "还没有可用的诊断数据；完成一次诊断后这里才会出现数字。"
+    },
+
+    /* 卡片标题 */
     card: {
       lastRun: "最近一次结果",
-      env: "环境与依赖"
+      env: "环境与依赖",
+      envSub: "四项各自影响哪些功能"
     },
 
-    empty: {
-      lastRun: "还没有诊断结果",
-      lastRunHint: "从左侧任一入口开始一次诊断，结果会留在这里。"
+    /* 环境与依赖 */
+    env: {
+      stOk: "已就绪",
+      stMissing: "缺失",
+      stLimited: "受限",
+      impactLabel: "缺了会怎样",
+      detailLabel: "当前",
+      noCommand: "这一项没有可一键复制的命令，请用官网安装包",
+      pathTitle: "手动指定程序路径",
+      pathBody: "把 {name} 的安装目录或可执行文件路径填进来，保存后会立刻重新检测。",
+      pathLabel: "程序路径",
+      pathPh: "例如 D:\\Tools\\Wireshark\\tshark.exe",
+      pathEmpty: "请先填入路径",
+      pathBrowse: "浏览…",
+      pathBrowseFail: "浏览器读不到完整路径：请手动粘贴，或用系统的文件管理器复制路径",
+      pathSaveUnsupported: "当前版本还不能自动保存路径。请把 {name} 加到系统的 PATH（或装到默认目录），然后点「重新检测」。",
+      pathSaved: "已保存，正在重新检测…",
+      pathSaveFail: "保存失败：{reason}",
+      elevate: "以管理员身份重启",
+      elevateAsk: "已请求管理员权限，请在系统弹窗里点「是」",
+      elevateFail: "提权请求失败：{reason}",
+      elevateManual: "请关掉这个页面，右键启动器选「以管理员身份运行」。",
+      recheckDone: "重新检测完成：{count} 项没有通过。",
+      recheckAllOk: "重新检测完成：全部通过。",
+      recheckFail: "重新检测失败：{reason}",
+      groupOther: "其他检查",
+      otherHint: "这两项只在特定场景才影响结果，不影响上面的四项。",
+      none: "没有读到环境检查结果，点右上角「重新检测」再试。",
+      fixHint: "补齐后点「重新检测」，不需要重启程序。",
+      allOk: "四项都已就绪，抓包、抓文件分析、逐跳路径都可用。",
+      locked: "暂不可用：环境里缺依赖，到「总览 → 环境与依赖」补齐后点「重新检测」",
+      missingLead: "{count} 项没通过，相关入口已置灰；连通与速度测试、报告与导出仍然可用。"
     },
 
-    /* 数值缺失时的占位符，避免出现空白格 */
-    na: "—"
+    /* 最近一次结果 */
+    lastRun: {
+      emptyTitle: "还没有诊断结果",
+      emptyBody: "从左侧任一入口开始一次诊断，结果会留在这里。",
+      when: "{when} · {mode}{target}",
+      counters: "严重 {critical} · 警告 {warning} · 用时 {duration}",
+      summaryOnly: "完整结果已不在内存（服务重启过，或超出保留上限），只能看摘要；重新诊断一次就能看到完整结论。",
+      summaryTitle: "上次结果摘要",
+      summaryKept: "完整结果还在内存里，可以重新打开结果页查看四层结论。",
+      summaryGone: "完整结果已不在内存，只有这份摘要。",
+      legacyTitle: "这是旧版本的诊断结果，缺少结论边界信息",
+      legacyBody: "旧记录没有结论适用范围与边界，不能给出可复核的结论；本页只保留「重新诊断」，不提供含边界的导出。",
+      legacyTag: "旧版本",
+      okTag: "已完成",
+      failTag: "未成功",
+      /* 摘要弹窗的行标签 */
+      rowWhen: "时间",
+      rowMode: "模式",
+      rowTarget: "目标",
+      rowLevel: "健康度",
+      rowCritical: "严重项",
+      rowWarning: "警告项",
+      rowDuration: "用时"
+    },
+
+    /* 失败卡 */
+    fail: {
+      title: "这次诊断没有完成",
+      reasonLabel: "原因",
+      adviceLabel: "建议",
+      reasonGeneric: "没有拿到结论。具体原因记录在日志里，最后一条错误通常是根因。",
+      advice: "先看日志里最后一条错误，按提示补齐环境（驱动 / 权限 / 网卡）后再重试一次。",
+      legacy: "上一次任务没有成功，所以没有可展示的结论。"
+    },
+
+    /* 降级卡 */
+    degrade: {
+      title: "证据不足，给不出结论",
+      zeroTitle: "这次一个报文都没抓到",
+      zeroBody: "0 个报文说明流量根本没进到网卡：多半是网卡选错、过滤条件把流量挡掉了，或者目标没有在通信。",
+      thinBody: "本次只抓到 {packets} 个报文，样本太少，任何一层都给不出可信结论。",
+      advice: "把时长调到 30–60 秒；全网体检先确认网卡选对；单目标诊断换一个确定可达的目标再试一次。",
+      again: "再测一次"
+    },
+
+    /* 设置页 */
+    settings: {
+      service: "后台服务",
+      idleLabel: "空闲退出",
+      serviceHint: "没有页面访问时，后台服务会在空闲时间到达后自动退出并释放端口；有任务在跑时不会退出。",
+      idleOn: "{minutes} 分钟无访问后自动退出",
+      idleOff: "已关闭自动退出（配置项 idle_exit_min = 0）",
+      quit: "立即退出后台",
+      quitConfirmTitle: "立即停止本机后台服务？",
+      quitConfirmBody: "正在运行的任务会被中断，本页面随后会失去连接。下次使用请重新双击工具目录里的启动器。",
+      quitting: "正在停止…",
+      quitDone: "本地服务已停止，可以直接关闭这个页面。",
+      quitFail: "停止失败：{reason}",
+      runtime: "网卡与运行信息",
+      version: "版本",
+      pid: "进程号",
+      port: "本地端口",
+      url: "打开地址",
+      admin: "权限",
+      adminYes: "管理员",
+      adminNo: "普通用户",
+      iface: "网卡",
+      ifaceCount: "{count} 个",
+      ifaceEmpty: "没有读到网卡",
+      ai: "AI 分析",
+      aiOn: "已配置",
+      aiOff: "未配置",
+      aiProvider: "服务商",
+      aiModel: "模型",
+      aiBase: "接口地址",
+      aiKey: "密钥",
+      aiConfigHint: "配置文件：config/ai-config.json（相对工具目录），改完点下面的按钮重新读取。",
+      aiCopyPath: "复制配置路径",
+      aiManage: "打开配置说明",
+      aiReload: "重新读取"
+    },
+
+    /* 日志中心 */
+    logs: {
+      title: "日志文件",
+      listTitle: "全部日志",
+      count: "{count} 个文件",
+      hint: "日志都在工具目录的 logs 下：app 是服务日志，diag 是诊断日志，startup 是启动日志。",
+      filter: "过滤文件名",
+      filterPh: "过滤文件名，例如 diag-2026",
+      empty: "logs 目录里还没有日志文件。",
+      noMatch: "没有匹配「{q}」的日志。",
+      unsupported: "本地服务还没有开放日志接口，暂时读不到 logs 目录。可以先用「导出诊断包」把日志一起打包带走。",
+      loadFail: "读取日志列表失败：{reason}",
+      openFail: "读取这个日志失败：{reason}",
+      tooBig: "文件较大（{size}），只显示最后 200 行。",
+      pack: "导出诊断包（脱敏）",
+      packing: "正在打包…",
+      packDone: "诊断包已生成：{path}（{size}）",
+      packFail: "导出失败：{reason}",
+      kindApp: "服务",
+      kindDiag: "诊断",
+      kindStartup: "启动",
+      kindOther: "其他",
+      viewerTitle: "{name}"
+    },
+
+    /* 还没接数据的页面（S3 起逐页替换） */
+    stub: {
+      title: "这个入口的运行视图在下一阶段接入",
+      body: "本阶段的交付范围是总览、日志中心和设置三页；{name} 的运行与结果视图会在下一步接入，现在可以从总览页查看已有结果。"
+    },
+
+    /* 弹层与提示 */
+    modal: {
+      close: "关闭"
+    },
+    toast: {
+      network: "连不上本地服务，请确认工具还在运行",
+      http: "本地服务返回 {status}",
+      timeout: "本地服务响应超时"
+    },
+
+    /* 单位与时间前缀：格式化一律走 ND.ui，不在这里拼句子 */
+    unit: {
+      sec: " 秒",
+      ms: " 毫秒",
+      min: " 分钟",
+      packet: " 个"
+    },
+    time: {
+      today: "今天",
+      yesterday: "昨天",
+      unknown: "时间未知"
+    }
   };
 })(window.ND = window.ND || {});
