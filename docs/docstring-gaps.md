@@ -3,8 +3,8 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**100.0%**（314/314）
-- 模块说明：33/33
+- 合格率：**99.4%**（315/317）
+- 模块说明：34/34
 
 ## 按文件汇总
 
@@ -38,7 +38,8 @@
 | `core/rules/legacy_map.py` | 9 | 9 | 9 | 100% |
 | `core/sanitize.py` | 4 | 4 | 4 | 100% |
 | `core/selfcheck.py` | 14 | 14 | 14 | 100% |
-| `core/server.py` | 26 | 26 | 26 | 100% |
+| `core/server.py` | 27 | 27 | 27 | 100% |
+| `core/startmsg.py` | 2 | 2 | 0 | 0% |
 | `core/tshark.py` | 13 | 13 | 13 | 100% |
 | `core/verdict.py` | 2 | 2 | 2 | 100% |
 | `core/version.py` | 1 | 1 | 1 | 100% |
@@ -48,4 +49,6 @@
 
 | 文件:行 | 符号 | 缺什么 |
 |---|---|---|
+| `core/startmsg.py:68` | `render` | 缺参数说明、缺返回值说明 |
+| `core/startmsg.py:74` | `main` | 缺参数说明、缺返回值说明 |
 
