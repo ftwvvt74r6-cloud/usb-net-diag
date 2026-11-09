@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -63,23 +64,34 @@ class UiSrcV2BundleTest(unittest.TestCase):
         self.assertEqual(_uisrc.html(),
                          (ROOT / "ui" / "v2" / "index.html").read_text(encoding="utf-8"))
 
-    def test_css_concatenates_four_files_in_order(self):
+    @staticmethod
+    def _declared(attr: str, ext: str):
+        """从入口 HTML 里按文档顺序取出外链文件名（只保留指定扩展名）。"""
         entry = (ROOT / "ui" / "v2" / "index.html").read_text(encoding="utf-8")
-        css = _uisrc.css()
-        self.assertIn("tokens.css", entry)
-        self.assertIn("components.css", entry)
-        # 4 份 CSS 拼接后应包含各自的内容标记（顺序由入口 HTML 决定）。
-        expected = ""
-        for name in ("tokens.css", "base.css", "layout.css", "components.css"):
-            expected += (ROOT / "ui" / "v2" / "css" / name).read_text(encoding="utf-8")
-        self.assertEqual(css, expected)
+        pat = rf'<link\b[^>]*\bhref="([^"]+)"' if attr == "href" else rf'<script\b[^>]*\bsrc="([^"]+)"'
+        names = []
+        for href in re.findall(pat, entry, re.IGNORECASE):
+            name = href.rsplit("/", 1)[-1]
+            if name.endswith(ext):
+                names.append(name)
+        return names
 
-    def test_js_concatenates_three_files_in_order(self):
-        js = _uisrc.js()
-        expected = ""
-        for name in ("copy.js", "icons.js", "boot.js"):
-            expected += (ROOT / "ui" / "v2" / "js" / name).read_text(encoding="utf-8")
-        self.assertEqual(js, expected)
+    def test_css_concatenates_declared_stylesheets_in_order(self):
+        """CSS 拼接结果必须等于「入口 HTML 声明的顺序」逐份拼接。
+
+        不写死文件数量：v2 增删样式时这一条不用改，只校验「顺序与内容」这一契约。
+        """
+        names = self._declared("href", ".css")
+        self.assertGreaterEqual(len(names), 1, "入口 HTML 未声明任何样式表")
+        expected = "".join((ROOT / "ui" / "v2" / "css" / n).read_text(encoding="utf-8") for n in names)
+        self.assertEqual(_uisrc.css(), expected)
+
+    def test_js_concatenates_declared_scripts_in_order(self):
+        """JS 拼接结果必须等于「入口 HTML 声明的顺序」逐份拼接（同上，不写死数量）。"""
+        names = self._declared("src", ".js")
+        self.assertGreaterEqual(len(names), 1, "入口 HTML 未声明任何脚本")
+        expected = "".join((ROOT / "ui" / "v2" / "js" / n).read_text(encoding="utf-8") for n in names)
+        self.assertEqual(_uisrc.js(), expected)
 
 
 if __name__ == "__main__":

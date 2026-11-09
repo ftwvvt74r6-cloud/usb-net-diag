@@ -14,8 +14,8 @@
 <div class="app">
 
   <!-- ============================================================ 左轨道 -->
-  <aside class="rail" aria-label="主导航">
-    <a class="brand" href="#/home" aria-label="NetDiag 网络矩阵" title="NetDiag 网络矩阵">
+  <aside class="rail">
+    <a class="brand" href="#/home">
       <img src="/v2/img/logo.svg" alt="NetDiag 网络矩阵" width="32" height="32" />
       <span class="brand-t"><b>NetDiag</b></span>
     </a>
@@ -32,61 +32,15 @@
     </header>
 
     <div class="scroll">
-      <div class="wrap">
-
-        <dl class="kpis">
-          <div class="kpi">
-            <dt data-copy="kpi.health"></dt>
-            <dd class="kpi-v na" data-copy="na"></dd>
-            <dd class="kpi-sub" data-kpi-sub="health"></dd>
-          </div>
-          <div class="kpi">
-            <dt data-copy="kpi.latency"></dt>
-            <dd class="kpi-v na" data-copy="na"></dd>
-            <dd class="kpi-sub" data-kpi-sub="latency"></dd>
-          </div>
-          <div class="kpi">
-            <dt data-copy="kpi.loss"></dt>
-            <dd class="kpi-v na" data-copy="na"></dd>
-            <dd class="kpi-sub" data-kpi-sub="loss"></dd>
-          </div>
-          <div class="kpi">
-            <dt data-copy="kpi.session"></dt>
-            <dd class="kpi-v na" data-copy="na"></dd>
-            <dd class="kpi-sub" data-kpi-sub="session"></dd>
-          </div>
-        </dl>
-
-        <div class="cols">
-          <section class="card">
-            <div class="card-hd"><h2 data-copy="card.lastRun"></h2></div>
-            <div class="card-bd">
-              <div class="empty">
-                <span class="ic" data-icon="report"></span>
-                <b data-copy="empty.lastRun"></b>
-                <p data-copy="empty.lastRunHint"></p>
-              </div>
-            </div>
-          </section>
-
-          <section class="card">
-            <div class="card-hd"><h2 data-copy="card.env"></h2></div>
-            <div class="card-bd">
-              <div class="chips" id="env-list"></div>
-              <div class="stack mt-4">
-                <div class="sk" style="--w:78%"></div>
-                <div class="sk" style="--w:56%"></div>
-                <div class="sk" style="--w:64%"></div>
-              </div>
-            </div>
-          </section>
-        </div>
-
-      </div>
+      <div class="wrap" id="view" tabindex="-1"></div>
     </div>
   </main>
 </div>
 
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<div id="modal-root"></div>
+
+<!-- v1 的文案块原样搬过来：五个模式的名称/说明只有一个来源 -->
 <script type="application/json" id="ui-config">
 {
   "locked_modes": [
@@ -263,6 +217,12 @@
 </script>
 <script src="/v2/js/copy.js"></script>
 <script src="/v2/js/icons.js"></script>
+<script src="/v2/js/api.js"></script>
+<script src="/v2/js/ui.js"></script>
+<script src="/v2/js/env.js"></script>
+<script src="/v2/js/home.js"></script>
+<script src="/v2/js/settings.js"></script>
+<script src="/v2/js/logs.js"></script>
 <script src="/v2/js/boot.js"></script>
 </body>
 </html>
