@@ -143,7 +143,9 @@ class VisualContractTest(unittest.TestCase):
         self.assertIn("grid-template-columns:repeat(auto-fill,minmax(160px,1fr))", CSS)
         self.assertIn(".statgrid .stat span{display:block;white-space:normal", CSS)
         self.assertIn(".statgrid .stat b{white-space:nowrap", CSS)
-        self.assertIn("padding-right:6px", CSS)
+        # 公共修复：内距统一走 4/8/12/16/24 的 token，6px 归入 --sp-2；
+        # 断言强度不变（仍要求「数值列右侧留白」这条排版决定存在）。
+        self.assertIn("padding-right:var(--sp-2)", CSS)
 
     def test_console_is_light_mono_with_prefix(self):
         """H4：运行日志改为浅灰中性面（禁止黑色块），等宽 + `›` 前缀保持不变。"""

@@ -3860,7 +3860,67 @@ $("#sysinfo-startup").onclick = () => { initStartup({ manual: true, force: true 
 $("#quit-app").onclick = quitApp;
 $("#quit-background").onclick = () => quitService($("#quit-background"));
 
+/* ---------- 弹窗可达性（公共修复）：焦点陷阱 + Esc 关闭 + 焦点归还 ----------
+   5 个弹窗原来只有 ai-mask 支持 Esc，且都没有焦点陷阱：键盘用户 Tab 一下
+   就跑到弹窗背后的页面里，Esc 也关不掉。这里用 MutationObserver 监听
+   .hidden 的增删，不改任何 open/close 函数（它们各自有自己的收尾逻辑）。 */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const MASK_IDS = ["startup-mask", "perm-mask", "cap-mask", "link-mask", "ai-mask"];
+//: 每个弹窗「按 Esc 等同于点哪个按钮」——必须点它自己的收尾按钮，
+//: 不能一律找 ✕：准备检查没有 ✕，「受限进入」才是它的正常出口。
+const MASK_CLOSE = {
+  "startup-mask": "#startup-limited",
+  "perm-mask": "#perm-cancel",
+  "cap-mask": "#cap-close",
+  "link-mask": "#link-cancel",
+};
+const maskReturnFocus = new WeakMap();
+
+function maskFocusables(el) {
+  return [...el.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null || n === document.activeElement);
+}
+
+function wireModalA11y() {
+  MASK_IDS.forEach((id) => {
+    const mask = $("#" + id);
+    if (!mask) return;
+    if (!mask.hasAttribute("role")) mask.setAttribute("role", "dialog");
+    mask.setAttribute("aria-modal", "true");
+    new MutationObserver(() => {
+      if (!mask.classList.contains("hidden")) {
+        maskReturnFocus.set(mask, document.activeElement);
+        const first = maskFocusables(mask)[0];
+        // 延后一帧：open 函数里可能还在改 innerHTML，提前 focus 会丢
+        if (first) setTimeout(() => first.focus(), 30);
+      } else {
+        const back = maskReturnFocus.get(mask);
+        // 启动检测是自动弹的，没有「打开它的控件」，此时退到页面主操作，
+        // 而不是把焦点丢给 body（丢给 body 后 Tab 要从头开始走一遍）。
+        const target = back && document.contains(back) && back !== document.body
+          ? back
+          : ($("#run") || document.querySelector("[data-mode]"));
+        if (target) setTimeout(() => target.focus(), 0);
+      }
+    }).observe(mask, { attributes: true, attributeFilter: ["class"] });
+    mask.addEventListener("keydown", (e) => {
+      // ai-mask 已有 document 级 Esc（closeAI），避免双触发重复关闭
+      if (e.key === "Escape" && MASK_CLOSE[id]) {
+        const closer = mask.querySelector(MASK_CLOSE[id]);
+        if (closer) { e.preventDefault(); closer.click(); }
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = maskFocusables(mask);
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+  });
+}
+
 wireFormPersistence();
+wireModalA11y();
 boot().then(poll).then(loadAI).then(loadAppInfo).then(initStartup).then(syncLastRun);
 </script>
 </body>
