@@ -1,0 +1,160 @@
+/* ============================================================================
+   components.css · 卡片 / 指标 / 标签 / 按钮 / 骨架块
+   ----------------------------------------------------------------------------
+   层次靠 1px 边框 + 留白，不用阴影；只有弹层与 tooltip 用 --sh-2。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- 卡片 */
+.card {
+  background: var(--n-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  min-width: 0;
+}
+.card-hd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-4) 0;
+}
+.card-hd h2, .card-hd h3 { font-size: var(--fs-md); font-weight: 600; }
+.card-hd .more { margin-left: auto; font-size: var(--fs-sm); color: var(--accent); }
+.card-bd { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+
+/* ---------------------------------------------------------------- 指标 */
+.kpi {
+  background: var(--n-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--sp-4);
+  min-width: 0;
+}
+.kpi dt {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kpi .kpi-v {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+}
+.kpi .kpi-v.na { color: var(--text-3); }
+.kpi .kpi-sub { margin-top: var(--sp-1); font-size: var(--fs-xs); color: var(--text-2); }
+
+/* ---------------------------------------------------------------- 标签 */
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--n-0);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--n-400);
+  flex: none;
+}
+.chip.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.chip.ok::before { background: var(--ok); }
+.chip.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.chip.warn::before { background: var(--warn); }
+.chip.crit { color: var(--crit); background: var(--crit-soft); border-color: transparent; }
+.chip.crit::before { background: var(--crit); }
+.chip.na { color: var(--text-2); background: var(--n-50); border-color: transparent; }
+.chip.na::before { background: var(--n-400); }
+
+/* ---------------------------------------------------------------- 按钮 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--n-0);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.btn:hover { background: var(--accent-hover); }
+.btn:active { transform: scale(.985); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.btn.ghost {
+  background: var(--n-0);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.btn.ghost:hover { background: var(--n-50); }
+
+/* ---------------------------------------------------------------- 骨架块 */
+/* S1 只出结构，数值等 S2 接真实接口；用灰块明确表达「这里将来有内容」 */
+.sk {
+  height: 10px;
+  width: var(--w, 100%);
+  border-radius: var(--r-pill);
+  background: var(--n-100);
+}
+.sk.tall { height: 14px; }
+.sk + .sk { margin-top: var(--sp-2); }
+
+.stack { display: flex; flex-direction: column; }
+.mt-4 { margin-top: var(--sp-4); }
+
+/* ---------------------------------------------------------------- 空态 */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.empty .ic { color: var(--n-400); }
+.empty .ic svg { width: 32px; height: 32px; }
+.empty b { color: var(--text); font-size: var(--fs-base); font-weight: 600; }
+
+/* ---------------------------------------------------------------- 折叠态 tooltip */
+/* 64px 纯图标模式下全称不能丢：hover / 键盘聚焦都在右侧弹气泡。
+   title 仍然保留，作为读屏与「CSS 失效」时的兜底。 */
+@media (max-width: 1100px) {
+  .rail-item[title]:hover::after,
+  .rail-item[title]:focus-visible::after {
+    content: attr(title);
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 60;
+    padding: 5px 10px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: var(--r-sm);
+    background: var(--n-900);
+    box-shadow: var(--sh-2);
+    color: var(--n-0);
+    font-size: var(--fs-xs);
+    font-weight: 400;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+}
