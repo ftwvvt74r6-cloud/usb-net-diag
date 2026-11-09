@@ -2161,6 +2161,12 @@ function wireFailureActions(kind) {
     if (!guardMode(MODE)) return;
     startCapture();
   };
+  const recapture = $("#err-recapture");
+  if (recapture) recapture.onclick = () => {
+    if (!MODE) return;
+    if (!guardMode(MODE)) return;
+    startCapture();
+  };
   const elevate = $("#err-elevate");
   if (elevate) elevate.onclick = showPermModal;
   const probe = $("#err-probe");
@@ -2201,7 +2207,30 @@ async function loadIfacesForError() {
     + '</ul>';
 }
 
-function renderFailureCard(kind, why) {
+/* pcap 路径类错误（FileNotFoundError / OSError）的可诊断性事实行。
+   后端 error_detail 白名单字段：pcap_path / pcap_name / pcap_exists / pcap_size /
+   stage。生成「抓包文件诊断信息」区块的条目，供失败卡渲染。 */
+function pcapFactLines(errDetail) {
+  if (!errDetail || typeof errDetail !== "object") return [];
+  const lines = [];
+  if (errDetail.pcap_path) lines.push("抓包文件绝对路径：" + errDetail.pcap_path);
+  if (errDetail.pcap_exists === true || errDetail.pcap_exists === false) {
+    lines.push("文件是否存在：" + (errDetail.pcap_exists ? "是" : "否"));
+  }
+  if (errDetail.pcap_size !== undefined && errDetail.pcap_size !== null) {
+    lines.push("文件大小：" + fmtBytes(errDetail.pcap_size));
+  }
+  if (errDetail.stage) lines.push("失败阶段：" + stageLabel(errDetail.stage));
+  return lines;
+}
+
+/* 失败阶段机器码 → 中文（与后端 diagnose._pcap_error_card 的 stage 四段对齐）。 */
+function stageLabel(stage) {
+  const map = { capture: "抓包", write: "落盘", parse: "解析", analyze: "分析" };
+  return map[stage] || String(stage || "");
+}
+
+function renderFailureCard(kind, why, errDetail) {
   showResultArea();
   const spec = UI.cards[kind] || {};
   const title = spec.title || "诊断失败";
@@ -2212,10 +2241,15 @@ function renderFailureCard(kind, why) {
   let acts = "";
   const btnLog = '<button class="btn ghost" id="err-log">查看日志</button>';
   const btnRetry = '<button class="btn ghost" id="err-retry">重试</button>';
+  const btnRecapture = '<button class="btn ghost" id="err-recapture">重新抓包</button>';
   const btnProbe = '<button class="btn ghost" id="err-probe">去连通与速度测试</button>';
   const btnOffline = '<button class="btn ghost" id="err-offline">去分析抓包文件</button>';
   const btnElevate = '<button class="btn" id="err-elevate">以管理员身份重启</button>';
   const btnDiagpack = '<button class="btn ghost" id="err-diagpack">导出诊断包</button>';
+
+  /* pcap 路径类错误（FileNotFoundError / OSError）：额外补「路径/存在性/大小/阶段」
+     可诊断性区块，并给「重新抓包」按钮。后端通过 error_detail 下发白名单字段。 */
+  const pcapFacts = pcapFactLines(errDetail);
 
   if (kind === "no_npcap") {
     facts = [
@@ -2262,28 +2296,35 @@ function renderFailureCard(kind, why) {
     acts = btnLog + btnDiagpack + btnRetry;
   }
 
+  /* 路径类错误：追加可诊断性区块（pcap 绝对路径 / 是否存在 / 大小 / 阶段），
+     并在按钮区补「重新抓包」（后端 error_detail.re_capture=true 时）。 */
+  const pcapBlock = pcapFacts.length
+    ? '<div class="pcap-diagnostic"><div class="sectitle">抓包文件诊断信息</div>'
+      + '<ul class="facts">' + pcapFacts.map((f) => '<li>' + esc(f) + '</li>').join("") + '</ul></div>'
+    : "";
+  if (errDetail && errDetail.re_capture) acts += btnRecapture;
+
   $("#result-chip").textContent = "失败";
   $("#result").innerHTML = '<div class="errcard" data-card="' + esc(kind) + '">'
     + '<div class="vkind">' + esc(spec.kicker || "无法完成") + '</div>'
     + '<h3>' + esc(title) + '</h3>'
     + '<ul class="facts">' + facts.map((f) => '<li>' + esc(f) + '</li>').join("") + '</ul>'
+    + pcapBlock
     + '<p class="why"><b>为什么：</b>' + esc(whyText) + '</p>'
     + '<p class="how"><b>怎么办：</b>' + esc(how) + '</p>'
     + (note ? '<div class="note">' + esc(note) + '</div>' : "")
     + '<div id="iface-list"></div>'
-    + '<div class="acts">' + acts + '</div></div>'
-    + conclusionCard(null);
+    + '<div class="acts">' + acts + '</div></div>';
   wireFailureActions(kind);
-  wireConclusionActions(null);
   scrollMainTop();
 }
 
-function failedResult(title, detail, code) {
+function failedResult(title, detail, code, errDetail) {
   hideQuestion();
   showResultArea();
   const why = detail || "未知错误";
   const kind = failureKind(code, why);
-  if (kind) { renderFailureCard(kind, why); return; }
+  if (kind) { renderFailureCard(kind, why, errDetail); return; }
   $("#result-chip").textContent = "失败";
   $("#result").innerHTML = '<div class="errcard" data-card="generic"><h3>' + esc(title || "诊断失败")
     + '</h3><p class="why"><b>为什么：</b>' + esc(why) + '</p>'
@@ -2291,10 +2332,8 @@ function failedResult(title, detail, code) {
     + '<div class="raw">如果以上步骤仍无法解决，点「查看日志」看完整过程，'
     + '或到「报告与导出 → 导出诊断包」把脱敏日志发回给维护者。</div>'
     + '<div class="acts"><button class="btn" id="err-log">查看日志</button>'
-    + '<button class="btn ghost" id="err-retry">重试</button></div></div>'
-    + conclusionCard(null);
+    + '<button class="btn ghost" id="err-retry">重试</button></div></div>';
   wireFailureActions("");
-  wireConclusionActions(null);
   scrollMainTop();
 }
 
@@ -2422,7 +2461,7 @@ async function poll() {
       stopRun();
       appendLog("诊断失败：" + why, "e");
       if (RUN_MODE) setMode(RUN_MODE);
-      failedResult("诊断失败", why, s.error_code);
+      failedResult("诊断失败", why, s.error_code, s.error_detail);
       collapseConsole();              // 真错误已进结果卡，日志仍可点开
     } else if (s.state === "running") {
       RUN_MODE = s.mode || RUN_MODE;
@@ -3042,6 +3081,18 @@ function conclusionMarkdownFallback(res) {
 
 function conclusionCard(res) {
   const d = conclusionData(res), copy = conclusionCopy();
+  /* 旧版本结果（缺结论边界字段）：只渲染一条横幅 + 重新诊断，不渲染四层「未知」卡，
+     也不给「导出结论（含边界）」按钮 —— 导出未知内容是误导（issue: 旧记录兼容）。 */
+  if (d.legacy) {
+    const banner = copy.legacy_banner
+      || "这是旧版本的诊断结果，缺少结论边界信息，建议重新诊断。";
+    const rerun = copy.legacy_rerun || "重新诊断";
+    return '<section class="concl legacy" id="conclusion-card"'
+      + ' data-conclusion-card="1" data-legacy="1">'
+      + '<div class="legacy-banner">' + esc(banner) + '</div>'
+      + '<div class="toolbar"><button class="btn ghost" id="conclusion-rerun">'
+      + esc(rerun) + '</button></div></section>';
+  }
   const label = copy.ui_conclusion_label || "结论";
   const confTpl = copy.ui_confidence_line
     || "置信度：{level}（{confidence:.2f}） · 关键边界：{key_limit}";
@@ -3052,8 +3103,8 @@ function conclusionCard(res) {
     + '<h5>' + esc(heading) + '</h5>'
     + (ordered ? '<ol>' : '<ul>') + items.map((x) => '<li>' + esc(x) + '</li>').join("")
     + (ordered ? '</ol>' : '</ul>') + '</div>';
-  return '<section class="concl' + (d.legacy ? " legacy" : "") + '" id="conclusion-card"'
-    + ' data-conclusion-card="1" data-legacy="' + (d.legacy ? "1" : "0") + '">'
+  return '<section class="concl" id="conclusion-card"'
+    + ' data-conclusion-card="1" data-legacy="0">'
     + '<div class="ck"><b>' + esc(copy.ui_title || "结论与边界") + '</b>'
     + '<span>' + esc(copy.ui_kicker || "整块阅读 · 不可折叠") + '</span></div>'
     + '<div class="cc" data-concl="conclusion"><b>' + esc(label) + '：</b>'
@@ -3080,6 +3131,15 @@ function downloadText(text, mime, filename) {
 
 function wireConclusionActions(res) {
   const copy = conclusionCopy();
+  /* 旧版本结果（legacy）：只有「重新诊断」按钮，没有复制/导出。 */
+  const rerun = $("#conclusion-rerun");
+  if (rerun) {
+    rerun.onclick = () => {
+      hideLastRun();
+      if (MODE) { setMode(MODE); if (guardMode(MODE)) startCapture(); }
+    };
+    return;
+  }
   const btnCopy = $("#conclusion-copy");
   if (btnCopy) btnCopy.onclick = async () => {
     /* 复制的是服务端 render_conclusion_text 的整块（含依据/覆盖/未覆盖/置信/边界/报告标识），

@@ -228,9 +228,9 @@ class ResultPathsStayInPanelTest(unittest.TestCase):
             ("function render(res, actions)", "/* ---------- 0 包降级结果页", "render"),
             ("function renderDegraded(res, actions)", "/* ---------- 链路体检",
              "renderDegraded"),
-            ("function renderFailureCard(kind, why)", "function failedResult",
+            ("function renderFailureCard(kind, why, errDetail)", "function failedResult",
              "renderFailureCard"),
-            ("function failedResult(title, detail, code)", "function classifyLog",
+            ("function failedResult(title, detail, code, errDetail)", "function classifyLog",
              "failedResult"),
             ("function renderPassiveEmpty(res)", "function renderPassive(res)",
              "renderPassiveEmpty"),
@@ -250,11 +250,12 @@ class ResultPathsStayInPanelTest(unittest.TestCase):
         self.assertIn("wireConclusionActions(res);", degraded)
         self.assertIn("showResultArea()", degraded)
 
-    def test_failure_path_has_conclusion_card_in_same_result_area(self):
+    def test_failure_path_has_no_conclusion_card(self):
+        # 失败路径不渲染结论卡（不混入上一次的结论区：四层未知卡 + 导出按钮）。
         failure = _slice("function renderFailureCard", "function failedResult",
                          "renderFailureCard")
-        self.assertIn("+ conclusionCard(null)", failure)
-        self.assertIn("wireConclusionActions(null);", failure)
+        self.assertNotIn("conclusionCard", failure)
+        self.assertNotIn("wireConclusionActions", failure)
 
 
 if __name__ == "__main__":

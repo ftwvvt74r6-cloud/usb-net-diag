@@ -195,13 +195,14 @@ class UiCardStructureTest(unittest.TestCase):
         degraded_fn = _slice("function renderDegraded(res, actions)", "/* ---------- 链路体检")
         self.assertIn("+ conclusionCard(res)", degraded_fn)
         self.assertIn("wireConclusionActions(res);", degraded_fn)
-        failure_fn = _slice("function renderFailureCard(kind, why)", "function failedResult")
-        self.assertIn("+ conclusionCard(null)", failure_fn)
-        self.assertIn("wireConclusionActions(null);", failure_fn)
-        generic_fn = _slice("function failedResult(title, detail, code)",
+        # 失败路径**不渲染**结论卡（不混入「旧结论区」的四层未知卡与导出按钮）。
+        failure_fn = _slice("function renderFailureCard(kind, why, errDetail)", "function failedResult")
+        self.assertNotIn("conclusionCard", failure_fn)
+        self.assertNotIn("wireConclusionActions", failure_fn)
+        generic_fn = _slice("function failedResult(title, detail, code, errDetail)",
                            "function classifyLog")
-        self.assertIn("+ conclusionCard(null)", generic_fn)
-        self.assertIn("wireConclusionActions(null);", generic_fn)
+        self.assertNotIn("conclusionCard", generic_fn)
+        self.assertNotIn("wireConclusionActions", generic_fn)
 
     def test_copy_button_copies_server_rendered_whole_block(self):
         wire = _slice("function wireConclusionActions(res)", "function render(res, actions)")
