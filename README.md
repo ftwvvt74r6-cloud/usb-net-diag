@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/ftwvvt74r6-cloud/usb-net-diag/actions/workflows/smoke.yml"><img src="https://github.com/ftwvvt74r6-cloud/usb-net-diag/actions/workflows/smoke.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-v0.3.2-blue" alt="version v0.3.2">
+  <img src="https://img.shields.io/badge/version-v0.3.3-blue" alt="version v0.3.3">
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License MIT">
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Platform Windows">
@@ -137,8 +137,8 @@ python core\diagnose.py --pcap captures\faults_demo.pcap --report-out %TEMP%\net
 
 ### ② 公开 lite 包（lite 包要求）
 
-当前已发布的是 **v0.3.2**：从 [Release v0.3.2](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.2)
-下载 `NetDiag-0.3.2-lite.zip`（**187 个文件 / 1,199,811 B / 解压后 3,301,772 B /
+当前已发布的是 **v0.3.3**：从 [Release v0.3.3](https://github.com/ftwvvt74r6-cloud/usb-net-diag/releases/tag/v0.3.3)
+下载 `NetDiag-0.3.3-lite.zip`（**203 个文件 / 1,262,060 B / 解压后 3,434,943 B /
 SHA-256 `da0c69b8b05eb52517c0550040cb5feef7d19b2580a335ed17a60f8a898e2e0e`**，同页附
 `SHA256SUMS.txt`）。解压后**推荐直接双击 `NetDiag.exe`**
 （启动时显示 splash 并做六项准备检查，之后直接进主界面）；需要排障时再用下面的命令：
@@ -148,7 +148,7 @@ SHA-256 `da0c69b8b05eb52517c0550040cb5feef7d19b2580a335ed17a60f8a898e2e0e`**，�
 python core\server.py
 ```
 
-**lite 包要求（v0.3.2）**：
+**lite 包要求（v0.3.3）**：
 
 - 需要 **Python 3.11+**；分析抓包文件另装 **Wireshark**（tshark）；全网体检 / 单目标诊断 /
   通信观察另装 **Npcap**。包内 `NetDiag.exe` 是构建时用系统 csc 编译的启动器（约 70 KB），

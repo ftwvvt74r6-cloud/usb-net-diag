@@ -16,12 +16,12 @@
 
 | 模式 | 命令（仓库根目录） | 产物 | zip 体积 | 解压后 | 包内第三方二进制 | 能发给谁 |
 |---|---|---|---|---|---|---|
-| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **1,199,811 B**（v0.3.2 实测） | **3,301,772 B**（v0.3.2 实测） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
+| **lite（默认）** | `python scripts\build_release.py` | `NetDiag-<VERSION>-lite.zip` | **1,262,060 B**（v0.3.3 实测） | **3,434,943 B**（v0.3.2 实测） | **无**（只含自有的 `NetDiag.exe`） | **公开 Release / 任何人** |
 | **内部离线** | `python scripts\build_release.py --with-tools` | `NetDiag-<VERSION>-internal.zip` | 约 **147 MB** | 约 **363 MiB** | 便携 Python + Wireshark（**无 Npcap**） | 本组织内部，**不外传** |
 | **内部离线 + Npcap** | `python scripts\build_release.py --with-npcap` | `NetDiag-<VERSION>-internal-npcap.zip` | 约 **149 MB** | 约 **364 MiB** | 便携 Python + Wireshark + `npcap-1.79.exe` | **仅限组织内部使用**，禁止公开 |
 
-> `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.2`）。
-> 表中 **lite 行是 v0.3.2 实测**（2026-11-09 发布件：187 文件 / 1,199,811 B / 解压后 3,301,772 B）；
+> `<VERSION>` 取仓库根 `VERSION` 文件（当前 `0.3.3`）。
+> 表中 **lite 行是 v0.3.3 实测**（2026-11-09 发布件：203 文件 / 1,262,060 B / 解压后 3,434,943 B）；
 > v0.3.1 历史值为 174 文件 / 1,031,112 B / 解压后 2,771,469 B；
 > v0.3.0 历史值为 169 文件 / 974,570 B / 解压后 2,590,174 B。
 > **internal 两行仍是 v0.2.0 历史实测**（v0.3.0 / v0.3.1 / v0.3.2 均未重建内部包，不作为当前版本预期值）。
