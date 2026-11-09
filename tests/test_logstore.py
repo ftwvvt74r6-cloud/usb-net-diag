@@ -199,9 +199,14 @@ class RecordRunTests(_TempLogCase):
         self.assertEqual((data["critical"], data["warning"]), (2, 3))
         self.assertTrue(data["sufficiency_ok"])
         self.assertEqual(data["error_code"], "")
-        self.assertEqual(data["params"]["pcap"], SAMPLE.name)
-        self.assertNotIn("D:", json.dumps(data["params"], ensure_ascii=False))
-        self.assertNotIn("\\", json.dumps(data["params"], ensure_ascii=False))
+        # ② pcap 绝对化（issue: 分析路径丢失）：params["pcap"] 是绝对路径，
+        # 文件名另存 params["pcap_file"]，避免工作目录/盘符变化拼出 'F:\' 怪路径。
+        self.assertTrue(Path(data["params"]["pcap"]).is_absolute(),
+                        "params.pcap 必须是绝对路径")
+        self.assertEqual(data["params"]["pcap_file"], SAMPLE.name)
+        self.assertIn("pcap_exists", data["params"])
+        self.assertIn("pcap_size", data["params"])
+        self.assertEqual(data["params"]["record_schema"], diagnose.RUN_RECORD_SCHEMA)
 
     def test_run_scan_failure_records_error_code(self):
         """失败也要记：``error_code`` 是稳定码，``level`` 留空。"""

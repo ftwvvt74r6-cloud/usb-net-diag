@@ -11,6 +11,7 @@ import argparse
 import datetime as dt
 import ipaddress
 import json
+import os
 import socket
 import sys
 import time
@@ -1106,16 +1107,187 @@ def run_scan(target: str = "", duration: int = 30, interface: str | None = None,
     return result
 
 
+#: run 记录的 schema 版本。旧记录没有这个字段（或更小版本），读方必须走「旧数据降级」。
+#: 本次升级原因（issue: 分析路径丢失）：旧记录里 ``params.pcap`` 只存文件名，工作目录/盘符
+#: 一变就拼出 ``F:\`` 这类怪路径。从本版本起 ``params.pcap`` 存绝对路径，并附带
+#: ``pcap_file`` / ``pcap_size`` / ``pcap_exists``，旧记录缺这些字段时 UI 只显示
+#: 「旧版本结果」横幅，不渲染四层「未知」卡。
+RUN_RECORD_SCHEMA = 2
+
+#: 兼容旧字段：UI 读旧记录时用到的契约版本字段名（写进 run 记录，供前端识别新旧）。
+UI_CONTRACT_VERSION = "2"
+
+
+def _pcap_file_meta(path: Path) -> dict:
+    """采集一个 pcap 路径的「可诊断性」元信息（存在性只用于展示，不作判定依据）。
+
+    为什么要单独抽出来：错误卡要显示「pcap 绝对路径 / 是否存在 / 文件大小 / 失败阶段」，
+    而 ``resolve()`` 前后、``cwd``、涉及盘符这些只在本地日志里记录、绝不联网。这里把
+    这些信息一次性算好，供错误卡与 run 记录复用，避免两处各写一套。
+
+    Args:
+        path: 待采集的 pcap 路径（可能是相对路径、盘符根 ``F:\\`` 等怪值）。
+
+    Returns:
+        dict: 键 ``pcap``（resolve 后的绝对路径字符串）/ ``name``（文件名，可能为空串）/
+            ``exists``（bool）/ ``size``（int，不存在时为 0）/ ``drive``（盘符或空串）。
+            任何 ``resolve()`` / ``stat()`` 失败都被吞掉，返回该键的安全默认值，
+            绝不因采集元信息而把一次「路径解析异常」变成二次崩溃。
+    """
+    raw = str(path)
+    try:
+        resolved = Path(raw).resolve()
+    except (OSError, ValueError, RuntimeError):
+        resolved = Path(raw)
+    name = ""
+    try:
+        name = resolved.name
+    except (ValueError, OSError):
+        name = ""
+    drive = ""
+    try:
+        drive = resolved.drive
+    except (ValueError, OSError):
+        drive = ""
+    exists = False
+    size = 0
+    try:
+        if resolved.is_file():
+            exists = True
+            size = resolved.stat().st_size
+    except OSError:
+        exists = False
+    return {
+        "pcap": str(resolved),
+        "name": name,
+        "exists": exists,
+        "size": size,
+        "drive": drive,
+    }
+
+
+def _pcap_error_card(path: str | Path, stage: str, exc: BaseException | None = None,
+                     cwd: str | None = None) -> dict:
+    """构造「分析失败」错误卡的完整诊断信息（可诊断性：路径 / 存在性 / 大小 / 阶段）。
+
+    事故根因（issue: 分析路径丢失）：单目标诊断跑完后结果区显示
+    ``FileNotFoundError: [WinError 3] 系统找不到指定的路径。: 'F:\\'`` —— 异常里的路径
+    是**盘符根**，不是某个 pcap 文件。用户只能看到一串异常文本，无法定位「到底是哪个
+    文件、为什么没了」。本函数把失败整理成结构化字段，供 UI 渲染成错误卡。
+
+    ``stage`` 取值（四段）：``capture``（抓包完成）→ ``write``（落盘）→ ``parse``（解析）
+    → ``analyze``（分析）。``resolve_before`` / ``resolve_after`` / ``cwd`` / ``drive``
+    只进本地日志（:func:`logstore`），**不随响应外发、不联网**。
+
+    Args:
+        path: 用户/调用方传入的 pcap 路径（原始值，不 resolve）。
+        stage: 失败发生在哪一阶段（``capture`` / ``write`` / ``parse`` / ``analyze``）。
+        exc: 触发失败的异常（``FileNotFoundError`` / ``OSError`` 会被映射成用户话术）。
+        cwd: 失败时的当前工作目录；省略时现场取 ``os.getcwd()``。
+
+    Returns:
+        dict: 键 ``ok``(False) / ``error``（用户话术）/ ``code`` / ``stage`` /
+            ``pcap_path``（绝对路径）/ ``pcap_exists`` / ``pcap_size`` /
+            ``pcap_name`` / ``reasons``（三条常见原因）/ ``re_capture``(True)；
+            另附 ``_log``（仅供本地日志的结构，调用方负责写进 logstore，不外发）。
+    """
+    raw = str(path)
+    meta = _pcap_file_meta(path)
+    cwd = cwd if cwd is not None else os.getcwd()
+    is_fs_error = isinstance(exc, (FileNotFoundError, OSError))
+    if is_fs_error:
+        message = "抓包文件不存在或已不可访问"
+    else:
+        message = str(exc) if exc else "分析失败"
+    reasons = [
+        "临时目录不可用（例如系统清空了临时目录，或该盘符已不存在）",
+        "移动盘被移除（U 盘 / 移动硬盘被拔出，盘符消失）",
+        "路径解析异常（盘符或工作目录变化，导致拼出无效路径）",
+    ]
+    card = {
+        "ok": False,
+        "error": message,
+        "code": "E_BAD_PCAP" if is_fs_error else "E_INTERNAL",
+        "stage": stage,
+        "pcap_path": meta["pcap"],
+        "pcap_name": meta["name"],
+        "pcap_exists": meta["exists"],
+        "pcap_size": meta["size"],
+        "reasons": reasons,
+        "re_capture": True,
+    }
+    # 本地日志专用：resolve 前后 / cwd / 盘符，绝不进对外响应（见 _log 说明）。
+    card["_log"] = {
+        "stage": stage,
+        "raw_path": raw,
+        "resolved_path": meta["pcap"],
+        "exists": meta["exists"],
+        "size": meta["size"],
+        "cwd": cwd,
+        "drive": meta["drive"],
+        "error": f"{type(exc).__name__}: {exc}" if exc else "",
+    }
+    return card
+
+
+def _log_pcap_card(card: dict) -> None:
+    """把错误卡的本地日志部分写进 ``logstore``（仅本地日志，绝不联网）。
+
+    Args:
+        card: :func:`_pcap_error_card` 的返回值；``_log`` 键缺失时静默跳过。
+
+    Returns:
+        None: 写日志失败只影响日志，不影响诊断。
+    """
+    detail = card.get("_log") if isinstance(card, dict) else None
+    if not isinstance(detail, dict):
+        return
+    line = (f"[诊断] pcap 路径解析失败｜阶段={detail.get('stage')}"
+            f"｜原始路径={detail.get('raw_path')}"
+            f"｜解析后路径={detail.get('resolved_path')}"
+            f"｜存在={detail.get('exists')}｜大小={detail.get('size')}"
+            f"｜cwd={detail.get('cwd')}｜盘符={detail.get('drive') or '无'}"
+            f"｜{detail.get('error') or ''}")
+    try:
+        logstore.diag_log(line)
+    except Exception:  # noqa: BLE001  日志失败不影响业务
+        pass
+
+
 def _run_params(target: str, duration: int, interface: str | None,
                 pcap: str | None) -> dict:
-    """组装 run 记录里的 ``params``：只留目标/时长/网卡与 pcap 文件名，不写绝对路径。"""
+    """组装 run 记录里的 ``params``：pcap 一律绝对化并持久化，附带 schema 版本。
+
+    为什么改：旧实现 ``params["pcap"] = Path(str(pcap)).name`` 只存文件名，后续靠
+    工作目录拼路径 —— 工作目录/盘符一变就拼出 ``F:\\`` 这类怪路径（issue: 分析路径丢失）。
+    新实现内部一律用绝对路径（``Path.resolve()``），并同时保存文件名、大小、是否存在；
+    ``exists`` 只用于展示，不作为判定依据。同时写 ``record_schema`` /
+    ``ui_contract_version``，旧记录缺这两个字段时读方必须走「旧数据降级」。
+
+    Args:
+        target: 目标 IP/网段/域名；截断到 300 字符。
+        duration: 抓包秒数。
+        interface: 网卡；截断到 120 字符。
+        pcap: pcap 路径；``None`` 表示实时抓包。
+
+    Returns:
+        dict: 键 ``target`` / ``duration`` / ``interface`` / ``record_schema`` /
+            ``ui_contract_version``；有 pcap 时另加 ``pcap``（绝对路径）/ ``pcap_file``
+            （文件名）/ ``pcap_size`` / ``pcap_exists``。
+    """
     params = {
         "target": (target or "")[:300],
         "duration": int(duration or 0),
         "interface": str(interface)[:120] if interface else "",
+        "record_schema": RUN_RECORD_SCHEMA,
+        "ui_contract_version": UI_CONTRACT_VERSION,
     }
     if pcap:
-        params["pcap"] = Path(str(pcap)).name
+        meta = _pcap_file_meta(pcap)
+        params["pcap"] = meta["pcap"]
+        params["pcap_file"] = meta["name"]
+        params["pcap_size"] = meta["size"]
+        params["pcap_exists"] = meta["exists"]
     return params
 
 
@@ -1195,7 +1367,12 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         if not p.is_absolute() and not p.exists():
             p = CAPTURES / p.name
         if not p.is_file():
-            return {"ok": False, "error": f"抓包文件不存在: {pcap}"}
+            # 失败时才采集绝对路径/存在性/大小/阶段，成功路径的 pcap 字符串保持不变，
+            # 避免 resolve 改变 analyzer.analyze 收到的路径、进而改变报告快照（红线）。
+            card = _pcap_error_card(p, "analyze",
+                                    FileNotFoundError(f"抓包文件不存在: {p}"))
+            _log_pcap_card(card)
+            return card
         cap["pcap"] = str(p)
     else:
         # 离线路径（上面的分支）恒不启动探针：用户可能只是在分析别人的 pcap。
@@ -1228,6 +1405,17 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         result = analyzer.analyze(cap["pcap"], target=target,
                                   ti_key=cfg.get("threat_intel_key", ""), log=logger)
     if not result.get("ok"):
+        # 解析阶段失败也要补「阶段」与 pcap 可诊断性，让错误卡能显示「路径/存在性/大小/阶段」。
+        # 只有文件不存在（FileNotFoundError 语义）才走 _pcap_error_card 的完整卡；
+        # 其它解析失败（文件不完整 / tshark rc 非 0）保留原错误文案，只补 stage 标记。
+        err = str(result.get("error") or "")
+        if "不存在" in err or "not found" in err.lower() or "不完整" in err or "cut short" in err.lower():
+            card = _pcap_error_card(cap.get("pcap", pcap), "parse",
+                                    FileNotFoundError(err))
+            card["error"] = err
+            _log_pcap_card(card)
+            return card
+        result["stage"] = "parse"
         return result
 
     result["meta"]["interface"] = cap.get("interface", "-")

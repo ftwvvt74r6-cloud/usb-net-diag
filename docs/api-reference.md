@@ -1811,14 +1811,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 51 | ✅ |
-| `log` | function | 114 | ✅ |
-| `capture_filter_for` | function | 220 | ✅ |
-| `bpf_for` | function | 306 | ✅ |
-| `capture_live` | function | 604 | ✅ |
-| `degraded_empty_capture_result` | function | 879 | ✅ |
-| `run_scan` | function | 1056 | ✅ |
-| `main` | function | 1385 | ✅ |
+| `load_config` | function | 52 | ✅ |
+| `log` | function | 115 | ✅ |
+| `capture_filter_for` | function | 221 | ✅ |
+| `bpf_for` | function | 307 | ✅ |
+| `capture_live` | function | 605 | ✅ |
+| `degraded_empty_capture_result` | function | 880 | ✅ |
+| `run_scan` | function | 1057 | ✅ |
+| `main` | function | 1573 | ✅ |
 
 ### `load_config`
 
@@ -5352,32 +5352,32 @@ Example:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `static_asset` | function | 102 | ✅ |
-| `touch` | function | 209 | ✅ |
-| `request_quit` | function | 214 | ✅ |
-| `cleanup_pid` | function | 262 | ✅ |
-| `BodyTooLarge` | class | 272 | ✅ |
-| `doctor_cached` | function | 351 | ✅ |
-| `log` | function | 468 | ✅ |
-| `evidence_payload` | function | 564 | ✅ |
-| `conclusion_report_id` | function | 688 | ✅ |
-| `build_status_conclusion` | function | 719 | ✅ |
-| `start_job` | function | 1075 | ✅ |
-| `report_index` | function | 1136 | ✅ |
-| `request_elevation` | function | 1170 | ✅ |
-| `preflight_payload` | function | 1208 | ✅ |
-| `engine_info` | function | 1252 | ✅ |
-| `passive_start` | function | 1295 | ✅ |
-| `passive_status` | function | 1330 | ✅ |
-| `link_actions` | function | 1404 | ✅ |
-| `Handler` | class | 1485 | ✅ |
-| `Handler.handle_one_request` | method | 1511 | ✅ |
-| `Handler.log_message` | method | 1556 | ✅ |
-| `Handler.do_GET` | method | 1694 | ✅ |
-| `Handler.do_POST` | method | 1716 | ✅ |
-| `DiagServer` | class | 2036 | ✅ |
-| `DiagServer.handle_error` | method | 2047 | ✅ |
-| `create_server` | function | 2075 | ✅ |
-| `main` | function | 2122 | ✅ |
+| `touch` | function | 210 | ✅ |
+| `request_quit` | function | 215 | ✅ |
+| `cleanup_pid` | function | 263 | ✅ |
+| `BodyTooLarge` | class | 273 | ✅ |
+| `doctor_cached` | function | 352 | ✅ |
+| `log` | function | 469 | ✅ |
+| `evidence_payload` | function | 565 | ✅ |
+| `conclusion_report_id` | function | 689 | ✅ |
+| `build_status_conclusion` | function | 720 | ✅ |
+| `start_job` | function | 1110 | ✅ |
+| `report_index` | function | 1171 | ✅ |
+| `request_elevation` | function | 1205 | ✅ |
+| `preflight_payload` | function | 1243 | ✅ |
+| `engine_info` | function | 1287 | ✅ |
+| `passive_start` | function | 1330 | ✅ |
+| `passive_status` | function | 1365 | ✅ |
+| `link_actions` | function | 1439 | ✅ |
+| `Handler` | class | 1520 | ✅ |
+| `Handler.handle_one_request` | method | 1546 | ✅ |
+| `Handler.log_message` | method | 1591 | ✅ |
+| `Handler.do_GET` | method | 1729 | ✅ |
+| `Handler.do_POST` | method | 1751 | ✅ |
+| `DiagServer` | class | 2071 | ✅ |
+| `DiagServer.handle_error` | method | 2082 | ✅ |
+| `create_server` | function | 2110 | ✅ |
+| `main` | function | 2157 | ✅ |
 
 ### `static_asset`
 

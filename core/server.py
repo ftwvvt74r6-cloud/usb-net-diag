@@ -153,6 +153,7 @@ JOB = {
     "result": None,
     "error": "",
     "error_code": "",     # 稳定错误码（E_NO_NPCAP / E_NO_ADMIN / E_BAD_PCAP ...）
+    "error_detail": None,  # 失败时的可诊断性字段（stage / pcap_path / pcap_exists / ...）
 }
 
 # 通信观察（被动监听）单独一个任务槽，避免和诊断任务互相覆盖
@@ -915,6 +916,12 @@ def _last_run_from_runs(limit: int = 50) -> dict | None:
         if not target and mode == "offline":
             target = str(params.get("pcap") or "").strip()
         epoch = _mtime(path)
+        # 旧记录兼容：没有 schema 版本字段的历史记录标记 legacy，前端据此只显示
+        # 「旧版本结果」横幅、禁用导出，而不是渲染四层「未知」卡。
+        legacy = not (
+            isinstance(params.get("record_schema"), int)
+            or isinstance(params.get("ui_contract_version"), str)
+        )
         return {
             "time": _now_iso(epoch),
             "epoch": int(epoch),
@@ -927,6 +934,7 @@ def _last_run_from_runs(limit: int = 50) -> dict | None:
             "warning": max(0, int(data.get("warning") or 0)),
             "full_result": False,
             "source": "runs",
+            "legacy": legacy,
         }
     return None
 
@@ -987,6 +995,30 @@ def _settings_ui_copy() -> dict:
         return {}
 
 
+def _error_detail_from(res: dict) -> dict | None:
+    """从失败结果里提取「可诊断性」字段，供 UI 错误卡渲染（不返回本地日志专用字段）。
+
+    失败结果可能是 ``diagnose._pcap_error_card`` 的产物（带 ``pcap_path`` /
+    ``pcap_exists`` / ``pcap_size`` / ``stage`` / ``reasons`` / ``re_capture``），
+    也可能是普通 ``{"ok": False, "error": "..."}``（无这些字段）。这里只挑出
+    UI 需要的白名单字段，``_log`` 这类本地日志字段绝不外发。
+
+    Args:
+        res: 失败结果字典。
+
+    Returns:
+        dict | None: 白名单字段的浅拷贝（``stage`` / ``pcap_path`` / ``pcap_name`` /
+            ``pcap_exists`` / ``pcap_size`` / ``reasons`` / ``re_capture``）；
+            结果里一个相关字段都没有时返回 ``None``（UI 走普通失败卡）。
+    """
+    if not isinstance(res, dict):
+        return None
+    keys = ("stage", "pcap_path", "pcap_name", "pcap_exists", "pcap_size",
+            "reasons", "re_capture")
+    detail = {key: res[key] for key in keys if key in res}
+    return detail or None
+
+
 def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: str | None,
             shadow: bool = False) -> None:
     # run 记录由 diagnose.run_scan() 统一写（UI 的 /api/scan 也走它），
@@ -1027,10 +1059,12 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
                 JOB["result"] = res
                 JOB["error"] = ""
                 JOB["error_code"] = ""
+                JOB["error_detail"] = None
             else:
                 JOB["state"] = "error"
                 JOB["error"] = res.get("error", "未知错误")
-                JOB["error_code"] = diagnose._error_code(res)
+                JOB["error_code"] = res.get("code") or diagnose._error_code(res)
+                JOB["error_detail"] = _error_detail_from(res)
                 JOB["result"] = None
             JOB["finished_at"] = time.time()
         # G5：把本次分析记进内存，供刷新/重开页面时提示「上次结果」。放在状态更新之后，
@@ -1043,6 +1077,7 @@ def _worker(mode: str, target: str, duration: int, interface: str | None, pcap: 
             JOB["state"] = "error"
             JOB["error"] = f"{type(exc).__name__}: {exc}"
             JOB["error_code"] = "E_INTERNAL"
+            JOB["error_detail"] = None
             JOB["finished_at"] = time.time()
         _remember_last_run(mode, _last_run_target(mode, target, pcap),
                            started_at, {"ok": False, "error": str(exc)})
@@ -1122,7 +1157,7 @@ def start_job(payload: dict) -> dict:
         JOB.update({"state": "running", "mode": mode, "target": target or "全网",
                     "duration": duration if mode != "offline" else 0,
                     "started_at": time.time(), "finished_at": 0, "logs": [],
-                    "result": None, "error": "", "error_code": ""})
+                    "result": None, "error": "", "error_code": "", "error_detail": None})
     if ignored_target:
         log(f"[提示] 全网体检（全网扫描）模式忽略目标 {ignored_target}，抓取全部流量")
     log(f"任务已启动：模式={mode}，目标={target or '全网'}，时长={duration}s"
