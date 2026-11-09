@@ -15,6 +15,9 @@ API:
   GET  /api/preflight       启动器/首屏共用能力快照（与 /api/selfcheck 同源，无 first_run）
   GET  /api/selfcheck       首屏准备检查（六项只读环境检查 + 首次运行标记）
   POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
+  POST /api/selfcheck/path  保存手填组件路径 {key:python|tshark, path}（校验后写 config/paths.json）
+  GET  /api/logs            日志列表（logs/ 直属 app/diag/startup）
+  GET  /api/log?name=       单个日志正文（&lines=N 取尾部 N 行，&download=1 下附件）
   GET  /api/last-run        上次运行摘要（内存优先；进程重启后用 runs/ 历史兜底）
   GET  /api/last-run/result 上次运行的完整结果（只在内存里；没有时返回 404 JSON）
   POST /api/last-run/clear  清空内存里的上次结果（runs/ 历史记录保留）
@@ -1404,6 +1407,147 @@ def preflight_payload() -> dict:
     }
 
 
+# ---------------------------------------------------------------- R4：保存手填路径
+#: ``POST /api/selfcheck/path`` 支持手填的 key 白名单（scapy / npcap 不能靠路径指定）。
+SAVE_PATH_KEYS = ("python", "tshark")
+
+#: key → ``config/paths.json`` 的字段名（与 selfcheck.collect 的覆盖口径一致）。
+SAVE_PATH_FIELDS = {"python": "python_path", "tshark": "tshark_path"}
+
+#: 各 key 的「可执行自检」参数：tshark 跑 ``-v``，python 跑 ``-V``。
+SAVE_PATH_PROBE = {"python": ("-V",), "tshark": ("-v",)}
+
+
+def validate_component_path(key: str, path: str) -> tuple[bool, str, str]:
+    """校验手填组件路径：存在 / 是文件 / 可执行（跑对应探测命令）。
+
+    这是纯函数：不做写盘、不读全局，方便单测。校验三关顺序固定，第一处失败即返回，
+    返回的 ``code`` 供前端区分展示（``not_found`` / ``not_a_file`` / ``not_executable``）。
+
+    Args:
+        key: 组件 key（``python`` / ``tshark``，调用方须先过 :data:`SAVE_PATH_KEYS`）。
+        path: 用户填的路径串（可能为空 / 带引号 / 相对路径）。
+
+    Returns:
+        tuple[bool, str, str]: ``(是否通过, code, 错误说明)``。通过时 ``code`` 为
+            ``""``、说明为空；失败时 code 是稳定的机器码，说明是给人看的一句话。
+    """
+    if not path or not str(path).strip():
+        return False, "empty", "路径不能为空"
+    p = Path(str(path).strip().strip('"'))
+    if not p.exists():
+        return False, "not_found", f"路径不存在：{p}"
+    if not p.is_file():
+        return False, "not_a_file", f"不是文件：{p}"
+    probe_args = SAVE_PATH_PROBE.get(key, ("-v",))
+    try:
+        rc, _out, err = tshark.run([str(p), *probe_args], timeout=15)
+    except Exception as exc:  # noqa: BLE001
+        return False, "not_executable", f"无法执行：{type(exc).__name__}: {exc}"
+    if rc != 0:
+        return False, "not_executable", f"无法执行（rc={rc}）：{str(err or '').strip()[:200] or p}"
+    return True, "", ""
+
+
+# ---------------------------------------------------------------- R5：日志列表与正文
+#: ``GET /api/logs`` 只列 logs/ 直属的这三类日志；``GET /api/log?name=`` 也按此白名单。
+#: startup-*.log 由 launcher 的 --measure 写（当前可能不存在），预留前缀但不多判。
+LOG_KINDS = ("app", "diag", "startup")
+
+#: 单文件正文读取的尾部行数上限（``?lines=N``）。
+LOG_MAX_LINES = 5000
+
+
+def log_files() -> list[dict]:
+    """列出 ``logs/`` 直属的 app / diag / startup 日志文件（不含子目录、env.json、
+    netdiag.pid 等）。返回结构匹配前端 logs.js 的 ``normalize``：``name`` / ``kind`` /
+    ``size`` / ``mtime`` / ``epoch``。
+
+    Returns:
+        list[dict]: 按 mtime 降序；读取失败返回空列表。
+    """
+    root = logstore.log_root()
+    out: list[dict] = []
+    try:
+        for p in root.iterdir():
+            if not p.is_file() or p.is_symlink():
+                continue
+            kind = _log_kind(p.name)
+            if kind is None:
+                continue
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append({
+                "name": p.name,
+                "kind": kind,
+                "size": st.st_size,
+                "mtime": time.strftime("%Y-%m-%d %H:%M",
+                                       time.localtime(st.st_mtime)),
+                "epoch": int(st.st_mtime),
+            })
+    except OSError:
+        return []
+    out.sort(key=lambda item: item["epoch"], reverse=True)
+    return out
+
+
+def _log_kind(name: str) -> str | None:
+    """判断文件名是否属于 app / diag / startup 日志（白名单前缀 + ``.log`` 后缀）。
+
+    只认 ``<kind>-<日期>.log`` 或 ``<kind>.log`` 形式；其它（env.json、netdiag.pid、
+    子目录、``..`` 穿越）一律 ``None``，由调用方 404。
+
+    Args:
+        name: 文件名字符串（不含目录）。
+
+    Returns:
+        str | None: ``app`` / ``diag`` / ``startup``；不匹配返回 ``None``。
+    """
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return None
+    if not name.endswith(".log"):
+        return None
+    stem = name[:-4]
+    for kind in LOG_KINDS:
+        if stem == kind or stem.startswith(kind + "-"):
+            return kind
+    return None
+
+
+def resolve_log_file(name: str) -> Path | None:
+    """把 ``?name=`` 解析成 ``logs/`` 直属的可安全读取日志文件。
+
+    复用 :func:`static_asset` 的四道关思路（白名单 + 拒绝穿越 + 符号链接二次校验）：
+    只接受 ``logs/`` 直属文件、``app/diag/startup`` 前缀、非符号链接。
+
+    Args:
+        name: 查询参数 ``name`` 的值（可能含 ``../`` / 绝对路径 / 编码穿越）。
+
+    Returns:
+        Path | None: 通过全部检查的文件；不合法一律 ``None``（调用方 404）。
+    """
+    if not name or not isinstance(name, str):
+        return None
+    raw = urllib.parse.unquote(name)
+    if "\x00" in raw or "\\" in raw or raw in (".", ".."):
+        return None
+    if "/" in raw or raw != Path(raw).name:
+        return None
+    if _log_kind(raw) is None:
+        return None
+    candidate = logstore.log_root() / raw
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(logstore.log_root().resolve())
+    except (OSError, ValueError):
+        return None
+    if resolved.is_symlink():
+        return None
+    return resolved if resolved.is_file() else None
+
+
 # ---------------------------------------------------------------- 通信观察
 def engine_info() -> dict:
     """当前可用的采集引擎（第一步就告诉用户「能不能用 Scapy」）。
@@ -1853,6 +1997,44 @@ class Handler(BaseHTTPRequestHandler):
         log(f"AI 解读完成（{out.get('model')}，{out.get('latency_ms', 0) / 1000:.1f}s）")
         return self._json(out)
 
+    def _save_component_path(self, payload: dict) -> dict:
+        """处理 ``POST /api/selfcheck/path``：校验并保存手填组件路径。
+
+        流程：key 白名单（scapy/npcap 拒）→ 校验存在/是文件/可执行 → 写
+        ``config/paths.json`` → 清自检缓存 → 强制重检该 key 与整体 preflight。
+
+        Args:
+            payload: ``{"key": "python|tshark", "path": "<绝对路径>"}``。
+
+        Returns:
+            dict: 成功 ``{"ok": True, "key", "path", "item", "preflight"}``；
+                失败 ``{"ok": False, "code", "error"}``（``unsupported_key`` /
+                ``empty`` / ``not_found`` / ``not_a_file`` / ``not_executable``）。
+        """
+        key = str(payload.get("key") or "").strip()
+        if key not in SAVE_PATH_KEYS:
+            return {"ok": False, "code": "unsupported_key",
+                    "error": "scapy/npcap 不能通过路径指定：scapy 需 pip 安装，npcap 需运行安装器"}
+        path = str(payload.get("path") or "")
+        ok, code, err = validate_component_path(key, path)
+        if not ok:
+            return {"ok": False, "code": code, "error": err}
+        clean = str(Path(path.strip().strip('"')))
+        field = SAVE_PATH_FIELDS[key]
+        try:
+            from core.config import save_paths  # 延迟导入：config 走 core 包相对导入
+            save_paths({field: clean})
+        except OSError as exc:
+            return {"ok": False, "code": "write_failed",
+                    "error": f"写入配置失败：{type(exc).__name__}: {exc}"}
+        # 路径变了：作废自检缓存并强制重检，返回该项新状态 + 整体 preflight。
+        selfcheck.invalidate_cache()
+        snap = selfcheck.collect_cached(force=True)
+        checks = snap.get("checks") or []
+        item = next((c for c in checks if isinstance(c, dict) and c.get("key") == key), {})
+        return {"ok": True, "key": key, "path": clean, "item": item,
+                "preflight": preflight_payload()}
+
     # ---------- routes ----------
     def do_GET(self):
         """处理 GET：静态页 + 只读 API。
@@ -2044,6 +2226,42 @@ class Handler(BaseHTTPRequestHandler):
             # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程；短 TTL 缓存
             # 让紧接着的 /api/app 或「重新检测」复用同一份结果。
             return self._json(selfcheck.collect_cached())
+        if path == "/api/logs":
+            # R5：日志列表（logs/ 直属的 app/diag/startup），字段匹配前端 logs.js。
+            return self._json({"ok": True, "files": log_files()})
+        if path == "/api/log":
+            # R5：单个日志正文（?name=<文件名>[&lines=N][&download=1]）。
+            # 默认 JSON {ok,name,text,size,truncated,lines}（前端 fetchLog 读 text/truncated）；
+            # download=1 时改回 text/plain + Content-Disposition attachment。
+            q = urllib.parse.parse_qs(parsed.query)
+            name = (q.get("name") or [""])[0]
+            target = resolve_log_file(name)
+            if target is None:
+                return self._json({"ok": False, "error": "日志不存在或名称不合法"}, 404)
+            want_lines = _to_int((q.get("lines") or [None])[0], None, 1, LOG_MAX_LINES)
+            want_download = _to_bool((q.get("download") or [None])[0], False)
+            try:
+                data = target.read_bytes()
+            except OSError as exc:
+                return self._json({"ok": False, "error": f"读取日志失败：{exc}"}, 500)
+            size = len(data)
+            truncated = False
+            if want_lines is not None:
+                # 尾部 N 行：按行切（末尾换行产生的空串不算一行），保留最后 want_lines 行。
+                parts = data.split(b"\n")
+                if parts and parts[-1] == b"":
+                    parts = parts[:-1]
+                if len(parts) > want_lines:
+                    data = b"\n".join(parts[-want_lines:]) + b"\n"
+                    truncated = True
+            if want_download:
+                extra = (("Content-Disposition",
+                          f'attachment; filename="{target.name}"'),)
+                return self._send(200, data, "text/plain; charset=utf-8", extra)
+            return self._json({"ok": True, "name": target.name,
+                               "text": data.decode("utf-8", "replace"),
+                               "size": size, "truncated": truncated,
+                               "lines": want_lines})
         if path == "/api/passive":
             return self._json(passive_status())
         if path == "/api/ai":
@@ -2112,6 +2330,11 @@ class Handler(BaseHTTPRequestHandler):
             # 下一次 /api/selfcheck 还会把「首次运行」下发一遍。
             selfcheck.invalidate_cache()
             return self._json(result)
+
+        if parsed.path == "/api/selfcheck/path":
+            # R4：保存手填组件路径（python / tshark）。校验通过才写 config/paths.json，
+            # 再强制重检该 key 并连同整体 preflight 一起返回，前端可立即刷新状态。
+            return self._json(self._save_component_path(self._read_json()))
 
         if parsed.path == "/api/ai":
             payload = self._read_json()

@@ -137,14 +137,16 @@ class FailureDetailTest(unittest.TestCase):
                 mock.patch.object(selfcheck, "_python_runtime", return_value="系统 Python"):
             self.assertFalse(selfcheck.check_python()["ok"])
 
-    def test_tshark_missing_has_download_and_interfaces_command(self):
+    def test_tshark_missing_has_download_and_portable_guide(self):
         with mock.patch.object(selfcheck.tshark, "find_tshark", return_value=None):
             item = selfcheck.check_tshark()
         self.assertFalse(item["ok"])
         self.assertIn("tshark", item["detail"])
         self.assertEqual(item["fix_kind"], "url")
         self.assertIn("wireshark.org", item["fix_url"])
-        self.assertIn("--interfaces", item["fix_command"])
+        # R4：fix_command 改成便携版放置说明（不再是指令命令），引导把
+        # WiresharkPortable 放到 tools/ 下即可被自动扫描命中。
+        self.assertIn("WiresharkPortable", item["fix_command"])
 
     def test_npcap_missing_has_official_link(self):
         with mock.patch.object(selfcheck, "_npcap_installed", return_value=False):
@@ -367,13 +369,16 @@ class CapabilitiesMatrixTest(unittest.TestCase):
         self.assertFalse(caps["path_probe"])
         self.assertIsNone(caps["mtr_engine"])
 
-    def test_check_scapy_missing_is_degradation_not_install_guide(self):
-        """scapy 是可选引擎：失败项说明「降级 tracert」，fix_kind 不是安装链接。"""
+    def test_check_scapy_missing_is_optional_speedup_not_required(self):
+        """scapy 是可选引擎：失败项说明「降级 tracert」，给的是**可选**加速入口
+        （官网 + pip 命令），不强制安装。impact/detail 仍讲降级，不出现「必须安装」。"""
         with mock.patch.object(selfcheck, "_scapy_available", return_value=False):
             item = selfcheck.check_scapy()
         self.assertFalse(item["ok"])
-        self.assertEqual(item["fix_kind"], "none")
-        self.assertEqual(item["fix_url"], "")
+        # R4：scapy 现在给可选加速入口（scapy.net + pip install），fix_kind 从 none 改为 url。
+        self.assertEqual(item["fix_kind"], "url")
+        self.assertIn("scapy.net", item["fix_url"])
+        self.assertIn("pip install scapy", item["fix_command"])
         self.assertIn("tracert", item["impact"])
         self.assertIn("tracert", item["detail"])
         self.assertNotIn("必须安装", item["detail"] + item["impact"])
