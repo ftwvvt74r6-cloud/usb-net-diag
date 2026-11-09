@@ -23,14 +23,17 @@
   --n-800: #2C2C2E;
   --n-900: #1D1D1F;
 
-  /* 唯一强调色 */
-  --accent: #0071E3;
-  --accent-hover: #0077ED;
-  --accent-soft: #E8F2FE;
-  --accent-on-dark: #64A8FF;
+  /* 唯一强调色：青绿（teal）。白底 5.47:1，小字可用；
+     --accent-on-dark 只服务深色轨道，白底上仅 1.9:1，禁止使用。 */
+  --accent: #0F766E;
+  --accent-hover: #115E59;
+  --accent-soft: #E7F6F4;
+  --accent-on-dark: #5EEAD4;
 
-  /* 语义色（加深版，白底全部 ≥4.5:1） */
-  --ok: #1F7A3D;
+  /* 语义色（加深版，白底全部 ≥4.5:1）。
+     ok 用叶绿（色相 122°）而不是原来的 140°：与 accent 的青绿（175°）差 53°，
+     两个绿放在一起不会糊成一片。 */
+  --ok: #2F7D32;
   --ok-soft: #EAF6EE;
   --warn: #B25000;
   --warn-soft: #FFF5E9;
@@ -50,8 +53,8 @@
   --rail-bg: rgba(29, 29, 31, .82);
   --rail-icon: #A1A1A6;
   --rail-icon-hover: #FFFFFF;
-  --rail-active-bg: rgba(0, 113, 227, .18);
-  --rail-active-icon: #64A8FF;
+  --rail-active-bg: rgba(15, 118, 110, .20);
+  --rail-active-icon: #5EEAD4;
 
   /* 圆角 */
   --r-sm: 10px;

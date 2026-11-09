@@ -54,11 +54,13 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, .16);
 }
 .brand-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+/* wordmark：logo 图标 +「NetDiag」并排，15px/600，深轨上纯白（16.8:1） */
 .brand-t b {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--rail-icon-hover);
-  letter-spacing: .01em;
+  letter-spacing: -.01em;
+  white-space: nowrap;
 }
 
 .railnav { display: flex; flex-direction: column; gap: 2px; }
