@@ -12,7 +12,7 @@ R1 —— 静态白名单扩展到 ``ui/v2/**``：
 R2 —— 入口开关与一键回滚：
 
 * ``ui_entry`` 优先级：``?ui=`` > Cookie ``nd_ui`` > ``config/ui-version.json``
-  ``.default`` > 内置 ``v1``；
+  ``.default`` > 内置 ``v2``；
 * ``?ui=`` 命中时回写 ``Set-Cookie``（``_send`` 的 ``extra_headers``）；
 * 路由覆盖 ``/`` / ``/index.html`` / ``/v2/`` / ``/v2/index.html``；
 * ``scripts/ui_switch.py v1|v2`` 写 ``config/ui-version.json``（无需重启）。
@@ -186,12 +186,12 @@ class UiEntryTest(unittest.TestCase):
             with mock.patch.object(server, "UI_VERSION_CONFIG", p):
                 self.assertEqual(self._entry("", None), "v2")
 
-    def test_defaults_to_v1(self):
+    def test_defaults_to_v2(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(server, "UI_VERSION_CONFIG",
                                    Path(tmp) / "nope.json"):
-                self.assertEqual(self._entry("", None), "v1")
-                self.assertEqual(self._entry("ui=bad", "v3"), "v1")
+                self.assertEqual(self._entry("", None), "v2")
+                self.assertEqual(self._entry("ui=bad", "v3"), "v2")
 
     def test_parse_ui_cookie(self):
         class _H:
@@ -249,11 +249,11 @@ class UiEntryRouteTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_default_root_is_v1(self):
+    def test_default_root_is_v2(self):
         status, ctype, _, body = self._get("/")
         self.assertEqual(status, 200)
         self.assertEqual(ctype, "text/html; charset=utf-8")
-        self.assertEqual(body, b"V1_ENTRY")
+        self.assertEqual(body, b"V2_ENTRY")
 
     def test_query_ui_v2_returns_v2_and_sets_cookie(self):
         status, ctype, set_cookie, body = self._get("/?ui=v2")
@@ -269,7 +269,7 @@ class UiEntryRouteTest(unittest.TestCase):
     def test_v2_index_route_serves_entry(self):
         status, _, _, body = self._get("/v2/index.html")
         self.assertEqual(status, 200)
-        self.assertEqual(body, b"V1_ENTRY")  # 无 query/cookie 时仍回 v1
+        self.assertEqual(body, b"V2_ENTRY")  # 无 query/cookie 时仍回 v1
 
     def test_missing_entry_returns_500_not_fallback(self):
         # 把 v2 入口文件临时挪走，用 ?ui=v2 时应 500 且写明缺哪个文件，不回退 v1；
