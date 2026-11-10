@@ -92,7 +92,9 @@
     var foot = U.el("div", "console-ft");
     box.appendChild(foot);
 
-    var expanded = !!(job && (job.state === "running" || job.state === "starting"));
+    var running0 = !!(job && (job.state === "running" || job.state === "starting"));
+    /* 专业模式：结束后控制台保持展开，省掉每次点「展开输出」 */
+    var expanded = running0 || (ND.state && ND.state.isPro && ND.state.isPro());
     var lastCount = -1;
     var collapsed = false;
 

@@ -22,8 +22,21 @@
     jobAt: 0,           /* 快照时间（本机毫秒） */
     last: null,         /* /api/last-run 的 last */
     result: null,       /* /api/last-run/result 的 result（内存里有才取） */
-    pollError: ""       /* 轮询失败的原因，页面据此提示「连不上本地服务」 */
+    pollError: "",      /* 轮询失败的原因，页面据此提示「连不上本地服务」 */
+    pro: false          /* 专业模式：控制台默认展开、面板显示全字段 */
   };
+
+  /* 专业模式是本机偏好，不是运行状态：放 localStorage，刷新后保持 */
+  var PRO_KEY = "nd_pro";
+  try { S.pro = window.localStorage.getItem(PRO_KEY) === "1"; } catch (e) { S.pro = false; }
+
+  function isPro() { return !!S.pro; }
+
+  function setPro(on) {
+    S.pro = !!on;
+    try { window.localStorage.setItem(PRO_KEY, S.pro ? "1" : "0"); } catch (e) { /* 隐私模式写不进去也不影响本次 */ }
+    emit("pro");
+  }
 
   var subs = [];
   var watchers = {};
@@ -183,6 +196,8 @@
     subscribe: subscribe,
     isRunning: isRunning,
     hasJob: hasJob,
+    isPro: isPro,
+    setPro: setPro,
     applyJob: applyJob,
     refreshStatus: refreshStatus,
     refreshLastRun: refreshLastRun,
