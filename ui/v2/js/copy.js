@@ -170,16 +170,6 @@
       legacy: "上一次任务没有成功，所以没有可展示的结论。"
     },
 
-    /* 降级卡 */
-    degrade: {
-      title: "证据不足，给不出结论",
-      zeroTitle: "这次一个报文都没抓到",
-      zeroBody: "0 个报文说明流量根本没进到网卡：多半是网卡选错、过滤条件把流量挡掉了，或者目标没有在通信。",
-      thinBody: "本次只抓到 {packets} 个报文，样本太少，任何一层都给不出可信结论。",
-      advice: "把时长调到 30–60 秒；全网体检先确认网卡选对；单目标诊断换一个确定可达的目标再试一次。",
-      again: "再测一次"
-    },
-
     /* 设置页 */
     settings: {
       service: "后台服务",
@@ -366,6 +356,223 @@
       copy: "复制给协作方",
       reportPath: "报告文件",
       legacyNoExport: "旧记录没有边界信息，不提供含边界的导出。"
+    },
+
+    /* ---------------------------------------------------------- 一眼三层（结论区） */
+    /* 硬要求：横幅标题 ≤14 字、问题句 ≤40 字、每条动作 ≤30 字且动词开头。
+       这里所有句子都按这个预算写，UI 侧另有一道 clip 兜底。 */
+    verdict: {
+      kicker: "本次结论",
+      scopeLabel: "影响范围",
+      scope: {
+        peer: "只影响这个对端",
+        some: "影响部分目标",
+        all: "影响整机上网",
+        none: "全部正常",
+        unknown: "无法判断"
+      },
+      titleSuffix: "异常",
+      titleOk: "四层全部正常",
+      titleZero: "一个报文都没抓到",
+      titleThin: "证据不足，先别下结论",
+      okProblem: "没有发现影响上网的问题",
+      zeroProblem: "网卡选错，或过滤把流量挡住了",
+      thinProblem: "样本太少，任何一层都判不准",
+      stepsHeading: "现在怎么做",
+      stepNo: "第 {n} 步",
+      ownerHeading: "找谁解决",
+      ownerBasis: "判断依据",
+      ownerPartner: "需要谁配合",
+      ownerNone: "四层没有异常项，本次不需要找人协作。",
+      copyFooter: "需要协作时发给对方的内容：结论 + 依据 + 请对方做的事",
+      copySummary: "复制摘要",
+      copySummaryOk: "摘要已复制",
+      copySummaryFail: "复制失败，请手动选择文本",
+      prefillLive: "已把 {target} 填进单目标诊断，确认参数后点开始",
+      noTarget: "这次结果里没有可复测的地址，请手动填写目标",
+      evFold: "展开证据",
+      evBasis: "依据",
+      evCoverage: "本次覆盖",
+      evNot: "明确未覆盖",
+      evConf: "置信度",
+      evItems: "证据",
+      evAdvice: "完整排查思路",
+      evProbe: "探针基线",
+      evPath: "路径剖面",
+      evEmpty: "本次没有可列出的证据条目。",
+      boundaryLead: "适用范围",
+      boundaryFull: "完整边界",
+      boundaryNone: "旧记录没有边界信息",
+      confidence: "{level}（{value}）",
+      confidenceNone: "未给出",
+      /* 动作按钮：只允许这几个真实动作，宁可少一个也不放不能点的文字 */
+      act: {
+        retest: "立即复测",
+        hops: "查看逐跳",
+        copy: "复制摘要",
+        logs: "查看日志",
+        rerun: "改参数再测",
+        fold: "展开证据"
+      },
+      /* 责任归属四格 */
+      /* 每格一句「需要谁配合」，控制在 12 字内：四格在总览左栏只有 100 多像素宽 */
+      owners: {
+        host: { label: "本机", partner: "需要你：关掉占带宽的程序" },
+        lan: { label: "本地网络", partner: "需要网管：查交换机与网线" },
+        carrier: {
+          label: "运营商·承载网",
+          partner: "需要运营商：查线路丢包",
+          byKind: { icmp: "需要运营商：查路由与拦截策略" }
+        },
+        peer: { label: "对端服务", partner: "需要对方：查服务与防火墙" }
+      },
+      /* 判断依据的模板（数字会被加粗） */
+      basis: {
+        hostWin: "本机接收窗口被塞满 {n} 次",
+        hostOk: "本机网卡与协议栈没有异常",
+        lanArp: "网关 ARP 无应答",
+        lanHop: "第 {hop} 跳（网关）开始丢包",
+        carrierHop: "第 {hop} 跳之后开始丢包，共 {loss}%",
+        carrierBoth: "两侧都在丢包，网关侧也丢 {loss}%",
+        peerSingle: "只有 {target} 连不上，其他对端正常",
+        peer5xx: "对端返回 {n} 次 5xx",
+        peerRefused: "对端明确拒绝连接",
+        dnsFail: "DNS 解析失败率 {rate}%（服务器 {srv}）",
+        carrierIcmp: "收到 {n} 条 ICMP 不可达，链路中途被拦"
+      },
+      boundaryCount: "{a} 条覆盖 · {b} 项未覆盖",
+      /* 没被高亮的三格也要各给一句，否则只剩标签像半成品 */
+      clear: {
+        host: "本机能看到的项目都正常",
+        lan: "网关与本地链路正常",
+        carrier: "链路侧没有丢包",
+        peer: "对端响应正常"
+      },
+      /* 三步动作（动词开头、≤30 字）。按故障类型取，最多 3 条 */
+      steps: {
+        connFail: [
+          { text: "复测确认端口是否可达", act: "retest" },
+          { text: "看第几跳开始不通", act: "hops" },
+          { text: "把报告发给对端服务方", act: "copy" }
+        ],
+        retrans: [
+          { text: "复测确认丢包是否持续", act: "retest" },
+          { text: "看第几跳开始变慢", act: "hops" },
+          { text: "把丢包数据发给运营商", act: "copy" }
+        ],
+        /* ICMP 不可达 / 超时：报文被中途拒掉，「变慢」那套动作会误导用户 */
+        icmp: [
+          { text: "确认哪些地址连不上", act: "retest" },
+          { text: "看第几跳回 ICMP 不可达", act: "hops" },
+          { text: "把 ICMP 记录发给运营商", act: "copy" }
+        ],
+        dns: [
+          { text: "换一个公共 DNS 再测", act: "retest" },
+          { text: "查本机 DNS 设置是否正确", act: "logs" },
+          { text: "把 DNS 结果发给网管", act: "copy" }
+        ],
+        http: [
+          { text: "查服务端日志确认 5xx", act: "logs" },
+          { text: "复测确认是否稳定复现", act: "retest" },
+          { text: "把状态码发给服务方", act: "copy" }
+        ],
+        arp: [
+          { text: "插回网线或换个端口", act: "retest" },
+          { text: "确认网关地址是否正确", act: "logs" },
+          { text: "找网管查交换机", act: "copy" }
+        ],
+        ok: [
+          { text: "保存本次报告留档", act: "copy" },
+          { text: "过 10 分钟再测一次", act: "retest" },
+          { text: "展开证据看统计口径", act: "fold" }
+        ],
+        /* 0 包 / 样本不足：不指着「找谁」发力，先让用户把采集搞对 */
+        zero: [
+          { text: "换一块网卡再测一次", act: "rerun" },
+          { text: "看采集日志找原因", act: "logs" }
+        ],
+        thin: [
+          { text: "把时长调到 30-60 秒再测", act: "rerun" },
+          { text: "换一个确定可达的目标", act: "rerun" }
+        ]
+      },
+      /* 复制给协作方的摘要骨架 */
+      summaryTitle: "【结论】",
+      summaryBasis: "【依据】",
+      summaryAsk: "【请对方做的事】",
+      summaryOwner: "【责任归属】",
+      summaryScope: "【适用范围】",
+      summaryReport: "【报告】"
+    },
+
+    /* ---------------------------------------------------------- 专业数据面板 */
+    panel: {
+      title: "实时与专业数据",
+      sub: "左边说人话，右边给原始数据",
+      pro: "专业模式",
+      proOn: "专业模式已开启",
+      proOff: "专业模式已关闭",
+      proHint: "开启后采集控制台默认展开、面板显示全部字段",
+      fold: "收起面板",
+      unfold: "展开面板",
+      secOverview: "概览",
+      secQuality: "传输质量",
+      secStreams: "Top 会话",
+      secL7: "应用层分布",
+      secDns: "DNS",
+      ovPackets: "报文总数",
+      ovStreams: "TCP 会话",
+      ovDuration: "抓包时长",
+      ovSamples: "采样样本数",
+      qRetrans: "重传",
+      qOoo: "乱序",
+      qRst: "RST",
+      qZeroWin: "零窗口",
+      qDupAck: "重复 ACK",
+      times: "{n} 次",
+      ofRate: "{n} 次 · {rate}%",
+      streamsHint: "点任意一行复制对应的 Wireshark 过滤器",
+      colFlow: "源 → 目标",
+      colPkts: "包",
+      colBytes: "字节",
+      colRtt: "RTT",
+      colRetrans: "重传",
+      copyFilter: "复制过滤器",
+      filterCopied: "过滤器已复制：{f}",
+      filterFail: "复制失败，请手动复制：{f}",
+      more: "显示全部 {n} 条会话",
+      l7Note: "按 TCP 会话数统计；DNS 走 UDP，见下一行",
+      l7Sample: "样本 {n}/{total} 个会话",
+      l7Missing: "后端未下发应用层报文占比（需求单 R8-1），这里按会话类型统计",
+      l7Empty: "本次没有可归类的会话",
+      l7Http: "HTTP",
+      l7Tls: "TLS",
+      l7Other: "其他",
+      dnsQueries: "查询",
+      dnsResp: "响应",
+      dnsAvg: "平均耗时",
+      dnsFail: "失败率",
+      empty: "完成一次诊断后，这里会出现本次的专业数据",
+      running: "正在采集，结束后这里出统计",
+      runningFill: "采集中，下面这些位置结束后依次填数",
+      runningBody: "{phase} · 已用 {elapsed} 秒 · 控制台 {lines} 行",
+      noData: "—",
+      secExtra: "更多字段",
+      exRttP95: "RTT P95",
+      exJitter: "抖动",
+      exHs: "握手均值",
+      exHttpAvg: "HTTP 均值",
+      exThroughput: "吞吐",
+      exProbe: "探针基线",
+      exProbeNone: "本次没有发探针",
+      secLogs: "控制台（最近 {n} 行）",
+      secLogsNone: "本次没有控制台输出"
+    },
+
+    /* 零散的开关提示 */
+    pro: {
+      on: "专业模式已开启：控制台默认展开，面板显示全部字段",
+      off: "专业模式已关闭：只显示摘要"
     },
 
     /* 还没接数据的页面（S3 起逐页替换） */

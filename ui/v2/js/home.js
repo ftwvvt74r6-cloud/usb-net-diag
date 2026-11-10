@@ -1,11 +1,12 @@
 /* ============================================================================
-   home.js · 总览页：四张指标卡 + 最近一次结果 + 环境与依赖
+   home.js · 总览页：指标卡 + 实时与专业数据（左三层结论 / 右专业面板）+ 环境
    ----------------------------------------------------------------------------
-   数据只有一个来源：ND.state（背后是 /api/last-run + /api/last-run/result）。
-   有任务在跑时，KPI 显示「诊断中…」+ 小 spinner，而不是「暂无数据」——
-   否则用户切回首页会以为任务没在跑，回去再点一次。
-   轮询只在有任务时开（state.acquire("home")），任务结束立刻释放，
-   不让一个空转的首页把后台服务的空闲退出拖住。
+   这一页只做两件事：
+   1) 把「现在到底能不能上网、卡在哪」用三层结构说清楚（ND.verdict）
+   2) 把同一份结果的原始数字摊开（ND.panel），每行都能复制 Wireshark 过滤器
+
+   有任务在跑时：KPI 显示「诊断中…」，左边不摆结论（还没算出来，摆就是编），
+   右边给出进度摘要。轮询只在有任务时开，任务结束立刻释放。
    ========================================================================== */
 (function (ND) {
   "use strict";
@@ -13,6 +14,7 @@
   var U = ND.ui;
   var C = ND.copy || {};
   var R = ND.render;
+  var P = C.panel || {};
 
   var page = null;
 
@@ -29,62 +31,106 @@
 
     var kpis = U.el("dl", "kpis");
     var src = U.el("p", "kpi-src");
-    var cols = U.el("div", "cols");
-    var left = U.el("div", "col-main");
-    var right = U.el("div", "col-side");
-
     view.appendChild(kpis);
     view.appendChild(src);
-    cols.appendChild(left);
-    cols.appendChild(right);
-    view.appendChild(cols);
 
-    page = { view: view, kpis: kpis, src: src, left: left, right: right, envDrawn: false, resultSig: "" };
+    /* ---- 实时与专业数据：一张卡，左说人话右给数据 ---- */
+    var card = U.el("section", "card livecard");
+    var hd = U.el("div", "card-hd");
+    hd.appendChild(U.el("h2", "", P.title || ""));
+    hd.appendChild(U.el("span", "card-sub", P.sub || ""));
+
+    var sw = U.el("label", "pro-sw");
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = ND.state.isPro();
+    cb.setAttribute("aria-label", P.pro || "");
+    cb.addEventListener("change", function () {
+      ND.state.setPro(cb.checked);
+      U.toast(cb.checked ? (C.pro || {}).on : (C.pro || {}).off, "");
+    });
+    sw.appendChild(cb);
+    sw.appendChild(U.el("span", "pro-sw-t", P.pro || ""));
+    sw.title = P.proHint || "";
+    hd.appendChild(sw);
+
+    var fold = U.btn(P.fold || "", { kind: "ghost", size: "sm", onClick: function () { togglePanel(fold); } });
+    hd.appendChild(fold);
+    card.appendChild(hd);
+
+    var prow = U.el("div", "prow");
+    var left = U.el("div", "p-left");
+    var right = U.el("div", "p-right");
+    prow.appendChild(left);
+    prow.appendChild(right);
+    card.appendChild(prow);
+    view.appendChild(card);
+
+    var envHost = U.el("div", "home-env");
+    view.appendChild(envHost);
+
+    page = { kpis: kpis, src: src, left: left, right: right, prow: prow,
+             envHost: envHost, foldBtn: fold, envDrawn: false, sig: "" };
 
     paint(true);
-
-    left.appendChild(skeletonCard(C.card.lastRun));
-    right.appendChild(skeletonCard(C.card.env));
+    left.appendChild(skeletonBlock());
+    right.appendChild(skeletonBlock());
 
     page.unsub = ND.state.subscribe(function (S, evt) {
-      if (evt === "last" || evt === "job" || evt === "init") apply();
+      if (evt === "job" || evt === "last" || evt === "init" || evt === "pro") apply();
     });
 
-    /* 环境检查与顶栏徽章共用 state 里那一份，不重复请求 */
     if (!(ND.state.get().checks || []).length) ND.state.loadChecks();
 
-    ND.state.refreshLastRun().then(function () {
-      ND.state.refreshStatus();
-    });
+    ND.state.refreshLastRun().then(function () { ND.state.refreshStatus(); });
+  }
+
+  function togglePanel(btn) {
+    if (!page) return;
+    var show = page.right.hidden;
+    page.right.hidden = !show;
+    page.right.classList.toggle("is-hidden", !show);
+    page.prow.classList.toggle("is-full", !show);
+    var t = btn.querySelector(".btn-t");
+    if (t) t.textContent = show ? (P.fold || "") : (P.unfold || "");
   }
 
   function apply() {
     if (!page) return;
     var S = ND.state.get();
     var running = ND.state.isRunning();
-
     paint(false, running);
 
-    if (running) ND.state.acquire("home", 1500);
+    if (running) ND.state.acquire("home", 1200);
     else ND.state.release("home");
 
-    /* 结果卡：数据变了才重建 */
     var sig = [
       S.last ? (S.last.epoch || S.last.time || "1") : "0",
-      S.last ? (S.last.full_result ? 1 : 0) : 0,
+      S.last && S.last.full_result ? 1 : 0,
       S.last && S.last.legacy ? 1 : 0,
       S.result ? 1 : 0,
-      running ? 1 : 0
+      running ? 1 : 0,
+      ND.state.isPro() ? 1 : 0,
+      /* 专业模式的控制台尾巴跟着日志走：日志变了就得重画，否则永远停在打开那一刻 */
+      ND.state.isPro() ? (((S.job || {}).logs || []).length) : 0
     ].join("|");
-    if (page.resultSig !== sig) {
-      page.resultSig = sig;
-      U.clear(page.left).appendChild(lastRunCard(running));
-    }
+    if (page.sig === sig) return;
+    page.sig = sig;
 
-    /* 环境卡：检查结果到位后画一次，之后由「重新检测」自己更新 */
+    U.clear(page.left);
+    leftPane(running);
+
+    /* 专业面板：运行中给进度摘要，结束后给真实统计。
+       旧记录 / 上次失败没有本次数据，不拿别的记录往上凑。 */
+    var last = S.last;
+    var stale = !!(last && (last.legacy || !last.ok));
+    ND.panel.render(page.right, stale ? null : resultOf(S, running), {
+      bare: true, pro: ND.state.isPro(), job: S.job
+    });
+
     if (!page.envDrawn && (S.checks || []).length) {
       page.envDrawn = true;
-      U.clear(page.right).appendChild(ND.env.card(S.checks, {
+      U.clear(page.envHost).appendChild(ND.env.card(S.checks, {
         onRecheck: function (list) {
           if (ND.boot && ND.boot.paintChips) ND.boot.paintChips(list);
           ND.state.applyJob(ND.state.get().job);
@@ -93,20 +139,130 @@
     }
   }
 
+  /* 本次结果优先：status 里刚跑完的那份比 last-run 更新 */
+  function resultOf(S, running) {
+    if (running) return null;
+    var job = S.job || {};
+    if (job.state === "done" && job.result) return job.result;
+    return S.result || (job.state === "done" ? job.result : null);
+  }
+
+  /* ------------------------------------------------------------ 左栏 */
+  function leftPane(running) {
+    var S = ND.state.get();
+    var last = S.last;
+    var host = page.left;
+
+    if (running) {
+      var jb = S.job || {};
+      host.appendChild(R.empty("speed", P.running || "",
+        U.tpl(P.runningBody || "", {
+          phase: jb.phase || "", elapsed: U.num(jb.elapsed, 0) || "0",
+          lines: (jb.logs || []).length
+        }),
+        [U.btn(C.act.view, {
+          kind: "ghost", size: "sm",
+          onClick: function () { location.hash = "#/" + (jb.mode || "scan"); }
+        })]));
+      return;
+    }
+
+    if (!last) {
+      host.appendChild(R.empty("report", C.lastRun.emptyTitle, C.lastRun.emptyBody, [startBtn()]));
+      return;
+    }
+
+    /* 旧记录：没有边界也就没有专业数据，只留横幅 + 重新诊断 */
+    if (last.legacy) {
+      host.appendChild(R.banner("warn", C.lastRun.legacyTitle, C.lastRun.legacyBody));
+      host.appendChild(actionsRow(last, false));
+      return;
+    }
+
+    if (!last.ok) {
+      host.appendChild(failBlock(last));
+      return;
+    }
+
+    var job = { result: resultOf(S, false), mode: last.mode };
+    if (!job.result) {
+      host.appendChild(R.banner("warn", C.lastRun.summaryOnly));
+      host.appendChild(actionsRow(last, false));
+      return;
+    }
+    job.conclusion = job.result.conclusion || null;
+    job.report_id = job.result.report_id;
+    job.link_actions = (S.job || {}).link_actions || [];   /* 复测用后端给的地址，不自己猜 */
+    job.mode = (S.job && S.job.mode) || last.mode;
+
+    var card = ND.verdict.card(job, { bare: true });
+    if (card) {
+      host.appendChild(card);
+      host.appendChild(actionsRow(last, false));
+    } else {
+      host.appendChild(R.banner("warn", C.result.title, C.tech.empty));
+    }
+  }
+
+  function startBtn() {
+    var m = U.mode("scan");
+    var go = U.btn((m && m.btn) || C.act.rerun, { size: "sm" });
+    go.addEventListener("click", function () { location.hash = "#/scan"; });
+    return go;
+  }
+
+  function actionsRow(last, withExport) {
+    var row = U.el("div", "result-acts");
+    row.appendChild(U.btn(C.act.view, {
+      kind: "ghost", size: "sm", icon: "report",
+      onClick: function () { summaryModal(last); }
+    }));
+    row.appendChild(U.btn(C.act.rerun, {
+      kind: "ghost", size: "sm", icon: "refresh",
+      onClick: function () { location.hash = "#/" + ((last && last.mode) || "scan"); }
+    }));
+    return row;
+  }
+
+  function failBlock(last) {
+    var box = U.el("div", "left-fail");
+    var F = C.fail || {};
+    box.appendChild(U.el("p", "result-head crit", F.title));
+    box.appendChild(labeled(F.reasonLabel, F.reasonGeneric));
+    box.appendChild(labeled(F.adviceLabel, F.advice));
+    var acts = U.el("div", "result-acts");
+    acts.appendChild(U.btn(C.act.retry, { kind: "ghost", size: "sm", onClick: function () { location.hash = "#/" + ((last && last.mode) || "scan"); } }));
+    acts.appendChild(U.btn(C.act.logs, { kind: "ghost", size: "sm", onClick: function () { location.hash = "#/logs"; } }));
+    box.appendChild(acts);
+    return box;
+  }
+
+  function labeled(label, text) {
+    var p = U.el("p", "result-label");
+    p.appendChild(U.el("b", "", (label || "") + "："));
+    p.appendChild(document.createTextNode(text || ""));
+    return p;
+  }
+
+  function skeletonBlock() {
+    var c = U.el("div", "left-sk");
+    c.appendChild(R.skeleton(4, 62));
+    return c;
+  }
+
   /* ------------------------------------------------------------ 指标卡 */
   function paint(loading, running) {
     var host = page.kpis;
     U.clear(host);
     var S = ND.state.get();
     var last = S.last;
-    var res = S.result;
+    var res = resultOf(S, running);
     var meta = (res && res.meta) || {};
     var metrics = (res && res.metrics) || {};
     var verdict = (res && res.verdict) || {};
     var K = C.kpi || {};
 
     if (running) {
-      /* 运行中：四个数值位置统一换成 spinner，避免旧值被当成本次结果 */
       var job = S.job || {};
       host.appendChild(R.kpi(K.health, "", K.runningSub, "", { running: true }));
       host.appendChild(R.kpi(K.latency, "", "", "", { running: true }));
@@ -114,12 +270,9 @@
       host.appendChild(R.kpi(K.session, "", "", "", { running: true }));
       U.clear(page.src);
       page.src.appendChild(U.el("b", "", (C.source.label || "") + "："));
-      page.src.appendChild(document.createTextNode(
-        U.tpl(C.source.running || "", {
-          mode: U.modeLabel(job.mode),
-          phase: job.phase || ""
-        })
-      ));
+      page.src.appendChild(document.createTextNode(U.tpl(C.source.running || "", {
+        mode: U.modeLabel(job.mode), phase: job.phase || ""
+      })));
       return;
     }
 
@@ -127,8 +280,7 @@
     var legacy = !!(last && last.legacy);
     var failed = !!(last && !last.ok && !legacy);
 
-    /* 0 包 / 样本不足时 RTT 与重传率都是 0，那是「没样本」而不是「很好」：
-       一律退回「暂无数据」，避免把 0.00% 读成完美链路。 */
+    /* 0 包 / 样本不足时 RTT 与重传率都是 0，那是「没样本」而不是「很好」 */
     var zeroPkt = isFinite(Number(meta.packets)) && Number(meta.packets) === 0;
     var sufficiency = verdict && verdict.sufficiency;
     var thin = zeroPkt || level === (C.sev || {}).na ||
@@ -152,16 +304,9 @@
     host.appendChild(R.kpi(K.session, streams === null ? "" : U.num(streams, 0),
       streams === null ? why : K.sessionSub, "", { loading: loading }));
 
-    /* 数据来源行：必须让用户知道这不是实时值 */
     U.clear(page.src);
-    if (loading) {
-      page.src.textContent = C.common.loading;
-      return;
-    }
-    if (!last) {
-      page.src.textContent = C.source.none;
-      return;
-    }
+    if (loading) { page.src.textContent = C.common.loading; return; }
+    if (!last) { page.src.textContent = C.source.none; return; }
     page.src.appendChild(U.el("b", "", (C.source.label || "") + "："));
     var tail = last.target ? (" · " + last.target) : "";
     var packets = meta.packets;
@@ -191,165 +336,6 @@
     if (level === s.info) return "warn";
     if (level === s.ok) return "ok";
     return "";
-  }
-
-  function skeletonCard(title) {
-    var c = R.card(title);
-    c.body.appendChild(R.skeleton(3, 78));
-    return c.section;
-  }
-
-  /* ------------------------------------------------------------ 最近一次结果 */
-  function lastRunCard(running) {
-    var S = ND.state.get();
-    var last = S.last;
-    var sec = R.card(C.card.lastRun);
-
-    if (!last) {
-      if (running) {
-        sec.body.appendChild(R.empty("speed", C.kpi.running, C.kpi.runningSub, [
-          U.btn(C.act.view, { kind: "ghost", size: "sm", onClick: function () {
-            location.hash = "#/" + ((S.job && S.job.mode) || "scan");
-          } })
-        ]));
-        return sec.section;
-      }
-      sec.body.appendChild(R.empty("report", C.lastRun.emptyTitle, C.lastRun.emptyBody, [startBtn()]));
-      return sec.section;
-    }
-
-    sec.hd.appendChild(R.tag(
-      last.legacy ? "warn" : (last.ok ? "ok" : "crit"),
-      last.legacy ? C.lastRun.legacyTag : (last.ok ? C.lastRun.okTag : C.lastRun.failTag)
-    ));
-
-    if (last.legacy) {
-      sec.body.appendChild(R.banner("warn", C.lastRun.legacyTitle, C.lastRun.legacyBody));
-      sec.body.appendChild(legacyBody(last));
-      return sec.section;
-    }
-    if (!last.ok) {
-      sec.body.appendChild(failBody(last));
-      return sec.section;
-    }
-    var bad = degradeInfo(S.result);
-    sec.body.appendChild(bad ? degradeBody(last, bad) : okBody(last));
-    return sec.section;
-  }
-
-  function startBtn() {
-    var m = U.mode("scan");
-    var go = U.btn((m && m.btn) || C.act.rerun, { size: "sm" });
-    go.addEventListener("click", function () { location.hash = "#/scan"; });
-    return go;
-  }
-
-  function whenLine(last) {
-    var p = U.el("p", "result-when");
-    p.appendChild(U.icon("clock", "mini"));
-    p.appendChild(document.createTextNode(
-      U.tpl(C.lastRun.when, {
-        when: U.when(last.epoch, last.time),
-        mode: U.modeLabel(last.mode),
-        target: last.target ? (" · " + last.target) : ""
-      })
-    ));
-    return p;
-  }
-
-  function counters(last) {
-    return U.el("p", "result-counts", U.tpl(C.lastRun.counters, {
-      critical: last.critical || 0,
-      warning: last.warning || 0,
-      duration: U.dur(last.duration_ms) || "—"
-    }));
-  }
-
-  function okBody(last) {
-    var wrap = U.el("div", "result");
-    wrap.appendChild(whenLine(last));
-    var main = U.el("div", "result-main");
-    var v = (ND.state.get().result || {}).verdict || {};
-    if (v.headline) main.appendChild(U.el("p", "result-head", v.headline));
-    main.appendChild(counters(last));
-    var strip = R.layerStrip(v);
-    if (strip) main.appendChild(strip);
-    if (!last.full_result) main.appendChild(U.el("p", "result-note", C.lastRun.summaryOnly));
-
-    var acts = U.el("div", "result-acts");
-    acts.appendChild(U.btn(C.act.view, { kind: "ghost", size: "sm", onClick: function () { summaryModal(last); } }));
-    acts.appendChild(U.btn(C.act.rerun, { size: "sm", onClick: function () { goRun(last); } }));
-    main.appendChild(acts);
-    wrap.appendChild(main);
-    return wrap;
-  }
-
-  function failBody(last) {
-    var wrap = U.el("div", "result");
-    wrap.appendChild(whenLine(last));
-    var main = U.el("div", "result-main");
-    var F = C.fail || {};
-    main.appendChild(U.el("p", "result-head crit", F.title));
-    main.appendChild(labeled(F.reasonLabel, F.reasonGeneric));
-    main.appendChild(labeled(F.adviceLabel, F.advice));
-    var acts = U.el("div", "result-acts");
-    acts.appendChild(U.btn(C.act.retry, { kind: "ghost", size: "sm", onClick: function () { goRun(last); } }));
-    acts.appendChild(U.btn(C.act.logs, { kind: "ghost", size: "sm", onClick: function () { location.hash = "#/logs"; } }));
-    main.appendChild(acts);
-    wrap.appendChild(main);
-    return wrap;
-  }
-
-  function degradeBody(last, bad) {
-    var wrap = U.el("div", "result");
-    wrap.appendChild(whenLine(last));
-    var main = U.el("div", "result-main");
-    var g = C.degrade || {};
-    main.appendChild(U.el("p", "result-head warn", bad.zero ? g.zeroTitle : g.title));
-    main.appendChild(U.el("p", "result-counts", bad.zero
-      ? g.zeroBody
-      : U.tpl(g.thinBody, { packets: bad.packets })));
-    main.appendChild(labeled(C.fail.adviceLabel, g.advice));
-    var acts = U.el("div", "result-acts");
-    acts.appendChild(U.btn(g.again, { kind: "ghost", size: "sm", onClick: function () { goRun(last); } }));
-    main.appendChild(acts);
-    wrap.appendChild(main);
-    return wrap;
-  }
-
-  function legacyBody(last) {
-    var wrap = U.el("div", "result");
-    wrap.appendChild(whenLine(last));
-    var main = U.el("div", "result-main");
-    /* 旧记录：只有横幅 + 重新诊断；不渲染四层「未知」卡，也不给含边界导出 */
-    main.appendChild(counters(last));
-    var acts = U.el("div", "result-acts");
-    acts.appendChild(U.btn(C.act.rerun, { size: "sm", onClick: function () { goRun(last); } }));
-    main.appendChild(acts);
-    wrap.appendChild(main);
-    return wrap;
-  }
-
-  function labeled(label, text) {
-    var p = U.el("p", "result-label");
-    p.appendChild(U.el("b", "", (label || "") + "："));
-    p.appendChild(document.createTextNode(text || ""));
-    return p;
-  }
-
-  function goRun(last) {
-    location.hash = "#/" + ((last && last.mode) || "scan");
-  }
-
-  /* 0 包 / 证据不足：有完整结果才能判定 */
-  function degradeInfo(res) {
-    if (!res) return null;
-    var meta = res.meta || {};
-    var v = res.verdict || {};
-    var pk = Number(meta.packets);
-    if (isFinite(pk) && pk === 0) return { zero: true, packets: 0 };
-    if (v.sufficiency && v.sufficiency.ok === false) return { zero: false, packets: isFinite(pk) ? pk : 0 };
-    return null;
   }
 
   /* ------------------------------------------------------------ 摘要弹窗 */

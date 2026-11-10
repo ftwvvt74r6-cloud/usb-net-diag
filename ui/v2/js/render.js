@@ -1,13 +1,12 @@
 /* ============================================================================
-   render.js · 块级渲染件（卡片 / 指标 / 横幅 / 键值 / 结论卡 / 技术详情）
+   render.js · 块级渲染件（卡片 / 指标 / 横幅 / 键值 / 证据 / 技术详情）
    ----------------------------------------------------------------------------
    这一层只做「一块内容长什么样」，不知道任何接口字段之外的东西：
    进来的都是已经取好的数据，出去的都是 DOM 节点。
    页面（home / modes / settings / logs）负责取数与装配顺序。
 
-   本文件里唯一有「规矩」的地方是结论卡：
-   结论句 → 依据 / 本次覆盖 / 明确未覆盖 / 置信度 → 证据 → 建议，固定顺序，
-   边界与结论同卡、不可折叠；复制与导出都只走「含边界」的那份后端预渲染文本。
+   S4 起「结论区」不在这里：它要判断「哪层坏了 / 该找谁」，属于业务，
+   搬到了 verdict.js。本文件只剩证据、建议、技术详情这些纯块级件。
    ========================================================================== */
 (function (ND) {
   "use strict";
@@ -127,94 +126,8 @@
   }
 
   /* ------------------------------------------------------------ 结论卡 */
-  /* 一张卡、固定顺序、不可折叠。block 为空时不渲染（旧记录走横幅那条路）。 */
-  function conclusion(job, opts) {
-    opts = opts || {};
-    var block = (job && job.conclusion) || (job && job.result && job.result.conclusion) || null;
-    if (!block) return null;
-    var ui = (job && job.ui_copy && job.ui_copy.conclusion) || {};
-    var R = C.result || {};
-
-    var sec = U.el("section", "card concl");
-    sec.setAttribute("aria-labelledby", "concl-t");
-    var hd = U.el("div", "card-hd");
-    var h = U.el("h2", "", ui.ui_title || R.boundary);
-    h.id = "concl-t";
-    hd.appendChild(h);
-    /* 「整块阅读 · 不可折叠」是后端给的定性，不是装饰：告诉用户这块不能单拆 */
-    hd.appendChild(U.el("span", "card-sub", ui.ui_kicker || ""));
-    sec.appendChild(hd);
-
-    var bd = U.el("div", "card-bd");
-
-    /* ① 结论句 */
-    var say = U.el("div", "concl-say");
-    say.appendChild(U.el("span", "concl-kicker", ui.ui_conclusion_label || R.conclusion));
-    say.appendChild(U.el("p", "concl-text", block.conclusion || ui.fallback_unknown || ""));
-    bd.appendChild(say);
-
-    /* ② 依据 / 覆盖 / 未覆盖 / 置信度 —— 四段全部同卡，没有折叠 */
-    var grid = U.el("div", "concl-grid");
-    grid.appendChild(conclBlock(ui.ui_basis_heading || R.basis, block.basis));
-    grid.appendChild(conclBlock(ui.ui_coverage_heading || R.coverage, block.coverage));
-    grid.appendChild(conclBlock(ui.ui_not_covered_heading || R.notCovered, block.not_covered));
-    bd.appendChild(grid);
-
-    var conf = U.el("p", "concl-conf");
-    conf.appendChild(U.el("b", "", (R.confidence || "") + "："));
-    conf.appendChild(document.createTextNode(confidenceText(block)));
-    if (block.key_limit) {
-      conf.appendChild(document.createTextNode("　·　"));
-      conf.appendChild(U.el("b", "", (R.boundary || "") + "："));
-      conf.appendChild(document.createTextNode(block.key_limit));
-    }
-    bd.appendChild(conf);
-
-    /* ③ 证据 */
-    var ev = opts.evidence;
-    if (ev) bd.appendChild(ev);
-
-    /* ④ 建议 */
-    var ad = opts.advice;
-    if (ad) bd.appendChild(ad);
-
-    /* 动作：只有「含边界」的两份导出 + 一份整块复制 */
-    var ft = U.el("div", "concl-ft");
-    ft.appendChild(U.btn(ui.btn_copy || R.copy, {
-      kind: "ghost", size: "sm", icon: "copy",
-      onClick: function () { copyConclusion(job); }
-    }));
-    ft.appendChild(U.btn(ui.btn_export_md || R.exportMd, {
-      kind: "ghost", size: "sm", icon: "download",
-      onClick: function () { saveText(reportName(job, "md"), textOf(job, "md")); }
-    }));
-    ft.appendChild(U.btn(ui.btn_export_json || R.exportJson, {
-      kind: "ghost", size: "sm", icon: "download",
-      onClick: function () { saveText(reportName(job, "json"), textOf(job, "json")); }
-    }));
-    bd.appendChild(ft);
-
-    var rid = (job && job.result && job.result.report_id) || (job && job.report_id) || "";
-    if (rid) bd.appendChild(U.el("p", "concl-id mono", U.tpl(R.reportId, { id: rid })));
-
-    sec.appendChild(bd);
-    return sec;
-  }
-
-  function conclBlock(heading, items) {
-    var box = U.el("div", "concl-blk");
-    box.appendChild(U.el("h3", "concl-h", heading || ""));
-    if (items && items.length) box.appendChild(list(items, "concl-list"));
-    else box.appendChild(U.el("p", "muted", (C.tech || {}).valueEmpty || "—"));
-    return box;
-  }
-
-  function confidenceText(block) {
-    var level = block.confidence_level || "";
-    var n = Number(block.confidence);
-    if (!isFinite(n)) return level || "—";
-    return (level ? level + "（" : "（") + n.toFixed(2) + "）";
-  }
+  /* S4：结论区的「一眼三层」搬到 verdict.js（那里才做判断）。
+     本文件只留它用到的证据 / 建议 / 技术详情这些块级件。 */
 
   function textOf(job, kind) {
     var r = (job && job.result) || {};
@@ -420,12 +333,32 @@
     }
     bd.appendChild(ifb);
 
-    /* 探针明细 */
-    if (pb && pb.roles && pb.roles.length) {
-      var prb = U.el("div", "tech-blk");
-      prb.appendChild(U.el("h4", "", T.probe));
+    /* 探针明细与逐跳路径已移到「展开证据」里（结论卡的证据折叠区），
+       这里只留采集侧参数，避免同一个表在页面上出现两次 */
+
+    /* 阶段耗时分解：后端还没下发（R6-3） */
+    var tb = U.el("div", "tech-blk");
+    tb.appendChild(U.el("h4", "", T.timing));
+    tb.appendChild(U.el("p", "tech-todo", T.timingTodo));
+    bd.appendChild(tb);
+
+    return det;
+  }
+
+  /* ------------------------------------------------------------ 证据细节件 */
+  /* 探针基线：发出 / 收到 / 超时 / 每类探针的丢包。结论卡与证据区共用 */
+  function probeBaseline(pb) {
+    var T = C.tech || {};
+    if (!pb) return U.el("p", "muted", (C.panel || {}).exProbeNone || "");
+    var box = U.el("div", "tech-blk");
+    box.appendChild(U.el("p", "tech-dim", U.tpl(T.statsProbe, {
+      sent: num(pb.sent), recv: num(pb.recv),
+      timeout: num(pb.timeout), excluded: num(pb.excluded_packets)
+    })));
+    var roles = pb.roles || [];
+    if (roles.length) {
       var ul = U.el("ul", "tech-list");
-      pb.roles.forEach(function (r) {
+      roles.forEach(function (r) {
         var li = U.el("li", "");
         li.appendChild(U.el("b", "", U.tpl(T.probeRole, {
           role: r.role || "", kind: String(r.kind || "").toUpperCase(), target: r.target || ""
@@ -438,43 +371,30 @@
         }
         ul.appendChild(li);
       });
-      prb.appendChild(ul);
-      bd.appendChild(prb);
+      box.appendChild(ul);
     }
+    return box;
+  }
 
-    /* 逐跳路径 */
-    var pp = meta.path_profile;
-    if (pp && pp.hops && pp.hops.length) {
-      var pth = U.el("div", "tech-blk");
-      pth.appendChild(U.el("h4", "", T.path));
-      if (pp.method || pp.probes_sent) {
-        pth.appendChild(U.el("p", "tech-dim",
-          U.tpl(T.pathEngine, { engine: pp.method || "" }) + " · " + (pp.probes_sent || 0) + " probes"));
-      }
-      var tbl = U.el("div", "hop-table");
-      var head = U.el("div", "hop-row hop-head");
-      (T.hopCols || []).forEach(function (t) { head.appendChild(U.el("span", "", t)); });
-      tbl.appendChild(head);
-      pp.hops.forEach(function (h) {
-        var row = U.el("div", "hop-row");
-        row.appendChild(U.el("span", "mono", String(h.ttl || "")));
-        row.appendChild(U.el("span", "mono", h.ip || "*"));
-        row.appendChild(U.el("span", "mono", (h.sent || 0) + "/" + (h.lost || 0)));
-        row.appendChild(U.el("span", "mono", (h.loss_pct === null || h.loss_pct === undefined) ? "—" : h.loss_pct + "%"));
-        row.appendChild(U.el("span", "mono", isFinite(Number(h.rtt_avg_ms)) ? Number(h.rtt_avg_ms).toFixed(1) + " ms" : "—"));
-        tbl.appendChild(row);
-      });
-      pth.appendChild(tbl);
-      bd.appendChild(pth);
-    }
-
-    /* 阶段耗时分解：后端还没下发（R6-3） */
-    var tb = U.el("div", "tech-blk");
-    tb.appendChild(U.el("h4", "", T.timing));
-    tb.appendChild(U.el("p", "tech-todo", T.timingTodo));
-    bd.appendChild(tb);
-
-    return det;
+  /* 逐跳表：结论卡的路径剖面与探针页共用一份实现 */
+  function hopTable(pp) {
+    var T = C.tech || {};
+    var tbl = U.el("div", "hop-table");
+    var head = U.el("div", "hop-row hop-head");
+    (T.hopCols || []).forEach(function (t) { head.appendChild(U.el("span", "", t)); });
+    tbl.appendChild(head);
+    (pp && pp.hops || []).forEach(function (h) {
+      var row = U.el("div", "hop-row");
+      row.appendChild(U.el("span", "mono", String(h.ttl || "")));
+      row.appendChild(U.el("span", "mono", h.ip || "*"));
+      row.appendChild(U.el("span", "mono", (h.sent || 0) + "/" + (h.lost || 0)));
+      row.appendChild(U.el("span", "mono",
+        (h.loss_pct === null || h.loss_pct === undefined) ? "—" : h.loss_pct + "%"));
+      row.appendChild(U.el("span", "mono",
+        isFinite(Number(h.rtt_avg_ms)) ? Number(h.rtt_avg_ms).toFixed(1) + " ms" : "—"));
+      tbl.appendChild(row);
+    });
+    return tbl;
   }
 
   function num(v, digits) {
@@ -530,11 +450,15 @@
     list: list,
     kpi: kpi,
     layerStrip: layerStrip,
-    conclusion: conclusion,
     evidence: evidence,
     advice: advice,
     techDetails: techDetails,
+    probeBaseline: probeBaseline,
+    hopTable: hopTable,
     saveText: saveText,
+    textOf: textOf,
+    reportName: reportName,
+    copyConclusion: copyConclusion,
     sevKind: sevKind
   };
 })(window.ND = window.ND || {});

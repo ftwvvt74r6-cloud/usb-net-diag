@@ -47,6 +47,7 @@
 
     view.appendChild(pageHead(mode));
 
+    if (pendingLive && id === "live") ctx.targetValue = pendingLive.target;
     ctx.form = buildForm(id, mode, ctx);
     view.appendChild(ctx.form.section);
 
@@ -59,6 +60,12 @@
 
     ctx.resultHost = U.el("div", "result-zone");
     view.appendChild(ctx.resultHost);
+
+    if (pendingLive && id === "live") {
+      pendingLive = null;
+      var focusBtn = ctx.goBtn;
+      if (focusBtn) setTimeout(function () { focusBtn.focus(); }, 40);
+    }
 
     ctx.unsub = ND.state.subscribe(function (S, evt) {
       if (evt === "job" || evt === "init") apply(S);
@@ -334,19 +341,10 @@
       return box;
     }
 
-    /* 降级：0 包或证据不足 —— 结论照给（低置信），但先把原因说在前面 */
-    var degrade = degradeInfo(job);
-    if (degrade) {
-      box.appendChild(R.banner("warn",
-        degrade.zero ? C.degrade.zeroTitle : C.degrade.title,
-        degrade.zero ? C.degrade.zeroBody : U.tpl(C.degrade.thinBody, { packets: degrade.packets })));
-    }
-
-    var concl = R.conclusion(job, {
-      evidence: R.evidence(job),
-      advice: R.advice(job)
-    });
-    if (concl) box.appendChild(concl);
+    /* 一眼三层：问题横幅 → 现在怎么做 → 找谁解决；0 包/证据不足也是同一张卡，
+       只是标题与动作换成「先把采集搞对」，不再另起一条黄色横幅。 */
+    var card = ND.verdict ? ND.verdict.card(job, {}) : null;
+    if (card) box.appendChild(card);
     else box.appendChild(R.banner("warn", C.result.title, C.tech.empty));
 
     /* 技术详情只挂在「运行」卡里（运行中/结束都同一位置），结果区不再复制一份 */
@@ -398,14 +396,65 @@
     close.addEventListener("click", function () { box.close(); });
   }
 
-  function degradeInfo(job) {
-    var res = (job && job.result) || {};
-    var meta = res.meta || {};
-    var v = res.verdict || {};
-    var pk = Number(meta.packets);
-    if (isFinite(pk) && pk === 0) return { zero: true, packets: 0 };
-    if (v.sufficiency && v.sufficiency.ok === false) return { zero: false, packets: isFinite(pk) ? pk : 0 };
-    return null;
+  /* ------------------------------------------------------------ 一键复测 */
+  /* 结论卡里的「立即复测 / 查看逐跳」落到这里。参数不自己猜：
+     /api/status 的 link_actions 已经给出「对端（live）」和「网关（probe）」，
+     那是后端按本次结果算的权威值。两条路的处理不同 ——
+       · probe：不抓包、不要管理员、只读，直接开跑；
+       · live ：要管理员、会写 pcap，只预填表单，开始按钮交给用户按。 */
+  var pendingProbe = null;
+  var pendingLive = null;
+
+  function retest(job, opts) {
+    opts = opts || {};
+    var acts = (job && job.link_actions) || [];
+    var toPeer = null, toGw = null;
+    acts.forEach(function (a) {
+      if (!a || !a.target) return;
+      if (a.kind === "live") toPeer = a;
+      else if (a.kind === "probe") toGw = a;
+    });
+
+    /* 看逐跳必须有 probe 才拿得到路径，优先走网关那条 */
+    if (opts.focus === "path") {
+      var host = toGw ? toGw.target : (toPeer ? toPeer.target : hostOf(job));
+      if (host) return goProbe(host, "path");
+    }
+    if (toPeer) {
+      pendingLive = { target: toPeer.target, port: toPeer.port || null };
+      go("#/live");
+      U.toast(U.tpl((C.verdict || {}).prefillLive || "", {
+        target: toPeer.display || toPeer.target
+      }), "");
+      return;
+    }
+    if (toGw) return goProbe(toGw.target, opts.focus);
+    var t = hostOf(job);
+    if (t) return goProbe(t, opts.focus);
+    U.toast((C.verdict || {}).noTarget || "", "warn");
+    go("#/" + ((job && job.mode) || "scan"));
+  }
+
+  function goProbe(target, focus) {
+    pendingProbe = { target: String(target), focus: String(focus || "") };
+    go("#/probe");
+  }
+
+  function go(hash) {
+    if (location.hash === hash) ND.boot.route();
+    else location.hash = hash;
+  }
+
+  /* 结果里兜底的地址：必须是「像主机」的串，"全网" 这种不能拿去探测 */
+  function hostOf(job) {
+    var s = (job && job.result && job.result.summary) || {};
+    var meta = (job && job.result && job.result.meta) || {};
+    var cands = [s.target, ((meta.streams_top || [])[0] || {}).server];
+    for (var i = 0; i < cands.length; i++) {
+      var t = String(cands[i] || "").trim();
+      if (/^[\w.-]+(:\d+)?$/.test(t) && t.indexOf(".") > 0) return t;
+    }
+    return "";
   }
 
   /* ------------------------------------------------------------ 失败 */
@@ -490,7 +539,7 @@
     var out = U.el("div", "result-zone");
     view.appendChild(out);
 
-    go.addEventListener("click", function () {
+    function run() {
       var target = (ti.value || "").trim();
       if (!target) { err.textContent = F.needTarget || ""; ti.focus(); return; }
       if (ctx.busy) return;
@@ -515,8 +564,27 @@
           return;
         }
         out.appendChild(renderProbeResult(res.data || {}));
+        /* 「查看逐跳」进来时，结果出来后直接落到路径表，不多一次滚动 */
+        if (ctx.focusPath) {
+          ctx.focusPath = false;
+          var hop = out.querySelector(".hop-table");
+          if (hop) {
+            try { hop.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) { hop.scrollIntoView(); }
+          }
+        }
       });
-    });
+    }
+
+    go.addEventListener("click", run);
+
+    /* 从结论卡一键复测：地址已经填好，进来就开跑 */
+    var pend = pendingProbe;
+    pendingProbe = null;
+    if (pend && pend.target) {
+      ti.value = pend.target;
+      ctx.focusPath = pend.focus === "path";
+      setTimeout(run, 30);
+    }
   }
 
   function cardWith(content) {
@@ -553,30 +621,11 @@
     var pp = d.path_profile;
     if (pp && pp.hops && pp.hops.length) {
       var pc = R.card(C.tech.path);
-      pc.body.appendChild(hopTable(pp));
+      pc.body.appendChild(R.hopTable(pp));
       box.appendChild(pc.section);
     }
     return box;
   }
 
-  function hopTable(pp) {
-    var tbl = U.el("div", "hop-table");
-    var head = U.el("div", "hop-row hop-head");
-    ((C.tech || {}).hopCols || []).forEach(function (t) { head.appendChild(U.el("span", "", t)); });
-    tbl.appendChild(head);
-    (pp.hops || []).forEach(function (h) {
-      var row = U.el("div", "hop-row");
-      row.appendChild(U.el("span", "mono", String(h.ttl || "")));
-      row.appendChild(U.el("span", "mono", h.ip || "*"));
-      row.appendChild(U.el("span", "mono", (h.sent || 0) + "/" + (h.lost || 0)));
-      row.appendChild(U.el("span", "mono",
-        (h.loss_pct === null || h.loss_pct === undefined) ? "—" : h.loss_pct + "%"));
-      row.appendChild(U.el("span", "mono",
-        isFinite(Number(h.rtt_avg_ms)) ? Number(h.rtt_avg_ms).toFixed(1) + " ms" : "—"));
-      tbl.appendChild(row);
-    });
-    return tbl;
-  }
-
-  ND.modes = { render: render, cleanup: cleanup };
+  ND.modes = { render: render, cleanup: cleanup, retest: retest };
 })(window.ND = window.ND || {});
