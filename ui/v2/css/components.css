@@ -1167,3 +1167,16 @@
   /* 叠成一列后，专业面板与结论之间要有一条分界，否则像是结论的续写 */
   .p-right { border-top: 1px solid var(--line); padding-top: var(--sp-4); }
 }
+
+
+/* ---- 网络参数卡（wifi.js）---- */
+.np-card .card-hd { align-items: center; }
+.np-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: var(--fs-sm); }
+.np-table th, .np-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.np-table th { width: 34%; color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.np-table td { color: var(--text); font-variant-numeric: tabular-nums; }
+.np-table tr:last-child th, .np-table tr:last-child td { border-bottom: 0; }
+.np-table .np-group td { color: var(--text-2); font-weight: 700; background: var(--n-25, #FAFAFC); padding-top: 10px; }
+.np-table td.np-muted { color: var(--text-3); }
+.np-note { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.6; }
+.np-note.np-tip { color: var(--text-3); }

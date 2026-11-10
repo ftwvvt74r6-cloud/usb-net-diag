@@ -69,8 +69,11 @@
     var envHost = U.el("div", "home-env");
     view.appendChild(envHost);
 
+    var wifiHost = U.el("div", "home-wifi");
+    view.appendChild(wifiHost);
+
     page = { kpis: kpis, src: src, left: left, right: right, prow: prow,
-             envHost: envHost, foldBtn: fold, envDrawn: false, sig: "" };
+             envHost: envHost, wifiHost: wifiHost, foldBtn: fold, envDrawn: false, sig: "" };
 
     paint(true);
     left.appendChild(skeletonBlock());
@@ -81,6 +84,7 @@
     });
 
     if (!(ND.state.get().checks || []).length) ND.state.loadChecks();
+    if (ND.wifi && ND.wifi.mount) ND.wifi.mount(wifiHost);
 
     ND.state.refreshLastRun().then(function () { ND.state.refreshStatus(); });
   }
