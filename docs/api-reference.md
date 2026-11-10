@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**34** 个（有模块说明 34 个）
-- 公开符号：**323** 个（有 docstring 323 个，合格 321 个）
+- 扫描模块：**35** 个（有模块说明 35 个）
+- 公开符号：**326** 个（有 docstring 326 个，合格 324 个）
 - 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -5402,37 +5402,37 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `static_asset` | function | 105 | ✅ |
-| `ui_entry` | function | 176 | ✅ |
-| `touch` | function | 298 | ✅ |
-| `request_quit` | function | 303 | ✅ |
-| `cleanup_pid` | function | 351 | ✅ |
-| `BodyTooLarge` | class | 361 | ✅ |
-| `doctor_cached` | function | 440 | ✅ |
-| `log` | function | 557 | ✅ |
-| `evidence_payload` | function | 653 | ✅ |
-| `conclusion_report_id` | function | 777 | ✅ |
-| `build_status_conclusion` | function | 808 | ✅ |
-| `start_job` | function | 1234 | ✅ |
-| `report_index` | function | 1295 | ✅ |
-| `request_elevation` | function | 1329 | ✅ |
-| `preflight_payload` | function | 1367 | ✅ |
-| `validate_component_path` | function | 1421 | ✅ |
-| `log_files` | function | 1461 | ✅ |
-| `resolve_log_file` | function | 1519 | ✅ |
-| `engine_info` | function | 1552 | ✅ |
-| `passive_start` | function | 1595 | ✅ |
-| `passive_status` | function | 1630 | ✅ |
-| `link_actions` | function | 1704 | ✅ |
-| `Handler` | class | 1785 | ✅ |
-| `Handler.handle_one_request` | method | 1811 | ✅ |
-| `Handler.log_message` | method | 1863 | ✅ |
-| `Handler.do_GET` | method | 2039 | ✅ |
-| `Handler.do_POST` | method | 2061 | ✅ |
-| `DiagServer` | class | 2443 | ✅ |
-| `DiagServer.handle_error` | method | 2454 | ✅ |
-| `create_server` | function | 2482 | ✅ |
-| `main` | function | 2529 | ✅ |
+| `static_asset` | function | 108 | ✅ |
+| `ui_entry` | function | 179 | ✅ |
+| `touch` | function | 301 | ✅ |
+| `request_quit` | function | 306 | ✅ |
+| `cleanup_pid` | function | 354 | ✅ |
+| `BodyTooLarge` | class | 364 | ✅ |
+| `doctor_cached` | function | 443 | ✅ |
+| `log` | function | 560 | ✅ |
+| `evidence_payload` | function | 656 | ✅ |
+| `conclusion_report_id` | function | 780 | ✅ |
+| `build_status_conclusion` | function | 811 | ✅ |
+| `start_job` | function | 1237 | ✅ |
+| `report_index` | function | 1298 | ✅ |
+| `request_elevation` | function | 1332 | ✅ |
+| `preflight_payload` | function | 1370 | ✅ |
+| `validate_component_path` | function | 1424 | ✅ |
+| `log_files` | function | 1464 | ✅ |
+| `resolve_log_file` | function | 1522 | ✅ |
+| `engine_info` | function | 1555 | ✅ |
+| `passive_start` | function | 1598 | ✅ |
+| `passive_status` | function | 1633 | ✅ |
+| `link_actions` | function | 1707 | ✅ |
+| `Handler` | class | 1788 | ✅ |
+| `Handler.handle_one_request` | method | 1814 | ✅ |
+| `Handler.log_message` | method | 1866 | ✅ |
+| `Handler.do_GET` | method | 2042 | ✅ |
+| `Handler.do_POST` | method | 2064 | ✅ |
+| `DiagServer` | class | 2452 | ✅ |
+| `DiagServer.handle_error` | method | 2463 | ✅ |
+| `create_server` | function | 2491 | ✅ |
+| `main` | function | 2538 | ✅ |
 
 ### `static_asset`
 
@@ -6402,6 +6402,85 @@ Returns:
     str: 形如 ``0.2.0`` 的版本号。文件缺失或不可读（``OSError``）、
     内容为空或只有 UTF-8 BOM 时回退 ``0.0.0``；非 UTF-8 内容触发的
     ``UnicodeDecodeError`` 不在此兜底范围内，会照常抛出。
+```
+
+## `core/wlan.py`
+
+**职责**：无线链路与主机网络参数采集（``GET /api/wifi`` 的数据源）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `parse_netsh_interfaces` | function | 81 | ✅ |
+| `collect` | function | 198 | ✅ |
+| `snapshot` | function | 240 | ✅ |
+
+### `parse_netsh_interfaces`
+
+```python
+def parse_netsh_interfaces(text: str) -> dict
+```
+
+```text
+解析 ``netsh wlan show interfaces`` 的输出，返回一份无线链路字典。
+
+Args:
+    text: ``netsh wlan show interfaces`` 的完整输出（中文或英文系统均可）。
+
+Returns:
+    dict: 已知字段按 :data:`_KEYS` 归一化后的字典；解析不到关键字段（如
+    ``SSID``）时返回空字典，由调用方判定为「当前无无线连接/无法解析」。
+
+Raises:
+    无。输入为空串时返回 ``{}``，不抛异常。
+
+Example:
+    >>> parse_netsh_interfaces("    SSID                   : RR\n    Rssi : -54")
+    {'ssid': 'RR', 'rssi_dbm': -54}
+```
+
+### `collect`
+
+```python
+def collect() -> dict
+```
+
+```text
+采集一份完整快照（不做缓存）。
+
+Returns:
+    dict: ``{"ok": bool, "available": bool, "wlan": {...}, "host": {...},
+    "probe": {...}, "external": [...]}``。
+
+    * ``available``：是否有可用的无线连接信息；
+    * ``external``：本机拿不到、需要网络后台（AC）才能补的字段清单，界面直接展示为「需网络后台」。
+
+Example:
+    >>> snap = collect()
+    >>> snap["ok"]
+    True
+```
+
+### `snapshot`
+
+```python
+def snapshot(force: bool=False) -> dict
+```
+
+```text
+带短缓存的快照（界面用）。
+
+Args:
+    force: ``True`` 时忽略缓存立即重采（「刷新参数」按钮用）。
+
+Returns:
+    dict: 同 :func:`collect` 的结构，另含 ``cached``/``age_s`` 便于界面显示数据新鲜度。
+
+Raises:
+    无。采集异常也会返回 ``{"ok": False, "error": "..."}``，不向上抛。
+
+Example:
+    >>> snapshot(force=True)["ok"]
+    True
 ```
 
 ## `mcp/wireshark-mcp/server.py`
