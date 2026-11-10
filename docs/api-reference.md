@@ -6410,9 +6410,9 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `parse_netsh_interfaces` | function | 74 | ✅ |
-| `collect` | function | 191 | ✅ |
-| `snapshot` | function | 233 | ✅ |
+| `parse_netsh_interfaces` | function | 81 | ✅ |
+| `collect` | function | 198 | ✅ |
+| `snapshot` | function | 240 | ✅ |
 
 ### `parse_netsh_interfaces`
 
