@@ -397,6 +397,127 @@
     return tbl;
   }
 
+  /* ------------------------------------------------------------ 明细（折叠） */
+  /* 只有「更深一层」的东西才进来：探针基线、路径剖面、抓包命令与 BPF、统计口径。
+     关键指标表与网络参数表不在这里 —— 它们属于第二/第三段，默认就该看得见。 */
+  function detail(job, model) {
+    var T = C.tech || {};
+    var V = C.verdict || {};
+    var R = C.result || {};
+    var res = (job && job.result) || {};
+    var meta = res.meta || {};
+    var metrics = res.metrics || {};
+    var block = (model && model.block) || {};
+
+    var bd = U.el("div", "ev-bd");
+
+    /* 依据 / 覆盖 / 未覆盖：口径的来源，不进正文。
+       结论块（后端 /api/status 的 conclusion）没有就退回 verdict 自带的三份清单 —— 真报告
+       的 coverage / not_covered 一直在 verdict 里，写在结论块是后来才加的。 */
+    var vd = res.verdict || {};
+    var grid = U.el("div", "ev-grid");
+    grid.appendChild(evBlock(V.evBasis || R.basis, block.basis || vd.basis));
+    grid.appendChild(evBlock(V.evCoverage || R.coverage, block.coverage || vd.coverage));
+    grid.appendChild(evBlock(V.evNot || R.notCovered, block.not_covered || vd.not_covered));
+    bd.appendChild(grid);
+
+    var conf = U.el("p", "ev-conf");
+    conf.appendChild(U.el("b", "", (V.evConf || R.confidence || "") + "："));
+    conf.appendChild(document.createTextNode(model ? model.confidence : ""));
+    if (block.key_limit) {
+      conf.appendChild(document.createTextNode("　·　"));
+      conf.appendChild(U.el("b", "", (V.boundaryFull || "") + "："));
+      conf.appendChild(document.createTextNode(String(block.key_limit)));
+    }
+    bd.appendChild(conf);
+
+    /* 后端原文：① 用的是规范表述，这里保留原句以便追溯 */
+    if (res.verdict && res.verdict.plain) {
+      var op = U.el("div", "dt-blk");
+      op.appendChild(U.el("h4", "ev-h", (C.report || {}).originTitle || ""));
+      op.appendChild(U.el("p", "dt-quote", String(res.verdict.plain)));
+      bd.appendChild(op);
+    }
+
+    /* 探针基线 */
+    var pb = meta.probe_baseline;
+    var pbBox = U.el("div", "ev-sec");
+    pbBox.appendChild(U.el("h4", "ev-h", V.evProbe || ""));
+    pbBox.appendChild(pb ? probeBaseline(pb) : U.el("p", "muted", (C.panel || {}).exProbeNone || ""));
+    bd.appendChild(pbBox);
+
+    /* 路径剖面 */
+    var pp = meta.path_profile;
+    var ppBox = U.el("div", "ev-sec");
+    ppBox.appendChild(U.el("h4", "ev-h", V.evPath || ""));
+    ppBox.appendChild(pp && (pp.hops || []).length
+      ? hopTable(pp)
+      : U.el("p", "muted", (C.panel || {}).noData || "—"));
+    bd.appendChild(ppBox);
+
+    /* 抓包命令与 BPF */
+    var cmd = captureCommand(meta);
+    var cb = U.el("div", "dt-blk");
+    cb.appendChild(U.el("h4", "ev-h", (C.report || {}).captureTitle || T.command || ""));
+    if (cmd) {
+      cb.appendChild(U.el("pre", "mono tech-pre", cmd));
+      cb.appendChild(U.el("p", "tech-note", T.commandNote));
+    } else {
+      cb.appendChild(U.el("p", "muted", T.commandTodo));
+    }
+    cb.appendChild(kv([
+      [T.iface, shown(meta.interface)],
+      [T.bpf, shown(asciiText(meta.bpf))],
+      [T.window, meta.capture_duration ? meta.capture_duration + (C.unit || {}).sec : shown("")],
+      [T.pcap, shown(meta.pcap_file)]
+    ], { cols: 2 }));
+    bd.appendChild(cb);
+
+    /* 统计口径 */
+    var samples = [
+      "RTT " + num(metrics.rtt_samples),
+      "握手 " + num(metrics.hs_samples),
+      "DNS " + num(metrics.dns_samples),
+      "HTTP " + num(metrics.http_samples)
+    ].join(" · ");
+    var sc = U.el("div", "dt-blk");
+    sc.appendChild(U.el("h4", "ev-h", (C.report || {}).scaleTitle || T.stats || ""));
+    sc.appendChild(kv([
+      [T.statsPackets, num(meta.packets) + " / " + num(meta.streams_total)],
+      [T.statsSamples, samples],
+      [T.statsProbe.split("：")[0], probeLine(pb)]
+    ], { cols: 1 }));
+    bd.appendChild(sc);
+
+    /* 每网卡探测与阶段耗时：后端还没下发，如实写待补 */
+    var ifb = U.el("div", "dt-blk");
+    ifb.appendChild(U.el("h4", "ev-h", T.ifaces || ""));
+    var probes = (job && job.interfaces_probe) || meta.interfaces_probe;
+    if (probes && probes.length) {
+      ifb.appendChild(list(probes.map(function (p, i) {
+        return U.tpl(T.ifaceRow, { n: p.index || (i + 1), name: p.name || p.iface || "" });
+      }), "tech-list"));
+    } else {
+      ifb.appendChild(U.el("p", "tech-todo", T.ifacesTodo));
+    }
+    bd.appendChild(ifb);
+
+    var tb = U.el("div", "dt-blk");
+    tb.appendChild(U.el("h4", "ev-h", T.timing || ""));
+    tb.appendChild(U.el("p", "tech-todo", T.timingTodo));
+    bd.appendChild(tb);
+
+    return bd;
+  }
+
+  function evBlock(heading, items) {
+    var box = U.el("div", "ev-blk");
+    box.appendChild(U.el("h4", "ev-h", heading || ""));
+    if (items && items.length) box.appendChild(list(items, "ev-list"));
+    else box.appendChild(U.el("p", "muted", (C.tech || {}).valueEmpty || "—"));
+    return box;
+  }
+
   function num(v, digits) {
     var n = U.num(v, digits === undefined ? 0 : digits);
     return n === null ? "—" : n;
@@ -453,6 +574,7 @@
     evidence: evidence,
     advice: advice,
     techDetails: techDetails,
+    detail: detail,
     probeBaseline: probeBaseline,
     hopTable: hopTable,
     saveText: saveText,
