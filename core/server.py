@@ -181,7 +181,7 @@ def ui_entry(parsed, cookie: str | None) -> str:
     1. ``?ui=v1|v2`` 查询参数；
     2. Cookie ``nd_ui``（上次 ``?ui=`` 回写的选择）；
     3. ``config/ui-version.json`` 的 ``.default``；
-    4. 内置 ``"v1"``。
+    4. 内置 ``"v2"``（2026-11 起默认新界面；``?ui=v1`` 可切回旧界面）。
 
     这是纯函数：只做字符串判断，不碰文件、不抛异常、不读全局 —— 方便单测。
 
@@ -206,7 +206,7 @@ def ui_entry(parsed, cookie: str | None) -> str:
                 return default
     except (OSError, ValueError):
         pass
-    return "v1"
+    return "v2"
 
 
 def _parse_ui_cookie(headers) -> str | None:

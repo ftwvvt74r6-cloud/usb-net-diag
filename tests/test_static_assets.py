@@ -101,8 +101,9 @@ class StaticAssetRouteTest(unittest.TestCase):
                          "必须显式给 application/javascript：text/plain 会被浏览器拒执行")
         self.assertEqual(body, JS_BODY)
 
-    def test_index_still_served_from_ui_dir(self):
-        status, ctype, body = self._get("/")
+    def test_v1_index_still_served_from_ui_dir(self):
+        """?ui=v1 时 / 仍由入口路由返回 ui/index.html（静态路由不劫持入口页）。"""
+        status, ctype, body = self._get("/?ui=v1")
         self.assertEqual(status, 200)
         self.assertEqual(ctype, "text/html; charset=utf-8")
         self.assertIn(b"stub", body)
