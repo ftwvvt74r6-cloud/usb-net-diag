@@ -11,6 +11,8 @@
 (function (ND) {
   "use strict";
 
+  var U = ND.ui;
+
   var C = {
     title: "网络参数",
     sub: "本机可采集的关键链路参数（对标无线控制器后台字段）",
@@ -67,32 +69,32 @@
 
   function draw() {
     if (!host) return;
-    ND.U.clear(host);
-    var card = ND.U.el("section", "card np-card");
-    var hd = ND.U.el("div", "card-hd");
-    hd.appendChild(ND.U.el("h2", "", C.title));
-    hd.appendChild(ND.U.el("span", "card-sub", C.sub));
-    var btn = ND.U.btn(C.refresh, { kind: "ghost", size: "sm", onClick: function () { load(true); } });
+    U.clear(host);
+    var card = U.el("section", "card np-card");
+    var hd = U.el("div", "card-hd");
+    hd.appendChild(U.el("h2", "", C.title));
+    hd.appendChild(U.el("span", "card-sub", C.sub));
+    var btn = U.btn(C.refresh, { kind: "ghost", size: "sm", onClick: function () { load(true); } });
     hd.appendChild(btn);
     card.appendChild(hd);
 
     if (loading) {
-      card.appendChild(ND.U.el("p", "np-note", "正在读取…"));
+      card.appendChild(U.el("p", "np-note", "正在读取…"));
       host.appendChild(card);
       return;
     }
     if (!data || !data.ok) {
-      card.appendChild(ND.U.el("p", "np-note", C.fail + (data && data.error ? "：" + data.error : "")));
+      card.appendChild(U.el("p", "np-note", C.fail + (data && data.error ? "：" + data.error : "")));
       host.appendChild(card);
       return;
     }
     if (!data.available) {
-      card.appendChild(ND.U.el("p", "np-note", C.empty));
+      card.appendChild(U.el("p", "np-note", C.empty));
       host.appendChild(card);
       return;
     }
 
-    var table = ND.U.el("table", "np-table");
+    var table = U.el("table", "np-table");
     var w = data.wlan || {};
     var h = data.host || {};
     var pr = data.probe || {};
@@ -129,9 +131,9 @@
     }
     card.appendChild(table);
 
-    var note = ND.U.el("p", "np-note", C.source + "。" + C.estTip);
+    var note = U.el("p", "np-note", C.source + "。" + C.estTip);
     card.appendChild(note);
-    var note2 = ND.U.el("p", "np-note np-tip", C.externalTip);
+    var note2 = U.el("p", "np-note np-tip", C.externalTip);
     card.appendChild(note2);
     host.appendChild(card);
   }
@@ -139,8 +141,12 @@
   function load(force) {
     loading = true;
     draw();
+    // ND.api.get 统一 resolve 成 {ok,status,data,error} 信封，这里取 data 本体。
     ND.api.get("/api/wifi" + (force ? "?force=1" : ""))
-      .then(function (d) { data = d; })
+      .then(function (res) {
+        if (res && res.ok && res.data) data = res.data;
+        else data = { ok: false, error: (res && res.error) || "" };
+      })
       .catch(function () { data = { ok: false }; })
       .then(function () { loading = false; draw(); });
   }
