@@ -81,12 +81,23 @@ INSUFFICIENT_REASON = "no_decidable_dimension"
 #: 落盘报告里 tshark 路径的占位：绝对路径是机器相关键，换机器重跑会产生脏 diff。
 TSHARK_PATH_PLACEHOLDER = "<TSHARK_PATH>"
 
-#: 分析抓包文件（``run_scan --pcap``）时写进 ``meta.bpf`` 的模式标记。
-#: 它同时会显示在报告的「网卡 / 过滤器」一行，所以必须是用户可见的新模式名。
+#: 分析抓包文件（``run_scan --pcap``）时的**展示用**模式名。
+#: R6-5 起 ``meta.bpf`` 在离线分析时置空串（模式信息改由 ``meta.capture_mode``
+#: 承载）；这个常量只剩两个用途：① 渲染 md / 判定文案时的展示回落，
+#: ② 兼容历史报告里 ``meta.bpf`` 存过这个值的旧数据。
 OFFLINE_BPF = "分析抓包文件"
 
 #: 旧版写进报告的模式标记；只用于兼容历史报告 / 旧调用方，不再新写。
 _OFFLINE_BPF_LEGACY = "离线分析"
+
+#: ``meta.capture_mode`` 的取值：本机实时抓包。
+CAPTURE_MODE_LIVE = "live"
+#: ``meta.capture_mode`` 的取值：分析已保存的抓包文件（离线）。
+CAPTURE_MODE_OFFLINE = "offline"
+#: ``meta.capture_mode`` 的取值：通信观察（被动监听）。
+CAPTURE_MODE_PASSIVE = "passive"
+#: ``meta.capture_mode`` 的全部合法取值（供测试 / 文档枚举，顺序固定）。
+CAPTURE_MODES = (CAPTURE_MODE_LIVE, CAPTURE_MODE_OFFLINE, CAPTURE_MODE_PASSIVE)
 
 # 排查顺序：自下而上。同严重度时，越底层越优先（先查链路再查应用）
 LAYER_RANK = {"L2 本地链路": 0, "L3 网络层": 1, "L4 传输层": 2, "L7 应用层": 3, "安全观察": 9}
@@ -418,12 +429,50 @@ def _load_copy() -> dict:
 
 
 def _is_offline(meta: dict) -> bool:
-    """分析抓包文件标记：``run_scan`` 走 ``--pcap`` 路径时把 bpf 写成 :data:`OFFLINE_BPF`。
+    """这次分析是不是「分析抓包文件」（离线）：判据只看 ``meta.capture_mode``。
 
-    旧报告 / 旧调用方写的是「离线分析」；两个都认，避免历史数据被当成在线抓包，
-    给出「换一块网卡再抓」这种做不到的建议。
+    R6-5 之前这个判据是 ``meta.bpf == "分析抓包文件"`` —— 把模式信息塞进了
+    「过滤器」字段。那既让 ``bpf`` 失真（离线时用户并没有设置任何 BPF），
+    又逼着每个消费方去猜「哪些取值是模式文案、哪些是真正的过滤器」。
+    现在模式有独立的 ``meta.capture_mode``，判定只认它。
+
+    历史数据仍兼容：``capture_mode`` 缺失时回落到旧的 ``bpf`` 取值，
+    否则旧报告会被当成在线抓包，给出「换一块网卡再抓」这种做不到的建议。
+
+    Args:
+        meta: 采集元信息。
+
+    Returns:
+        bool: True 表示本次是分析已保存的抓包文件。
     """
+    mode = str(meta.get("capture_mode") or "").strip()
+    if mode:
+        return mode == CAPTURE_MODE_OFFLINE
     return meta.get("bpf") in (OFFLINE_BPF, _OFFLINE_BPF_LEGACY)
+
+
+def display_capture_fields(meta: dict) -> tuple[str, str]:
+    """「网卡 / 过滤器」的**展示**文案（md / AI prompt 用），与契约字段分开。
+
+    契约层（``result["meta"]``）在离线分析时把 ``interface`` / ``bpf`` 置为空串
+    —— 空串就是「本模式不适用」，UI 不必再猜。但人读的 Markdown 里留一片空白
+    更糟，所以展示层统一回落：
+
+    * 网卡为空 → ``-``（沿用原有占位）；
+    * 过滤器为空且这次是离线分析 → 仍显示模式名（``分析抓包文件``），
+      读报告的人一眼能看出「不是没抓到过滤器，是这次根本没抓包」。
+
+    Args:
+        meta: 采集元信息（``interface`` / ``bpf`` / ``capture_mode``）。
+
+    Returns:
+        tuple[str, str]: ``(网卡文案, 过滤器文案)``，都不会是空串。
+    """
+    iface = str(meta.get("interface") or "").strip() or "-"
+    bpf = str(meta.get("bpf") or "").strip()
+    if not bpf:
+        bpf = OFFLINE_BPF if _is_offline(meta) else "-"
+    return iface, bpf
 
 
 def _insufficient_steps(meta: dict) -> list[str]:
@@ -657,6 +706,8 @@ def build(result: dict) -> dict:
     rows = result.get("rows") or []
     m = result.get("metrics") or {}
     packets = int(meta.get("packets") or 0)
+    # 展示文案统一走 helper：契约字段在离线时是空串，这里回落成可读占位。
+    iface_text, bpf_text = display_capture_fields(meta)
 
     # ---------- 抓空包：先别下结论 ----------
     if packets == 0:
@@ -673,7 +724,7 @@ def build(result: dict) -> dict:
                 "title": _t("verdict.plain", "collect_empty_title"),
                 "plain": _t("verdict.plain", "collect_empty_plain"),
                 "proof": _t("verdict.plain", "collect_empty_proof",
-                            iface=meta.get("interface", "-"), bpf=meta.get("bpf", "-")),
+                            iface=iface_text, bpf=bpf_text),
                 "action": _t("verdict.plain", "collect_empty_action"),
             }],
             "next_steps": [_t("next_step", "collect_again")],

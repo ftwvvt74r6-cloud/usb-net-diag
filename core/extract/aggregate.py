@@ -323,7 +323,9 @@ def build_features(rows: Sequence[Mapping[str, Any]],
         duration = float(stats["duration"])
 
     capture = CaptureMeta(
-        mode=str(meta.get("mode") or "offline"),
+        # R6-5 起模式由 ``meta.capture_mode`` 承载；``meta.mode`` 是历史/外部调用方
+        # 可能传的旧键，保留兜底；两者都没有时按离线处理（extract 的入口就是分析 pcap）。
+        mode=str(meta.get("capture_mode") or meta.get("mode") or "offline"),
         pcap_file=str(meta.get("pcap_file") or ""),
         pcap_name=str(meta.get("pcap_name") or ""),
         packets=len(rows),

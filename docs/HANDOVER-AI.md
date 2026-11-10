@@ -331,6 +331,12 @@ core/diagnose.py --pcap x.pcap --json
    md 第一节追加「结论与边界」块、取证单前重复同一块，json 的 verdict 块新增
    `confidence/basis/coverage/not_covered` 四键（删除四键后与基线逐字节相等）。
    E2 只改 UI / MCP / 文档，**没有新的报告结构变化**；20/20 复核仍成立。
+   **v0.3.3（R6-5）声明例外**：仅 `reports/faults_demo.json` 的 `meta` 三个键
+   —— `interface: "-"` → `""`、`bpf: "分析抓包文件"` → `""`、新增
+   `capture_mode: "offline"`（契约见 `docs/data-contract.md`）。同一份输出的
+   `faults_demo.md` 与 9 个样本的 18 个文件**逐字节不变**（md 的展示层把空串
+   回落成 `-` / 模式名）；9 个样本的 json 会跟着出现同样三键差异 —— 因为
+   `--pcap` 一律是离线分析，这是修根后的必然结果，不是行为漂移。
    重生成必须用 CLI 真跑并把 `generated_at` 归一化回基线值；测试/实验用
    `--report-out` 或临时目录，不要写仓库 `reports/`。
 3. **测试只增不减**：当前 **955 条**（v0.3.1 基线 722；F/G +168、H +65；只增不减）；修 bug 不许删断言/放宽，新增行为必须有命中 + 不命中用例。
@@ -577,6 +583,7 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/api-reference.md` | 自动生成的公开符号与签名 | ✅ 自动生成，禁止手改 |
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
 | `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 33 模块/314 符号 |
+| `docs/data-contract.md` | 结果数据契约：顶层五块 / `meta` 采集字段（`capture_mode` / `interface` / `bpf`）/ `dns_truncated` / API 加法字段 `l7_packets` / 展示与契约的分界 | ✅ 当前（R6-5 + R8-1 + R8-2） |
 | `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（v0.3.2 lite 实测 187 文件 / 1,199,811 B / 解压后 3,301,772 B；v0.3.1 历史值另列） |
 | `docs/release-v0.3.2.md` | v0.3.2 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 当前（已发布） |
 | `docs/release-v0.3.1.md` | v0.3.1 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 历史（v0.3.1） |

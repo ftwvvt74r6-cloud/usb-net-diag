@@ -2161,7 +2161,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/last-run":
             # 加法接口（G5）：页面加载 / bfcache 还原 / 分析完成后都来问一次。
             # 没有记录时 last=null（前端必须不渲染提示条，不能误报）。
-            return self._json({"ok": True, "last": _last_run_view(),
+            view = _last_run_view()
+            if isinstance(view, dict):
+                # R8-1：按报文数的 L7 分布是**加法字段**，只随 API 下发，不落报告。
+                # 摘要本身不存这份数据（内存里只有完整结果有），所以在这里补；
+                # 进程重启后走 runs/ 历史兜底时没有完整结果 → 该键自然缺省。
+                with LOCK:
+                    l7 = (LAST_RUN.get("result") or {}).get("l7_packets")
+                if isinstance(l7, dict):
+                    view["l7_packets"] = l7
+            return self._json({"ok": True, "last": view,
                                "ui_copy": {"last_run": _last_run_ui_copy()}})
         if path == "/api/last-run/result":
             # 完整结果只在内存里；进程重启 / 用户点过「开始新任务」后返回 404 JSON，

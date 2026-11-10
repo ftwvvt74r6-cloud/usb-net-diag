@@ -393,6 +393,9 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     summary = result.get("summary", {})
     target = summary.get("target", _t("all_network"))
 
+    # 契约层在离线分析时把 interface / bpf 置空串（R6-5）；人读的 md 不能留空白，
+    # 统一走展示回落：网卡 ``-``，过滤器回落到模式名（见 verdict.display_capture_fields）。
+    iface_text, bpf_text = verdict_mod.display_capture_fields(meta)
     L: list[str] = [
         _t("doc_title"),
         "",
@@ -400,7 +403,7 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
         _t("duration_line", duration=meta.get("duration", 0), packets=meta.get("packets", 0),
            streams=meta.get("streams_total", 0)),
         _t("generated_line", generated=meta.get("generated_at", ""),
-           iface=meta.get("interface", "-")),
+           iface=iface_text),
         "",
         _t("reading_order"),
         _t("layer_order"),
@@ -573,7 +576,7 @@ def render_markdown(result: dict, vd: dict | None = None) -> str:
     L += [_t("section_tech"), "", _t("h_overview"), ""]
     L.append(_table([_t("th_item"), _t("th_val")], [
         [_t("tech_pcap"), meta.get("pcap_name", "")],
-        [_t("tech_iface"), f"{meta.get('interface', '-')} / {meta.get('bpf', '-')}"],
+        [_t("tech_iface"), f"{iface_text} / {bpf_text}"],
         [_t("tech_bytes"), f"{meta.get('packets', 0)} / {meta.get('bytes', 0)}"],
         [_t("tech_duration"), _t("tech_duration_value", seconds=meta.get("duration", 0))],
         [_t("tech_tcp"), f"{meta.get('tcp_packets', 0)} / {meta.get('tcp_data_packets', 0)}"],

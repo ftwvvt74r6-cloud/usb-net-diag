@@ -774,6 +774,75 @@ def collect(pcap: Path, log=None,
 
 # ---------------------------------------------------------------- 派生指标
 
+#: L7 应用分布的分桶映射（``app`` → 桶 key）。
+#: 桶集合刻意与前端「应用层分布」保持一致：前端从 ``meta.streams_top`` 数**会话数**，
+#: 这里数**报文数**，同一组桶才能逐项对比「一个流很重」与「很多流很轻」的差异。
+_L7_BUCKETS = (("TLS", "tls"), ("HTTP", "http"))
+
+
+def _l7_packets(st: dict) -> dict:
+    """按**报文数**统计 L7 应用分布（R8-1），与前端「按会话数」的口径并存。
+
+    为什么要有第二套口径：会话数看不出流量结构。10 个 TLS 小流（各 2 包）+ 1 个
+    HTTP 大流（2000 包）按会话数是「TLS 91%」，按报文数才是「HTTP 99%」——
+    后者才是链路上真正占了带宽的那个。两者都保留，让 UI 按场景选。
+
+    统计范围是 **TCP 会话的报文**（``st["streams"]``）：DNS/UDP 不进流表，
+    因此不在分母里；这一点与前端按会话数的实现完全相同，不会造成两套口径互不可比。
+
+    Args:
+        st: 流聚合状态（``st["streams"]`` 为 ``{stream_id: 流字典}``，每项含
+            ``app`` 与 ``packets``）。
+
+    Returns:
+        dict: ``{"basis": "packets", "total_packets": int, "buckets": [...],
+            "complete": True}``；``buckets`` 每项 ``{"key", "packets", "pct"}``，
+            key 取 ``tls`` / ``http`` / ``other``，三者之和恒等于 ``total_packets``。
+            没有可统计报文时 ``total_packets`` 为 0、各桶 ``pct`` 为 0.0。
+    """
+    counts = {"tls": 0, "http": 0, "other": 0}
+    app_to_key = dict(_L7_BUCKETS)
+    total = 0
+    for s in st["streams"].values():
+        n = int(s.get("packets") or 0)
+        if n <= 0:
+            continue
+        total += n
+        key = app_to_key.get(str(s.get("app") or "").upper(), "other")
+        counts[key] += n
+    buckets = [{"key": key, "packets": counts[key],
+                "pct": round(_pct(counts[key], total), 1)}
+               for _, key in _L7_BUCKETS]
+    buckets.append({"key": "other", "packets": counts["other"],
+                    "pct": round(_pct(counts["other"], total), 1)})
+    return {"basis": "packets", "total_packets": total,
+            "buckets": buckets, "complete": True}
+
+
+def _mark_dns_truncated(meta: dict) -> bool:
+    """R8-2：``dns_resp`` 反超 ``dns_total`` 时给 meta 打 ``dns_truncated`` 标记。
+
+    正常情况下 DNS 一问一答，``dns_resp`` 不会大于 ``dns_total``。反超只有两种来源：
+    抓包在中途被截断（查询与响应的统计窗口不一致），或响应包被重复计数。此时下游
+    若直接算「失败率 = 1 - 响应/查询」会得到负数、算「响应率」会超过 100%，都是
+    看不出来的错数。这里在源头打标记，让上层明确知道「这两个数不能相除」。
+
+    **只在成立时加键**：未触发时不写这个字段，因此既有报告快照逐字节不变
+    （与 ``probe_baseline`` / ``path_profile`` 的「有数据才注入」同一口径）。
+    消费方读不到该键即视为未触发。
+
+    Args:
+        meta: 分析结果的 ``meta`` 块（会被就地修改）。
+
+    Returns:
+        bool: True 表示命中反超、已打标记；False 表示未触发。
+    """
+    if int(meta.get("dns_resp") or 0) > int(meta.get("dns_total") or 0):
+        meta["dns_truncated"] = True
+        return True
+    return False
+
+
 def _stream_rows(st: dict) -> list[dict]:
     """把流字典整理成可展示的会话明细，按「问题严重度」排序。
 
@@ -1527,6 +1596,16 @@ def analyze(pcap: Path | str, target: str = "", ti_key: str = "", log=None,
         "rows": rows,
         "summary": summary,
     }
+
+    # ---- R8-1：按**报文数**的 L7 应用分布 ----
+    # 放在顶层 ``l7_packets``，**不进 meta**：报告只落 summary/meta/metrics/rows/verdict
+    # 五块，所以它只出现在 /api/status、/api/last-run、/api/last-run/result 的响应里，
+    # 不写进 reports/（与 server.link_actions 的「加法字段」同一口径），快照不受影响。
+    result["l7_packets"] = _l7_packets(st)
+
+    # ---- R8-2：DNS 响应数反超查询数 = 抓包截断 / 重复计数 ----
+    # 抽成函数是为了能单测「反超 / 相等 / 缺键」三种输入，不必真造一个截断的 pcap。
+    _mark_dns_truncated(result["meta"])
 
     # ---- T03：增量产出结构化结论。旧的 rows[] / meta / metrics 一个字都不动 ----
     result["findings_v2"] = _build_findings_v2(rows, log=log)

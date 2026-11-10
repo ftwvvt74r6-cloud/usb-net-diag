@@ -383,8 +383,9 @@
     "threat_intel": {},
     "generated_at": "2026-11-07 21:49:03",
     "tshark_path": "<TSHARK_PATH>",
-    "interface": "-",
-    "bpf": "分析抓包文件",
+    "interface": "",
+    "bpf": "",
+    "capture_mode": "offline",
     "capture_duration": 0
   },
   "metrics": {
