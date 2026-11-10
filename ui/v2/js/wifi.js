@@ -17,15 +17,11 @@
     title: "网络参数",
     sub: "本机可采集的关键链路参数（对标无线控制器后台字段）",
     refresh: "刷新参数",
-    source: "来源：Windows 无线接口(netsh) + 本机 ping + 本地地址",
-    externalTip: "标「需网络后台」的字段本机取不到：请网络工程师在无线控制器(AC)用户详情页查看，或按「取证请求单」向对方索取。",
     estTip: "估计信噪比 = RSSI − 噪声底(-95 dBm)，仅作参考，不是设备实测值。",
     empty: "当前没有可用的无线连接信息（可能是有线连接，或无线接口未连接）。",
     fail: "读取网络参数失败",
     groupWireless: "无线链路",
     groupHost: "主机与网关",
-    groupExternal: "本机取不到（需网络后台）",
-    needAc: "需网络后台",
     labels: {
       state: "连接状态", ssid: "SSID", bssid: "AP MAC", band: "频段", channel: "信道",
       radio: "无线协议", auth: "加密方式", signal: "信号强度", rssi: "RSSI",
@@ -120,21 +116,7 @@
     row(table, C.labels.gwJitter, pr.jitter_ms == null ? null : pr.jitter_ms + " ms");
     row(table, C.labels.gwLoss, pr.loss_pct == null ? null : pr.loss_pct + " %");
 
-    var ext = data.external || [];
-    if (ext.length) {
-      groupRow(table, C.groupExternal);
-      ext.forEach(function (e) {
-        var tr = row(table, e.label, C.needAc);
-        tr.title = e.hint || "";
-        tr.querySelectorAll("td")[0].className = "np-muted";
-      });
-    }
     card.appendChild(table);
-
-    var note = U.el("p", "np-note", C.source + "。" + C.estTip);
-    card.appendChild(note);
-    var note2 = U.el("p", "np-note np-tip", C.externalTip);
-    card.appendChild(note2);
     host.appendChild(card);
   }
 
