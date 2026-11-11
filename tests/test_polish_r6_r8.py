@@ -50,6 +50,22 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+
+def _detect_tshark() -> bool:
+    """本机是否真的有 tshark（CI 没有 → 依赖真分析的用例必须 skip 而不是红）。"""
+    import os
+    import shutil
+    if os.environ.get("TSHARK_PATH"):
+        return Path(os.environ["TSHARK_PATH"]).is_file()
+    if shutil.which("tshark"):
+        return True
+    bundled = ROOT / "tools" / "WiresharkPortable" / "App" / "Wireshark" / "tshark.exe"
+    return bundled.is_file()
+
+
+_HAVE_TSHARK = _detect_tshark()
+_SKIP_REAL = "需要本机 tshark 才能做真实抓包分析（CI 环境无 tshark，应 skip 而非红）"
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
 
@@ -224,6 +240,7 @@ class L7PacketsTest(unittest.TestCase):
         self.assertEqual(got["total_packets"], 5)
 
 
+@unittest.skipUnless(_HAVE_TSHARK, _SKIP_REAL)
 class L7RealAnalysisTest(unittest.TestCase):
     """R8-1 端到端：真实 pcap 的结果里有 l7_packets，但报告 JSON 里没有。"""
 
@@ -248,6 +265,7 @@ class L7RealAnalysisTest(unittest.TestCase):
         self.assertEqual(set(payload), {"summary", "meta", "metrics", "rows", "verdict"})
 
 
+@unittest.skipUnless(_HAVE_TSHARK, _SKIP_REAL)
 class DnsTruncatedTest(unittest.TestCase):
     """R8-2：dns_resp 反超 dns_total 时打标记，其余情况不加键。"""
 
@@ -277,6 +295,7 @@ class DnsTruncatedTest(unittest.TestCase):
                          "demo 样本是一问一答，不该被误判成截断")
 
 
+@unittest.skipUnless(_HAVE_TSHARK, _SKIP_REAL)
 class LastRunL7Test(unittest.TestCase):
     """R8-1：``/api/last-run`` 把 l7_packets 作为加法字段带出去。"""
 
