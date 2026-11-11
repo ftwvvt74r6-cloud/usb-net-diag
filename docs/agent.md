@@ -145,6 +145,26 @@ python core\agent.py --interval 30     :: 写配置，立即返回
 `POST /api/history/mark` 写入，用于在时间轴上标注「这半小时是我在重启路由器」。
 格式见 `docs/data-contract.md`。
 
+### 4.4 怎么读这些数据
+
+不用自己解析 JSONL —— 前台服务（`core/server.py`）已经开了五个只读接口：
+
+| 想干什么 | 接口 |
+|---|---|
+| 画趋势（按 1m / 5m / 1h 分桶） | `GET /api/history?from=&to=&bucket=1m` |
+| 看「什么时候抖过」 | `GET /api/history/events?from=&to=` |
+| 打一个标记 / 看标记 | `POST /api/history/mark` / `GET /api/history/marks` |
+| 拿去 Excel 或贴进周报 | `GET /api/history/export?format=csv|md&from=&to=` |
+
+两点容易踩：
+
+* 接口里的 `series[].t` 是 **epoch 秒**（前端画横轴用），不是 ISO 字符串；
+* 事件类型在接口层叫 `latency` / `jitter` / `loss`，采集侧写的是 `rtt` ——
+  同一个测量，两处叫法不同（`docs/data-contract.md` §7.4）。
+
+样本**不落报告**：报告是「这一次诊断」的快照，历史是「这一周稳不稳」，
+两者混在一份文件里会让报告的结论边界变糊。
+
 ---
 
 ## 5. 保留与滚动

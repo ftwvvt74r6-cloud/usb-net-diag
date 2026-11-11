@@ -19,6 +19,11 @@ API:
   POST /api/selfcheck/path  保存手填组件路径 {key:python|tshark, path}（校验后写 config/paths.json）
   GET  /api/logs            日志列表（logs/ 直属 app/diag/startup）
   GET  /api/log?name=       单个日志正文（&lines=N 取尾部 N 行，&download=1 下附件）
+  GET  /api/history         历史样本聚合（?from&to&bucket=1m|5m|1h → series/marks/coverage）
+  GET  /api/history/events  历史事件列表（?from&to）
+  GET  /api/history/marks   人工标记列表（?from&to）
+  POST /api/history/mark    追加一条人工标记 {note}
+  GET  /api/history/export  导出历史（?format=csv|md&from&to）
   GET  /api/last-run        上次运行摘要（内存优先；进程重启后用 runs/ 历史兜底）
   GET  /api/last-run/result 上次运行的完整结果（只在内存里；没有时返回 404 JSON）
   POST /api/last-run/clear  清空内存里的上次结果（runs/ 历史记录保留）
@@ -76,6 +81,7 @@ import copytext  # noqa: E402
 import diagnose  # noqa: E402
 import diagpack  # noqa: E402
 import evidence  # noqa: E402
+import history  # noqa: E402  常驻 agent 的历史样本（GET /api/history*）
 import logstore  # noqa: E402
 import passive  # noqa: E402
 import pathprobe  # noqa: E402
@@ -896,11 +902,16 @@ def _last_run_target(mode: str, target: str, pcap: str | None) -> str:
         pcap: 离线模式选中的抓包文件（只取文件名，不写绝对路径）。
 
     Returns:
-        str: 目标文本；全网体检返回空串，由界面按 copy 表回退成「全网」。
+        str: 目标文本。**永不为空串**：全网体检回「全网」字符串 —— 接口里给空串
+        会让「目标」一栏在导出报告 / 提示条上变成空白，而空白既可能是「全网」
+        也可能是「界面没拿到数据」，读的人分不清。离线模式且没填目标时退回
+        抓包文件名（那是这次分析真正的输入）。
     """
     text = (target or "").strip()
     if not text and mode == "offline" and pcap:
         text = Path(str(pcap)).name
+    if not text:
+        text = copytext.text("common", "all_network")
     return text
 
 
@@ -1010,6 +1021,9 @@ def _last_run_from_runs(limit: int = 50) -> dict | None:
         target = str(params.get("target") or "").strip()
         if not target and mode == "offline":
             target = str(params.get("pcap") or "").strip()
+        if not target:
+            # 与 _last_run_target 同口径：接口里不给空串，全网体检写「全网」。
+            target = copytext.text("common", "all_network")
         epoch = _mtime(path)
         # 旧记录兼容：没有 schema 版本字段的历史记录标记 legacy，前端据此只显示
         # 「旧版本结果」横幅、禁用导出，而不是渲染四层「未知」卡。
@@ -2084,6 +2098,59 @@ class Handler(BaseHTTPRequestHandler):
             # 兜底：任何没读完 body 的返回路径都不许把残留字节留给下一条请求。
             self._discard_body()
 
+    def _route_history(self, parsed) -> None:
+        """``/api/history*`` 的参数解析与响应封装（数据层在 :mod:`core.history`）。
+
+        路由只用 ``==`` 精确匹配（``/api/history`` 与 ``/api/history/events`` 互不
+        前缀吞并），最后一段不是已知子路径时一律 404 —— 不猜、不回落到总览。
+
+        Args:
+            parsed: ``urllib.parse.urlparse`` 的请求结果（用 ``path`` / ``query``）。
+
+        Returns:
+            None: 直接写响应。
+
+            Note:
+            时间参数非法（格式错、``from`` 晚于 ``to``、``bucket`` 不在三档内）
+            回 400 并写明原因：这三种都是调用方写错了，静默回落到默认区间会让
+            「为什么查不到数据」变成一个排查不完的问题。
+        """
+        query = urllib.parse.parse_qs(parsed.query)
+
+        def arg(name: str, default=None):
+            values = query.get(name)
+            return values[0] if values else default
+
+        sub = parsed.path[len("/api/history"):].strip("/")
+        try:
+            if not sub:
+                return self._json(history.build_history(
+                    arg("from"), arg("to"), arg("bucket"), arg("target")))
+            if sub == "events":
+                start, end = history.parse_range(arg("from"), arg("to"))
+                events = [history.event_view(item)
+                          for item in history.read_events(start, end)]
+                return self._json({"ok": True, "from": history.iso(start),
+                                   "to": history.iso(end),
+                                   "count": len(events), "events": events})
+            if sub == "marks":
+                start, end = history.parse_range(arg("from"), arg("to"))
+                marks = [history.mark_view(item)
+                         for item in history.read_marks(start, end)]
+                return self._json({"ok": True, "from": history.iso(start),
+                                   "to": history.iso(end),
+                                   "count": len(marks), "marks": marks})
+            if sub == "export":
+                body, ctype, name = history.export_document(
+                    arg("format", "csv"), arg("from"), arg("to"))
+                extra = (("Content-Disposition",
+                          f'attachment; filename="{name}"'),)
+                return self._send(200, body.encode("utf-8"), ctype, extra)
+        except ValueError as exc:
+            return self._json({"ok": False, "error": str(exc)}, 400)
+        self._discard_body()
+        return self._send(404, b"not found", "text/plain; charset=utf-8")
+
     def _route_get(self):
         touch()
         if not self._guard():
@@ -2280,6 +2347,10 @@ class Handler(BaseHTTPRequestHandler):
                                "text": data.decode("utf-8", "replace"),
                                "size": size, "truncated": truncated,
                                "lines": want_lines})
+        if path == "/api/history" or path.startswith("/api/history/"):
+            # 常驻 agent 的历史样本：只读 logs/history 下的分片，不写文件、不联网。
+            # 五个子接口共用一套时间解析（见 _route_history），gaps 显式下发。
+            return self._route_history(parsed)
         if path == "/api/passive":
             return self._json(passive_status())
         if path == "/api/ai":
@@ -2391,6 +2462,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_probe_guarded(target, port, count, timeout,
                                              payload.get("proto") or None,
                                              path=want_path))
+        if parsed.path == "/api/history/mark":
+            # 人工标记：给时间轴打一个「15:20 换过 AP」之类的注记。
+            # 只追加一行到 logs/history/marks.jsonl，不碰样本、不改判定。
+            payload = self._read_json()
+            try:
+                mark = history.add_mark(str(payload.get("note") or ""))
+            except ValueError as exc:
+                return self._json({"ok": False, "error": str(exc)}, 400)
+            except OSError as exc:
+                # U 盘只读 / 文件被占用：如实回错，前端据此提示「标记没存下」，
+                # 绝不假装成功（下次查 marks 对不上会变成另一个谜）。
+                return self._json({"ok": False, "error": f"写入标记失败：{exc}"}, 500)
+            log(f"历史标记已记录：{mark['t']} {mark['note']}")
+            # 契约：``t`` 是**带时区的 ISO 文本**（前端只判断 ok，不做数值运算）；
+            # 列表接口里的 ``t`` 才是 epoch 秒 —— 两处的用途不同，别混。
+            return self._json({"ok": True, "t": mark["t"],
+                               "epoch": mark["epoch"], "mark": mark})
         if parsed.path == "/api/scan":
             payload = self._read_json()
             return self._json(start_job(payload))
