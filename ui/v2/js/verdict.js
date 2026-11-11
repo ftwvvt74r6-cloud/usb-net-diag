@@ -313,32 +313,15 @@
   }
 
   /* ------------------------------------------------------------ 摘要文本 */
-  function summaryText(model) {
-    var L = [];
-    L.push(tpl(V.summaryTitle) + model.title + "：" + model.problem);
-    var basis = (model.block && model.block.basis) || [];
-    if (basis.length) {
-      L.push(tpl(V.summaryBasis));
-      basis.slice(0, 3).forEach(function (x) { if (x) L.push("- " + x); });
-    }
-    var own = model.owner && model.owner.key ? model.owner : null;
-    if (own) {
-      var cell = null;
-      own.cells.forEach(function (c) { if (c.on) cell = c; });
-      if (cell) {
-        L.push(tpl(V.summaryOwner) + cell.label + "：" + cell.basis);
-        L.push(tpl(V.summaryAsk) + cell.partner);
-      }
-    }
-    /* 摘要也带边界：不给「结论说得很满、边界被剪掉」的版本流出去 */
-    if (model.boundary) L.push(tpl(V.summaryScope) + model.boundary);
-    var rid = model.reportId;
-    if (rid) L.push(tpl(V.summaryReport) + rid);
-    return L.join("\n");
-  }
-
+  /* 「复制给协作方」= 完整报告（结论 · 指标 · 证据 · 数据 · 上下文），
+     不是结论摘要：只给结论的版本没法复核。模型里带着 job，这里直接交给构建器。 */
   function copySummary(model) {
-    var text = model.summary || summaryText(model);
+    if (ND.reporter && model && model.job) {
+      ND.reporter.copy(model.job);
+      return;
+    }
+    /* 构建器缺失（理论上不会）：至少把结论与边界复制出去，不给空剪贴板 */
+    var text = [model.title + "：" + model.problem, V.summaryScope + (model.boundary || "")].join("\n");
     U.copyText(text).then(function (ok) {
       U.toast(ok ? (V.copySummaryOk || "") : (V.copySummaryFail || ""), ok ? "ok" : "crit");
     });
@@ -405,6 +388,9 @@
       steps: stepsOf(meta, lay, kind),
       owner: owner,
       reportId: res.report_id || (job && job.report_id) || "",
+      /* 导出/复制要整份 job（result + mode + epoch + link_actions），
+         模型里留个引用，按钮就不必再回传参数 */
+      job: job,
       summary: ""
     };
   }
@@ -529,22 +515,30 @@
     return sec;
   }
 
-  /* 页脚：复制 / 导出（始终可见，不进折叠） */
+  /* 页脚：复制 / 导出（始终可见，不进折叠）。
+     正文由 reporter.js 统一生成 —— 结论、指标、证据、数据、上下文一份文件全带，
+     只给「结论与边界」两段的版本不再产出。 */
   function footer(job, model) {
     var R = C.result || {};
     var ft = U.el("div", "v-ft");
     var ui = (job && job.ui_copy && job.ui_copy.conclusion) || {};
     ft.appendChild(U.btn(ui.btn_copy || R.copy || "", {
       kind: "ghost", size: "sm", icon: "copy",
-      onClick: function () { ND.render.copyConclusion(job); }
+      onClick: function () { copySummary(model); }
     }));
     ft.appendChild(U.btn(ui.btn_export_md || R.exportMd || "", {
       kind: "ghost", size: "sm", icon: "download",
-      onClick: function () { ND.render.saveText(ND.render.reportName(job, "md"), ND.render.textOf(job, "md")); }
+      onClick: function () {
+        if (ND.reporter) ND.reporter.download(job, "md");
+        else ND.render.saveText(ND.render.reportName(job, "md"), ND.render.textOf(job, "md"));
+      }
     }));
     ft.appendChild(U.btn(ui.btn_export_json || R.exportJson || "", {
       kind: "ghost", size: "sm", icon: "download",
-      onClick: function () { ND.render.saveText(ND.render.reportName(job, "json"), ND.render.textOf(job, "json")); }
+      onClick: function () {
+        if (ND.reporter) ND.reporter.download(job, "json");
+        else ND.render.saveText(ND.render.reportName(job, "json"), ND.render.textOf(job, "json"));
+      }
     }));
     if (model.reportId) ft.appendChild(U.el("span", "v-id mono", tpl(R.reportId, { id: model.reportId })));
     return ft;
@@ -564,7 +558,6 @@
     steps: steps,
     owner: owner,
     footer: footer,
-    summaryText: summaryText,
     copySummary: copySummary
   };
 })(window.ND = window.ND || {});

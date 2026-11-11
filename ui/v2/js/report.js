@@ -22,7 +22,6 @@
   var V = C.verdict || {};
   var SEV = C.sev || {};
 
-  var MAX_MARKS = 3;
   var MAX_EV = 6;
 
   function n(v) {
@@ -148,12 +147,12 @@
       box.appendChild(evTable(items));
     }
 
-    /* 关键指标表 */
+    /* 关键指标表：与导出文件同一份取数（metricstable.js），不在这里再写一遍 */
     var h2 = U.el("div", "rpt-h4");
     h2.appendChild(U.el("h4", "", RP.metricsTitle || ""));
     h2.appendChild(U.el("span", "rpt-dim", RP.metricsSub || ""));
     box.appendChild(h2);
-    box.appendChild(mtTable(res));
+    box.appendChild(ND.metrics.table(res));
     box.appendChild(U.el("p", "rpt-note", RP.metricsNote || ""));
     return section(2, RP.sec2, RP.sec2sub, box);
   }
@@ -204,128 +203,6 @@
     });
     tbl.appendChild(tb);
     return tbl;
-  }
-
-  /* ------------------------------------------------------------ 关键指标 */
-  function mtTable(res) {
-    var meta = (res && res.meta) || {};
-    var metrics = (res && res.metrics) || {};
-    var rows = [];
-
-    rows.push(mt("mRtt", num(pick(metrics.rtt_avg_ms, meta.rtt_avg_ms), 1), " ms", g(pick(metrics.rtt_avg_ms, meta.rtt_avg_ms), 100, 200)));
-    rows.push(mt("mJitter", num(pick(metrics.rtt_jitter_ms, meta.rtt_jitter_ms), 1), " ms", g(pick(metrics.rtt_jitter_ms, meta.rtt_jitter_ms), 30, 80)));
-
-    /* 丢包率只认探针基线：没发探针就写「未启用探针」，不拿重传率冒充 */
-    var pb = meta.probe_baseline;
-    var loss = null;
-    if (pb && n(pb.sent) > 0) loss = Math.max(0, (1 - (n(pb.recv) || 0) / n(pb.sent)) * 100);
-    rows.push(loss === null
-      ? { k: RP.mLoss, v: RP.mLossNone || "—", u: "", s: "", note: true }
-      : mt("mLoss", loss.toFixed(1), " %", g(loss, 1, 3)));
-
-    rows.push(mt("mRetrans", num(meta.retrans_rate, 2), " %", g(meta.retrans_rate, 1, 3)));
-
-    var dupRate = num(metrics.dup_ack_rate, 2);
-    rows.push(mt("mDupAck", num(meta.dup_ack, 0) || "0", dupRate === null ? "" : " · " + dupRate + " %",
-      g(meta.dup_ack, 3, 10)));
-
-    rows.push(mt("mRst", num(meta.rst, 0) || "0", " 次", g(meta.rst, 1, 5)));
-
-    rows.push({
-      k: RP.mDns,
-      v: (num(meta.dns_total, 0) || "0") + " / " + (num(meta.dns_resp, 0) || "0"),
-      u: "", s: "", info: true
-    });
-    rows.push(mt("mDnsMs", num(meta.dns_avg_ms, 0), " ms", g(meta.dns_avg_ms, 100, 300)));
-
-    var l7 = l7Text(meta);
-    rows.push({ k: RP.mL7, v: l7.text, u: "", s: "", info: true, note: l7.note });
-
-    var budget = MAX_MARKS;
-    rows.forEach(function (r) {
-      if (r.s !== "warn" && r.s !== "crit") return;
-      if (budget > 0) budget--;
-      else r.s = "";                     /* 超出预算的降级为中性，不再喊 */
-    });
-
-    var tbl = U.el("table", "mt-table");
-    var thead = document.createElement("thead");
-    var hr = document.createElement("tr");
-    [RP.colItem, RP.colValue, RP.colState].forEach(function (t) {
-      hr.appendChild(U.el("th", "", t || ""));
-    });
-    thead.appendChild(hr);
-    tbl.appendChild(thead);
-
-    var tb = document.createElement("tbody");
-    rows.forEach(function (r) {
-      var tr = document.createElement("tr");
-      if (r.s) tr.className = "is-" + r.s;
-      tr.appendChild(U.el("td", "mt-k", r.k || ""));
-      var vd = U.el("td", "mt-v");
-      vd.appendChild(U.el("b", "mono", r.v));
-      if (r.u) vd.appendChild(U.el("span", "mt-u", r.u));
-      if (r.note) vd.appendChild(U.el("span", "mt-flag", r.note));
-      tr.appendChild(vd);
-      var sd = U.el("td", "mt-s");
-      if (r.s) {
-        sd.appendChild(U.el("i", "mt-dot " + r.s));
-        sd.appendChild(U.el("span", "", stateText(r.s)));
-      } else {
-        sd.textContent = "—";
-      }
-      tr.appendChild(sd);
-      tb.appendChild(tr);
-    });
-    tbl.appendChild(tb);
-    return tbl;
-  }
-
-  function mt(key, value, unit, state) {
-    return { k: RP[key] || "", v: value === null ? "—" : value, u: value === null ? "" : (unit || ""), s: state, info: !state };
-  }
-
-  function g(v, warn, crit) {
-    var x = n(v);
-    if (x === null) return "";
-    if (x >= crit) return "crit";
-    if (x >= warn) return "warn";
-    return "ok";
-  }
-
-  function stateText(s) {
-    return s === "crit" ? (RP.stCrit || "") : (s === "warn" ? (RP.stWarn || "") : (RP.stOk || ""));
-  }
-
-  function pick() {
-    for (var i = 0; i < arguments.length; i++) {
-      var v = arguments[i];
-      if (v !== null && v !== undefined && v !== "" && isFinite(Number(v))) return Number(v);
-    }
-    return null;
-  }
-
-  /* L7 分布：后端没有按应用层协议的报文占比，按会话数统计并在同格注明口径 */
-  function l7Text(meta) {
-    var top = meta.streams_top || [];
-    if (!top.length) return { text: (C.panel || {}).noData || "—", note: "" };
-    var count = { TLS: 0, HTTP: 0, other: 0 };
-    top.forEach(function (s) {
-      var a = String((s && s.app) || "").toUpperCase();
-      if (a === "TLS") count.TLS++;
-      else if (a === "HTTP") count.HTTP++;
-      else count.other++;
-    });
-    var sum = count.TLS + count.HTTP + count.other || 1;
-    var parts = [];
-    if (count.TLS) parts.push("TLS " + Math.round(count.TLS * 100 / sum) + "%");
-    if (count.HTTP) parts.push("HTTP " + Math.round(count.HTTP * 100 / sum) + "%");
-    if (count.other) parts.push((C.panel || {}).l7Other + " " + Math.round(count.other * 100 / sum) + "%");
-    var total = n(meta.streams_total);
-    var note = total && top.length < total
-      ? "样本 " + top.length + "/" + total + " 会话"
-      : (RP.mL7Note || "");
-    return { text: parts.join(" · ") || "—", note: note };
   }
 
   /* ------------------------------------------------------------ ③ 数据 */

@@ -177,6 +177,11 @@
       else load(false);          /* load 内部会 paint 到所有宿主 */
       return el;
     },
-    unmount: function () { host = null; }
+    unmount: function () { host = null; },
+
+    /* 导出构建器（reporter.js）要用原始载荷，不要 DOM：
+       没读到就返回 null，由它决定是补一次还是写「未读取到」。 */
+    snapshot: function () { return (data && data.available) ? data : null; },
+    load: function (force) { return load(force); }
   };
 })(window.ND = window.ND || {});

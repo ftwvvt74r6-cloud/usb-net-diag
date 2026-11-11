@@ -129,8 +129,17 @@
   /* S4：结论区的「一眼三层」搬到 verdict.js（那里才做判断）。
      本文件只留它用到的证据 / 建议 / 技术详情这些块级件。 */
 
+  /* 导出的正文统一由 reporter.js 生成（结论 · 指标 · 证据 · 数据 · 上下文），
+     本文件只保留「文件名 / 落盘 / 复制」这些壳；后端的 conclusion_markdown
+     只在 reporter 不可用时兜底。 */
   function textOf(job, kind) {
     var r = (job && job.result) || {};
+    if (ND.reporter) {
+      if (kind === "json") return ND.reporter.json(job);
+      var m = ND.reporter.build(job);
+      if (m) return ND.reporter.md(m);
+      return "";
+    }
     if (kind === "md") return r.conclusion_markdown || job.conclusion_markdown || "";
     var exp = r.conclusion_export || job.conclusion_export;
     if (exp) return JSON.stringify(exp, null, 2);
@@ -138,6 +147,7 @@
   }
 
   function copyConclusion(job) {
+    if (ND.reporter) { ND.reporter.copy(job); return; }
     var R = C.result || {};
     var ui = (job && job.ui_copy && job.ui_copy.conclusion) || {};
     var text = (job && job.result && job.result.conclusion_text) || job.conclusion_text || "";
@@ -152,7 +162,15 @@
 
   function reportName(job, ext) {
     var r = (job && job.result) || {};
-    var id = r.report_id || (job && job.report_id) || ("conclusion-" + Date.now());
+    var id = r.report_id || (job && job.report_id) || "";
+    /* 没有报告号时按时间起名（netdiag-20261111-2149），
+       不要再叫 conclusion-<毫秒>：文件名是给人看的 */
+    if (!id) {
+      var d = new Date();
+      function p(x) { return x < 10 ? "0" + x : String(x); }
+      id = "netdiag-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+        "-" + p(d.getHours()) + p(d.getMinutes());
+    }
     return String(id).replace(/[\\/:*?"<>|]/g, "_") + "." + ext;
   }
 
@@ -581,6 +599,7 @@
     textOf: textOf,
     reportName: reportName,
     copyConclusion: copyConclusion,
+    captureCommand: captureCommand,
     sevKind: sevKind
   };
 })(window.ND = window.ND || {});

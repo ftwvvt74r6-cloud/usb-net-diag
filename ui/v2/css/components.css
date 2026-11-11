@@ -1247,6 +1247,8 @@ tr.is-warn .mt-v b { color: var(--warn); }
 tr.is-crit .mt-v b { color: var(--crit); }
 tr.is-ok .mt-v b { color: var(--text); }
 .mt-table tr.is-ok .mt-s { color: var(--text-2); }
+/* 超出「同屏 3 处」预算的行：判定文字照写，只是不给颜色 */
+.mt-table .mt-s.dim { color: var(--text-2); }
 
 /* ---------------------------------------------------------------- ③ 数据 */
 .dp-meta {
