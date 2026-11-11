@@ -182,6 +182,23 @@ def _ping_gateway(gateway: str, count: int = 4) -> dict:
     }
 
 
+def link_info() -> dict:
+    """只取无线链路本身（``netsh`` 一次解析），**不 ping、不缓存**。
+
+    与 :func:`collect` 的区别：``collect`` 会顺带 ping 网关（约 4 秒），常驻采集
+    agent 每 10 秒跑一轮时不能接受这个开销 —— 它自己有网关测量通路，只需要
+    SSID / BSSID / 信号这一组链路字段。
+
+    Returns:
+        dict: 同 :func:`parse_netsh_interfaces` 的结果；无无线连接时 ``{}``。
+
+    Example:
+        >>> isinstance(link_info(), dict)
+        True
+    """
+    return parse_netsh_interfaces(_run_netsh())
+
+
 def _local_ip() -> str:
     """取本机对外 IPv4（UDP connect 技巧，不实际发包；失败返回空串）。"""
     try:
@@ -210,7 +227,7 @@ def collect() -> dict:
         >>> snap["ok"]
         True
     """
-    wlan = parse_netsh_interfaces(_run_netsh())
+    wlan = link_info()
     gateway = ""
     try:
         gateway = winapi.default_gateway() or ""
