@@ -281,7 +281,7 @@ class CollectSampleTest(_AgentCase):
                                        "targets", "wlan"})
         self.assertEqual(record["interval_s"], 10)
         self.assertEqual(record["epoch"], 1000.0)
-        self.assertIn("+08:00", record["t"])
+        self.assertRegex(record["t"], r"[+-]\d{2}:\d{2}$|Z$", "t 必须是带时区的 ISO 时间（CI 是 UTC）")
 
     def test_gateway_block_has_no_key(self):
         with mock.patch.object(agent_mod, "_gateway", return_value="192.168.1.1"), \
