@@ -1360,7 +1360,9 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
               shadow: bool = False) -> dict:
     """``run_scan`` 的实现体（拆出来是为了让记录逻辑只包一层、不散落在每个 return）。"""
     cfg = load_config()
-    cap: dict = {"ok": True, "bpf": verdict.OFFLINE_BPF, "interface": "-", "duration": 0}
+    # R6-5：离线分析没有「网卡」也没有「BPF 过滤器」，两者一律空串（空 = 本模式
+    # 不适用）。模式信息由 ``meta.capture_mode`` 独立承载，不再借 ``bpf`` 当哨兵。
+    cap: dict = {"ok": True, "bpf": "", "interface": "", "duration": 0}
     if pcap:
         p = Path(pcap)
         # 支持 U 盘盘符变化：只给文件名时回落到 captures/
@@ -1418,8 +1420,12 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
         result["stage"] = "parse"
         return result
 
-    result["meta"]["interface"] = cap.get("interface", "-")
-    result["meta"]["bpf"] = cap.get("bpf", "-")
+    result["meta"]["interface"] = str(cap.get("interface") or "")
+    result["meta"]["bpf"] = str(cap.get("bpf") or "")
+    # R6-5：模式是独立契约字段（live / offline / passive），离线时上面两个字段为空串。
+    # 判定侧（verdict._is_offline）只认这个键，不再看 bpf 的取值。
+    result["meta"]["capture_mode"] = (
+        verdict.CAPTURE_MODE_OFFLINE if pcap else verdict.CAPTURE_MODE_LIVE)
     result["meta"]["capture_duration"] = cap.get("duration", 0)
 
     # 探针基线只「有数据才注入」：没有探针记录时一个键都不加，保证离线路径与
@@ -1486,11 +1492,14 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
                f"{degraded_text}{excluded_text}")
 
     if result["meta"]["packets"] == 0:
+        # 这一行是给人看的证据文案，走展示回落：契约字段在离线时是空串，
+        # 直接拼会得到「网卡 ，过滤器 」这种半截话。
+        empty_iface, empty_bpf = verdict.display_capture_fields(result["meta"])
         result["rows"].insert(0, {
             "category": "采集有效性",
             "finding": "抓包周期内未捕获任何报文，可能选错网卡或过滤器过严",
             "severity": "警告",
-            "evidence": f"网卡 {result['meta']['interface']}，过滤器 {result['meta']['bpf']}",
+            "evidence": f"网卡 {empty_iface}，过滤器 {empty_bpf}",
             "advice": "在网卡下拉框中手动切换有业务流量的网卡后重试",
         })
         result["summary"]["warning_count"] = sum(1 for r in result["rows"] if r["severity"] == "警告")

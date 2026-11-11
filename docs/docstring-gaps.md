@@ -3,7 +3,7 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**99.4%**（324/326）
+- 合格率：**99.4%**（325/327）
 - 模块说明：35/35
 
 ## 按文件汇总
@@ -41,7 +41,7 @@
 | `core/server.py` | 31 | 31 | 31 | 100% |
 | `core/startmsg.py` | 2 | 2 | 0 | 0% |
 | `core/tshark.py` | 13 | 13 | 13 | 100% |
-| `core/verdict.py` | 2 | 2 | 2 | 100% |
+| `core/verdict.py` | 3 | 3 | 3 | 100% |
 | `core/version.py` | 1 | 1 | 1 | 100% |
 | `core/wlan.py` | 3 | 3 | 3 | 100% |
 | `mcp/wireshark-mcp/server.py` | 5 | 5 | 5 | 100% |

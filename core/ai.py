@@ -405,7 +405,9 @@ def build_messages(result: dict, question: str = "") -> list[dict]:
     lines += [
         _t("user.collect_header"),
         _t("user.pcap_line", pcap=meta.get("pcap_name", "-"),
-           iface=meta.get("interface", "-"), bpf=meta.get("bpf", "-")),
+           # R6-5 后离线分析的 interface / bpf 是空串（本模式不适用），
+           # prompt 里回落成 "-"，避免出现「网卡:  / 过滤器: 」这种半截话。
+           iface=meta.get("interface") or "-", bpf=meta.get("bpf") or "-"),
         _t("user.packet_line", packets=meta.get("packets", "-"),
            tcp=meta.get("tcp_packets", "-"), streams=meta.get("streams_total", "-"),
            duration=meta.get("duration", "-"), throughput=m.get("throughput_mbps", 0)),

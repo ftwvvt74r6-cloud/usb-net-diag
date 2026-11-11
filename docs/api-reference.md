@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**35** 个（有模块说明 35 个）
-- 公开符号：**326** 个（有 docstring 326 个，合格 324 个）
+- 公开符号：**327** 个（有 docstring 327 个，合格 325 个）
 - 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -35,7 +35,7 @@ _（无公开符号）_
 | `chat` | function | 250 | ✅ |
 | `test_connection` | function | 337 | ✅ |
 | `build_messages` | function | 365 | ✅ |
-| `analyze_result` | function | 490 | ✅ |
+| `analyze_result` | function | 492 | ✅ |
 
 ### `AIError`  (class)
 
@@ -208,8 +208,8 @@ Raises:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `collect` | function | 412 | ✅ |
-| `build_findings` | function | 916 | ✅ |
-| `analyze` | function | 1405 | ✅ |
+| `build_findings` | function | 985 | ✅ |
+| `analyze` | function | 1474 | ✅ |
 
 ### `collect`
 
@@ -1855,7 +1855,7 @@ Returns:
 | `capture_live` | function | 605 | ✅ |
 | `degraded_empty_capture_result` | function | 880 | ✅ |
 | `run_scan` | function | 1057 | ✅ |
-| `main` | function | 1573 | ✅ |
+| `main` | function | 1582 | ✅ |
 
 ### `load_config`
 
@@ -4722,9 +4722,9 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `render_markdown` | function | 378 | ✅ |
-| `save` | function | 654 | ✅ |
-| `render_degraded` | function | 758 | ✅ |
-| `save_degraded` | function | 836 | ✅ |
+| `save` | function | 657 | ✅ |
+| `render_degraded` | function | 761 | ✅ |
+| `save_degraded` | function | 839 | ✅ |
 
 ### `render_markdown`
 
@@ -5429,10 +5429,10 @@ Example:
 | `Handler.log_message` | method | 1866 | ✅ |
 | `Handler.do_GET` | method | 2042 | ✅ |
 | `Handler.do_POST` | method | 2064 | ✅ |
-| `DiagServer` | class | 2452 | ✅ |
-| `DiagServer.handle_error` | method | 2463 | ✅ |
-| `create_server` | function | 2491 | ✅ |
-| `main` | function | 2538 | ✅ |
+| `DiagServer` | class | 2461 | ✅ |
+| `DiagServer.handle_error` | method | 2472 | ✅ |
+| `create_server` | function | 2500 | ✅ |
+| `main` | function | 2547 | ✅ |
 
 ### `static_asset`
 
@@ -6319,8 +6319,9 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 198 | ✅ |
-| `build` | function | 631 | ✅ |
+| `compute_layers` | function | 209 | ✅ |
+| `display_capture_fields` | function | 454 | ✅ |
+| `build` | function | 680 | ✅ |
 
 ### `compute_layers`
 
@@ -6344,6 +6345,30 @@ Args:
 Returns:
     list[dict]: 每项 ``{"id", "name", "protocol", "status"（ok/warn/bad/na）,
         "severity", "detail", "count"}``。
+```
+
+### `display_capture_fields`
+
+```python
+def display_capture_fields(meta: dict) -> tuple[str, str]
+```
+
+```text
+「网卡 / 过滤器」的**展示**文案（md / AI prompt 用），与契约字段分开。
+
+契约层（``result["meta"]``）在离线分析时把 ``interface`` / ``bpf`` 置为空串
+—— 空串就是「本模式不适用」，UI 不必再猜。但人读的 Markdown 里留一片空白
+更糟，所以展示层统一回落：
+
+* 网卡为空 → ``-``（沿用原有占位）；
+* 过滤器为空且这次是离线分析 → 仍显示模式名（``分析抓包文件``），
+  读报告的人一眼能看出「不是没抓到过滤器，是这次根本没抓包」。
+
+Args:
+    meta: 采集元信息（``interface`` / ``bpf`` / ``capture_mode``）。
+
+Returns:
+    tuple[str, str]: ``(网卡文案, 过滤器文案)``，都不会是空串。
 ```
 
 ### `build`
