@@ -116,7 +116,12 @@
   /* ------------------------------------------------------------ 报告位 */
   function drawReport(S, running) {
     var host = page.reportHost;
-    var opts = { onPro: function () { /* state 已 emit("pro")，这里不用再画 */ } };
+    /* 专业模式是本机偏好（state.pro），但面板只认 opts.pro：
+       不显式传下去，开关就只切了状态，数据段永远按非专业渲染。 */
+    var opts = {
+      pro: ND.state.isPro(),
+      onPro: function () { /* state 已 emit("pro")，这里不用再画 */ }
+    };
     U.clear(host);
     page.wifiHost.hidden = true;
 
@@ -157,6 +162,8 @@
     job.report_id = job.result.report_id;
     job.link_actions = (S.job || {}).link_actions || [];   /* 复测用后端给的地址，不自己猜 */
     job.mode = (S.job && S.job.mode) || last.mode;
+    /* 控制台尾巴要看采集日志：日志没带进来，专业模式开了也是空的 */
+    job.logs = (S.job || {}).logs || [];
 
     if (!ND.report.render(host, job, opts)) {
       host.appendChild(R.banner("warn", C.result.title, C.tech.empty));
