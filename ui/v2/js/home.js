@@ -20,6 +20,7 @@
   function cleanup() {
     if (!page) return;
     if (page.unsub) page.unsub();
+    if (ND.history && ND.history.unmount) ND.history.unmount();
     ND.state.release("home");
     page = null;
   }
@@ -40,18 +41,25 @@
     var envHost = U.el("div", "home-env");
     view.appendChild(envHost);
 
+    /* 历史趋势：常驻采集积累的时延 / 丢包曲线（自己取数、自己重画，
+       不跟着报告的刷新节奏走，否则每 1.2 秒重画一次 288 个点） */
+    var histHost = U.el("div", "home-hist");
+    view.appendChild(histHost);
+
     /* 没有诊断结果时，网络参数仍是可单独使用的表，所以给它一个独立卡片位 */
     var wifiHost = U.el("div", "home-wifi");
     view.appendChild(wifiHost);
 
-    page = { kpis: kpis, src: src, reportHost: reportHost, envHost: envHost,
-             wifiHost: wifiHost, envDrawn: false, sig: "" };
+    page = { kpis: kpis, src: src, reportHost: reportHost, histHost: histHost,
+             envHost: envHost, wifiHost: wifiHost, envDrawn: false, sig: "" };
 
     paint(true);
     U.clear(reportHost);
     var sk = R.card(RP.title || "", { sub: RP.sub || "" });
     sk.body.appendChild(R.skeleton(4, 52));
     reportHost.appendChild(sk.section);
+
+    if (ND.history && ND.history.mount) ND.history.mount(histHost);
 
     page.unsub = ND.state.subscribe(function (S, evt) {
       if (evt === "job" || evt === "last" || evt === "init" || evt === "pro") apply();

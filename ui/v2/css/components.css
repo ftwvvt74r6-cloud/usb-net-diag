@@ -409,6 +409,95 @@
   .set-thr { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ---------------------------------------------------------------- 历史趋势 */
+.hist-ctrl { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--n-0);
+  overflow: hidden;
+}
+.seg-b {
+  border: 0;
+  background: transparent;
+  padding: 5px 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg-b + .seg-b { border-left: 1px solid var(--line); }
+.seg-b:hover { color: var(--text); }
+.seg-b.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg-b:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.hist-chart { position: relative; margin-top: var(--sp-1); }
+.hp-svg { display: block; width: 100%; }
+.hp-grid { stroke: var(--line); stroke-width: 1; }
+.hp-ytick, .hp-xtick, .hp-unit { fill: var(--text-2); font-size: 11px; }
+.hp-thr { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 4 4; }
+.hp-thr-t { fill: var(--warn); font-size: 11px; }
+.hp-line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.hp-loss { fill: var(--warn); opacity: 0.45; }
+.hp-loss.hi { fill: var(--crit); opacity: 0.6; }
+.hp-mark { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 2 3; }
+.hp-mark-f { fill: var(--text-2); }
+.hp-ev { stroke: var(--crit); stroke-width: 1.4; opacity: 0.5; }
+.hp-ev.is-rtt { stroke: var(--accent); }
+.hp-ev.is-jitter { stroke: var(--warn); }
+.hp-hit { fill: transparent; cursor: pointer; }
+.hp-hit:hover, .hp-hit:focus { fill: var(--accent-soft); opacity: 0.5; }
+
+.hist-loading { padding: var(--sp-4) 0; }
+.hist-off {
+  margin: var(--sp-2) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--r-sm);
+}
+.hist-off b { display: block; font-size: var(--fs-sm); }
+.hist-off p { margin: 4px 0 var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); }
+
+.hist-ev {
+  margin: var(--sp-2) 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--n-50);
+}
+.hist-ev-h { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-1); }
+.hist-ev-h .btn { margin-left: auto; }
+.hist-ev-t { font-size: var(--fs-sm); color: var(--text-2); }
+.hist-ev-n {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  padding: 0 7px;
+}
+.hist-ev-row + .hist-ev-row { border-top: 1px solid var(--line); margin-top: var(--sp-1); padding-top: var(--sp-1); }
+.hist-ev .kv-row { padding: 4px 0; border-top: 0; }
+.hist-ev .kv-row dt { flex: 0 0 96px; }
+
+.hist-events { margin-top: var(--sp-3); }
+.hist-cov { margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); }
+.hist-table th:nth-child(1), .hist-table td:nth-child(1) { width: 106px; }
+.hist-table th:nth-child(3), .hist-table td:nth-child(3) { width: 78px; }
+.hist-table th:nth-child(4), .hist-table td:nth-child(4) { width: 92px; }
+.hist-table th:nth-child(5), .hist-table td:nth-child(5) { width: 72px; }
+.hist-table th:nth-child(6), .hist-table td:nth-child(6) { width: 96px; }
+.hist-table th:nth-child(7), .hist-table td:nth-child(7) { width: 172px; }
+.hist-table tbody tr { cursor: pointer; }
+.hist-table tbody tr:hover { background: var(--n-50); }
+.hist-note { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--text-2); }
+
+@media (max-width: 1100px) {
+  .hist-ctrl { margin-left: 0; width: 100%; }
+  .hist .card-hd { flex-wrap: wrap; }
+}
+
 /* ---------------------------------------------------------------- 日志中心 */
 .filter { width: 220px; flex: none; }
 
