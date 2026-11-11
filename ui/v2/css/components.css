@@ -374,6 +374,41 @@
 /* 网卡不是键值表的一部分：给它一条分隔线，否则「网卡：3 个」看着像表格的一行 */
 .ifaces { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 
+/* ---------------------------------------------------------------- 设置页：采集三块 */
+/* 「采集未开启」不是错误，是状态：左侧一条竖线，不用红色横幅 */
+.set-off {
+  margin: var(--sp-2) 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--r-sm);
+}
+.set-off b { display: block; font-size: var(--fs-sm); }
+.set-off p { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--text-2); }
+.set-off .set-why { color: var(--text-2); font-size: var(--fs-xs); }
+.set-why { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--text-2); }
+.set-last { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); color: var(--text-2); }
+.set-last b { color: var(--text); font-weight: 600; }
+.set-row { margin-top: var(--sp-3); }
+.set-sel { width: 160px; }
+
+.set-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.set-item { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto; gap: var(--sp-2); align-items: center; }
+.set-item .input { width: 100%; }
+.set-empty { font-size: var(--fs-sm); color: var(--text-2); padding: var(--sp-1) 0; }
+.input.is-bad { border-color: var(--crit); }
+
+.set-thr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.set-num { display: flex; align-items: center; gap: 6px; }
+.set-num .input { width: 96px; }
+.set-unit { font-size: var(--fs-sm); color: var(--text-2); }
+
+@media (max-width: 720px) {
+  .set-item { grid-template-columns: minmax(0, 1fr) 84px; }
+  .set-item .btn { grid-column: 1 / -1; justify-self: start; }
+  .set-thr { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ---------------------------------------------------------------- 日志中心 */
 .filter { width: 220px; flex: none; }
 
