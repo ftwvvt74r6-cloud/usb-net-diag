@@ -13,6 +13,7 @@ API:
   GET  /api/evidence        通用取证请求单（?full=0|1&fmt=md|txt，纯计算不写文件）
   GET  /api/doctor          环境自检
   GET  /api/preflight       启动器/首屏共用能力快照（与 /api/selfcheck 同源，无 first_run）
+  GET  /api/wifi            无线链路 + 主机网络 + 网关实测参数（界面「网络参数」表数据源）
   GET  /api/selfcheck       首屏准备检查（六项只读环境检查 + 首次运行标记）
   POST /api/selfcheck/ack   记下「首次运行检查已看过」（写失败不阻塞界面）
   POST /api/selfcheck/path  保存手填组件路径 {key:python|tshark, path}（校验后写 config/paths.json）
@@ -62,6 +63,8 @@ PROBE_PATH_BUDGET_S = 20.0
 CORE = Path(__file__).resolve().parent
 ROOT = CORE.parent
 sys.path.insert(0, str(CORE))
+
+import wlan  # noqa: E402  无线链路与主机网络参数（GET /api/wifi）
 
 import ai  # noqa: E402
 # H1：浏览器打开权的唯一判定（browser_disabled）与唯一打开入口（open_browser）
@@ -2231,6 +2234,12 @@ class Handler(BaseHTTPRequestHandler):
             # H6：启动器 splash 与 UI 首屏共用这一份（同一 collect_cached 缓存），
             # 不带 first_run/ack 语义；旧前端继续用 /api/selfcheck 也仍然同源。
             return self._json(preflight_payload())
+        if path == "/api/wifi":
+            # 无线链路 / 主机网络 / 网关实测，合成一张「网络参数」表。
+            # 数据只来自本机（netsh + ping + 本地地址），拿不到的字段在 external 里标「需网络后台」。
+            q = urllib.parse.parse_qs(parsed.query)
+            force = _to_bool((q.get("force") or [None])[0], False)
+            return self._json(wlan.snapshot(force=force))
         if path == "/api/selfcheck":
             # 纯读环境：不写文件、不触发 UAC、不启动抓包子进程；短 TTL 缓存
             # 让紧接着的 /api/app 或「重新检测」复用同一份结果。

@@ -275,10 +275,15 @@
       } else {
         page.stream.update(job);
       }
-      if (page.techKey !== state) {
+      /* 技术详情只在运行中出现；结束后由结果区的「展开明细」承载，
+         否则同一张采集参数表会在页面上出现两次 */
+      if (running && page.techKey !== state) {
         page.techKey = state;
         U.clear(page.techHost);
         page.techHost.appendChild(R.techDetails(job));
+      } else if (!running && page.techKey !== "done") {
+        page.techKey = "done";
+        U.clear(page.techHost);
       }
     } else {
       page.runCard.section.hidden = true;
@@ -341,13 +346,10 @@
       return box;
     }
 
-    /* 一眼三层：问题横幅 → 现在怎么做 → 找谁解决；0 包/证据不足也是同一张卡，
-       只是标题与动作换成「先把采集搞对」，不再另起一条黄色横幅。 */
-    var card = ND.verdict ? ND.verdict.card(job, {}) : null;
-    if (card) box.appendChild(card);
-    else box.appendChild(R.banner("warn", C.result.title, C.tech.empty));
+    /* 三段报告：结论 / 证据 / 数据 —— 与总览页同一组件，不另写一套 */
+    var node = ND.report ? ND.report.render(box, job, {}) : null;
+    if (!node) box.appendChild(R.banner("warn", C.result.title, C.tech.empty));
 
-    /* 技术详情只挂在「运行」卡里（运行中/结束都同一位置），结果区不再复制一份 */
     box.appendChild(actionsRow(job, true));
     return box;
   }
@@ -595,35 +597,8 @@
 
   function renderProbeResult(d) {
     var box = U.el("div", "stack-lg");
-    var c = R.card(C.result.title, {
-      tag: d.ok ? { kind: "ok", text: C.lastRun.okTag } : { kind: "crit", text: C.lastRun.failTag }
-    });
-
-    c.body.appendChild(U.el("p", "result-head", d.headline || ""));
-    if (d.advice) c.body.appendChild(labeled(C.fail.adviceLabel, d.advice));
-
-    var segs = d.segments || [];
-    if (segs.length) {
-      var tbl = U.el("ul", "seglist");
-      segs.forEach(function (s) {
-        var li = U.el("li", "segrow " + (s.status || ""));
-        li.appendChild(U.el("span", "seg-name", s.name || ""));
-        li.appendChild(U.el("span", "seg-ms mono",
-          s.ms === null || s.ms === undefined ? "—" : Number(s.ms).toFixed(1) + " ms"));
-        if (s.note) li.appendChild(U.el("span", "seg-note", s.note));
-        tbl.appendChild(li);
-      });
-      c.body.appendChild(tbl);
-    }
-    box.appendChild(c.section);
-
-    /* 逐跳（体检带 path 时后端才给） */
-    var pp = d.path_profile;
-    if (pp && pp.hops && pp.hops.length) {
-      var pc = R.card(C.tech.path);
-      pc.body.appendChild(R.hopTable(pp));
-      box.appendChild(pc.section);
-    }
+    /* 结论 / 证据 / 数据：与抓包类模式同一套三段组件（结构一致，用户不用换脑子） */
+    ND.report.renderProbe(box, d);
     return box;
   }
 

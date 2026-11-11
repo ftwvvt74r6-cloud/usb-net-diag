@@ -770,9 +770,7 @@
    ========================================================================== */
 
 /* ---------------------------------------------------------------- 卡片 */
-.vcard { overflow: hidden; }
-/* 嵌在首页那张大卡里时不再套一层边框，避免「卡中卡」 */
-.vcard.bare { border: 0; border-radius: 0; background: transparent; }
+/* S5：结论不再自己成卡，由 .rpt（三段）承载；这里只保留横幅/步骤/归属三块 */
 
 /* ---------------------------------------------------------------- 第一层：问题横幅 */
 .v-banner {
@@ -905,58 +903,10 @@
 }
 .v-copy-t { font-size: var(--fs-xs); color: var(--text-2); }
 
-/* ---------------------------------------------------------------- 证据折叠 */
-.evfold { border-bottom: 1px solid var(--line); }
-.evfold > summary {
-  padding: 10px var(--sp-4);
-  font-size: var(--fs-sm);
-  color: var(--accent);
-  cursor: pointer;
-  list-style: none;
-}
-.evfold > summary::-webkit-details-marker { display: none; }
-.evfold > summary::before { content: "▸ "; }
-.evfold[open] > summary::before { content: "▾ "; }
-.evfold > summary:hover { color: var(--accent-hover); }
-.ev-bd { padding: 0 var(--sp-4) var(--sp-4); }
-/* 三段并排，但容器窄时自动降到两列/一列：证据区在总览左栏只有 500px 出头 */
-.ev-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: var(--sp-3) var(--sp-4);
-}
-.ev-blk { min-width: 0; }
-.ev-h { margin-bottom: 2px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); }
-.ev-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding-left: 1.05em; font-size: var(--fs-sm); color: var(--text); }
-.ev-conf {
-  margin-top: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-sm);
-  background: var(--n-50);
-  font-size: var(--fs-xs);
-  color: var(--text-2);
-}
-.ev-conf b { color: var(--text); font-weight: 600; }
-.ev-sec { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
-
 /* ---------------------------------------------------------------- 结论卡页脚 */
 .v-ft { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
 .v-id { padding: 0 var(--sp-4) var(--sp-4); font-size: var(--fs-xs); color: var(--text-3); }
 
-/* ==========================================================================
-   首页：实时与专业数据
-   ========================================================================== */
-.livecard .card-hd { align-items: center; }
-.livecard .card-sub { color: var(--text-2); }
-.prow {
-  display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
-  gap: var(--sp-4);
-  align-items: start;
-}
-.p-left, .p-right { min-width: 0; }
-.p-right.is-hidden { display: none; }
-.prow.is-full { grid-template-columns: minmax(0, 1fr); }
 .left-sk { padding: var(--sp-2) 0; }
 .left-fail { display: flex; flex-direction: column; gap: var(--sp-2); }
 .home-env:empty { display: none; }
@@ -1159,11 +1109,185 @@
 
 /* ---------------------------------------------------------------- 窄屏 */
 @media (max-width: 1100px) {
-  .prow { grid-template-columns: minmax(0, 1fr); }
+  .evi-table th:nth-child(1), .evi-table td:nth-child(1) { width: 96px; }
+  .evi-table th:nth-child(3), .evi-table td:nth-child(3) { width: 170px; }
   .v-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ev-grid { grid-template-columns: minmax(0, 1fr); }
   .v-title { font-size: var(--fs-md); }
   .v-problem { font-size: var(--fs-base); }
   /* 叠成一列后，专业面板与结论之间要有一条分界，否则像是结论的续写 */
-  .p-right { border-top: 1px solid var(--line); padding-top: var(--sp-4); }
+  .mt-table th:nth-child(1) { width: 46%; }
+}
+
+
+/* ---- 网络参数卡（wifi.js）---- */
+.np-card .card-hd { align-items: center; }
+.np-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: var(--fs-sm); }
+.np-table th, .np-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.np-table th { width: 34%; color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.np-table td { color: var(--text); font-variant-numeric: tabular-nums; }
+.np-table tr:last-child th, .np-table tr:last-child td { border-bottom: 0; }
+.np-table .np-group td { color: var(--text-2); font-weight: 700; background: var(--n-25, #FAFAFC); padding-top: 10px; }
+.np-table td.np-muted { color: var(--text-3); }
+.np-note { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.6; }
+.np-note.np-tip { color: var(--text-3); }
+
+/* ==========================================================================
+   S5：结果区固定三段（定性结论 / 证据 / 数据）+ 明细折叠
+   首页与五个模式页共用同一套结构，所以这里的样式只描述「段」，不描述页面。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- 三段骨架 */
+.rpt { overflow: hidden; }
+.rpt .card-hd { align-items: center; }
+.rpt-bd { display: flex; flex-direction: column; }
+
+.rpt-sec { border-top: 1px solid var(--line); }
+.rpt-sec:first-child { border-top: 0; }
+
+.rpt-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-1);
+}
+.rpt-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+}
+.rpt-h h3 { font-size: var(--fs-md); font-weight: 600; }
+.rpt-sub { font-size: var(--fs-xs); color: var(--text-2); }
+
+/* 段体不留左右内边距：横幅/步骤/归属自带 var(--sp-4)，避免双份缩进 */
+.rpt-body { padding: 0; }
+.rpt-c2, .rpt-c3 { padding: var(--sp-2) var(--sp-4) var(--sp-4); }
+.rpt-c3 { padding-top: var(--sp-1); }
+
+.rpt-h4 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: var(--sp-4) 0 var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line);
+}
+.rpt-c2 .rpt-h4:first-child, .rpt-c3 .rpt-h4:first-child { margin-top: var(--sp-2); padding-top: 0; border-top: 0; }
+.rpt-h4 h4 { font-size: var(--fs-sm); font-weight: 600; }
+.rpt-dim { font-size: var(--fs-xs); font-weight: 400; color: var(--text-2); }
+.rpt-note { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--text-2); }
+
+/* 运行中的占位：三段先立住，数字等采集结束 */
+.rpt-ph { padding: var(--sp-2) 0; }
+.rpt-ph-t { margin-bottom: var(--sp-3); font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ---------------------------------------------------------------- ② 证据表 */
+.evi-table, .mt-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.evi-table th, .mt-table th {
+  padding: 6px 10px;
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.evi-table td, .mt-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.evi-table tr:last-child td, .mt-table tr:last-child td { border-bottom: 0; }
+
+.evi-table th:nth-child(1), .evi-table td:nth-child(1) { width: 124px; }
+.evi-table th:nth-child(3), .evi-table td:nth-child(3) { width: 236px; }
+.evi-table th:nth-child(4), .evi-table td:nth-child(4) { width: 82px; }
+.evi-lv { color: var(--text-2); font-size: var(--fs-xs); }
+.evi-what { color: var(--text); }
+.evi-num { color: var(--text-2); font-size: var(--fs-xs); }
+.evi-judge { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- 关键指标表 */
+.mt-table th:nth-child(1) { width: 38%; }
+.mt-table th:nth-child(3) { width: 104px; }
+.mt-k { color: var(--text-2); }
+.mt-v b { font-weight: 650; font-size: var(--fs-base); }
+.mt-u { margin-left: 2px; font-size: var(--fs-xs); color: var(--text-2); }
+.mt-flag { margin-left: 8px; font-size: var(--fs-xs); color: var(--text-2); }
+.mt-s { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
+.mt-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--n-300);
+}
+.mt-dot.ok { background: var(--ok); }
+.mt-dot.warn { background: var(--warn); }
+.mt-dot.crit { background: var(--crit); }
+
+/* 阈值色只染「数值」本身：正常青绿、关注琥珀、异常红；超标最多 3 处 */
+tr.is-warn .mt-v b { color: var(--warn); }
+tr.is-crit .mt-v b { color: var(--crit); }
+tr.is-ok .mt-v b { color: var(--text); }
+.mt-table tr.is-ok .mt-s { color: var(--text-2); }
+
+/* ---------------------------------------------------------------- ③ 数据 */
+.dp-meta {
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+}
+.dp-col { min-width: 0; }
+.np-embed { margin-top: var(--sp-2); max-width: 760px; }
+.np-bar { display: flex; justify-content: flex-end; margin-bottom: var(--sp-2); }
+
+/* ---------------------------------------------------------------- 明细折叠 */
+.rpt-detail { border-top: 1px solid var(--line); }
+.rpt-detail > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  cursor: pointer;
+  list-style: none;
+}
+.rpt-detail > summary::-webkit-details-marker { display: none; }
+.rpt-detail > summary::before { content: "▸ "; }
+.rpt-detail[open] > summary::before { content: "▾ "; }
+.rpt-detail > summary:hover { color: var(--accent-hover); }
+.rpt-detail > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rd-t { font-weight: 600; }
+.rd-s { font-size: var(--fs-xs); color: var(--text-2); }
+.rpt-detail .ev-bd { padding: 0 var(--sp-4) var(--sp-4); }
+.dt-blk { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.dt-quote { font-size: var(--fs-sm); line-height: 1.7; color: var(--text-2); white-space: pre-wrap; }
+
+@media (max-width: 1100px) {
+  .rpt-h { padding-top: var(--sp-2); }
+  .dp-grid { grid-template-columns: minmax(0, 1fr); }
 }

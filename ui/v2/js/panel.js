@@ -175,92 +175,24 @@
     };
   }
 
-  /* ------------------------------------------------------------ 渲染 */
-  /* host 是一个容器；清空后重画。opts: { job, pro, onPro, bare } */
-  function render(host, res, opts) {
+  /* ------------------------------------------------------------ 分块 */
+  /* 三段报告里的「数据」段要自己排布（Top 会话通栏、其余两列并排），
+     所以面板不再自己画整块，只交出一个个块节点。 */
+  function blocks(res, opts) {
     opts = opts || {};
-    U.clear(host);
-    var wrap = U.el("div", "pro" + (opts.bare ? " bare" : ""));
-    host.appendChild(wrap);
-
-    /* 头部只有「独立成卡」时才画；嵌在首页那张大卡里由页面统一给标题和开关 */
-    if (!opts.bare) {
-      var hd = U.el("div", "pro-hd");
-      var tt = U.el("div", "pro-t");
-      tt.appendChild(U.el("h3", "", P.title || ""));
-      tt.appendChild(U.el("span", "pro-sub", P.sub || ""));
-      hd.appendChild(tt);
-
-      var sw = U.el("label", "pro-sw");
-      var cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = !!opts.pro;
-      cb.addEventListener("change", function () {
-        if (opts.onPro) opts.onPro(cb.checked);
-      });
-      sw.appendChild(cb);
-      sw.appendChild(U.el("span", "pro-sw-t", P.pro || ""));
-      sw.title = P.proHint || "";
-      hd.appendChild(sw);
-      wrap.appendChild(hd);
-    }
-
-    var running = !!(opts.job && (opts.job.state === "running" || opts.job.state === "starting"));
-    if (running) {
-      wrap.appendChild(runningBlock(opts.job));
-      return wrap;
-    }
-    if (!res) {
-      wrap.appendChild(U.el("p", "pro-empty", P.empty || ""));
-      return wrap;
-    }
-
     var m = build(res, opts);
-    if (!m.has) {
-      wrap.appendChild(U.el("p", "pro-empty", P.empty || ""));
-      return wrap;
-    }
-
-    var bd = U.el("div", "pro-bd");
-    bd.appendChild(overview(m));
-    bd.appendChild(qualitySec(m));
-    bd.appendChild(sessionsSec(m, opts));
-    bd.appendChild(l7Sec(m));
-    bd.appendChild(dnsSec(m));
-    if (opts.pro) bd.appendChild(extraSec(m));
-    wrap.appendChild(bd);
-    return wrap;
-  }
-
-  function runningBlock(job) {
-    var box = U.el("div", "pro-run");
-
-    /* 头部一行：转圈 + 一句「在干嘛」。不再重复左边那句话的完整版，
-       左边负责「正在采集」，右边负责「这些位置在等着填数」。 */
-    var hd = U.el("div", "pro-run-hd");
-    var sp = U.el("span", "spinner");
-    sp.setAttribute("aria-hidden", "true");
-    hd.appendChild(sp);
-    hd.appendChild(U.el("span", "pro-run-t", P.runningFill || P.running || ""));
-    hd.appendChild(U.el("span", "pro-run-b", U.tpl(P.runningBody || "", {
-      phase: job.phase || "", elapsed: f(job.elapsed, 0),
-      lines: (job.logs || []).length
-    })));
-    box.appendChild(hd);
-
-    /* 骨架：把「结束后会出现哪几块」先摆出来，用户知道自己在等什么 */
-    var sk = U.el("div", "pro-skel");
-    [P.secOverview, P.secQuality, P.secStreams, P.secL7, P.secDns].forEach(function (name) {
-      var row = U.el("div", "sk-row");
-      row.appendChild(U.el("span", "sk-k", name || ""));
-      var bars = U.el("span", "sk-bars");
-      bars.appendChild(U.el("i", "sk-line"));
-      bars.appendChild(U.el("i", "sk-line sk-short"));
-      row.appendChild(bars);
-      sk.appendChild(row);
-    });
-    box.appendChild(sk);
-    return box;
+    var out = {
+      model: m,
+      has: m.has,
+      overview: m.has ? overview(m) : null,
+      quality: m.has ? qualitySec(m) : null,
+      sessions: m.has ? sessionsSec(m, opts) : null,
+      l7: m.has ? l7Sec(m) : null,
+      dns: m.has ? dnsSec(m) : null,
+      extra: (m.has && opts.pro) ? extraSec(m) : null,
+      logs: (m.has && opts.pro && m.logs && m.logs.length) ? logSec(m.logs) : null
+    };
+    return out;
   }
 
   function overview(m) {
@@ -446,19 +378,21 @@
       sec.appendChild(U.el("p", "pro-hint", (P.exProbe || "") + "：" + (P.exProbeNone || "")));
     }
 
-    /* 「专业模式 = 控制台默认展开」在首页的落地：不留一整块控制台，只给最后几行 */
-    if (m.logs && m.logs.length) {
-      var tail = m.logs.slice(-8).map(function (row) { return String((row && row.m) || ""); })
-        .filter(function (s) { return s !== ""; });
-      if (tail.length) {
-        var lh = U.el("h4", "pro-h pro-h-sub");
-        lh.appendChild(document.createTextNode(U.tpl(P.secLogs || "", { n: tail.length })));
-        sec.appendChild(lh);
-        var pre = U.el("pre", "pro-logs mono");
-        tail.forEach(function (line) { pre.appendChild(U.el("div", "pl-line", "› " + line)); });
-        sec.appendChild(pre);
-      }
-    }
+    return sec;
+  }
+
+  /* 控制台尾巴：专业模式下才出，放在数据段末尾 */
+  function logSec(logs) {
+    var sec = U.el("section", "pro-sec");
+    var tail = logs.slice(-8).map(function (row) { return String((row && row.m) || ""); })
+      .filter(function (s) { return s !== ""; });
+    if (!tail.length) return null;
+    var lh = U.el("h4", "pro-h");
+    lh.appendChild(document.createTextNode(U.tpl(P.secLogs || "", { n: tail.length })));
+    sec.appendChild(lh);
+    var pre = U.el("pre", "pro-logs mono");
+    tail.forEach(function (line) { pre.appendChild(U.el("div", "pl-line", "› " + line)); });
+    sec.appendChild(pre);
     return sec;
   }
 
@@ -485,5 +419,5 @@
     });
   }
 
-  ND.panel = { render: render, build: build, copyFilter: copyFilter };
+  ND.panel = { blocks: blocks, build: build, copyFilter: copyFilter };
 })(window.ND = window.ND || {});

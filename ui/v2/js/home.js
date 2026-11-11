@@ -1,12 +1,11 @@
 /* ============================================================================
-   home.js · 总览页：指标卡 + 实时与专业数据（左三层结论 / 右专业面板）+ 环境
+   home.js · 总览页：指标卡 + 三段报告（结论 / 证据 / 数据）+ 环境
    ----------------------------------------------------------------------------
-   这一页只做两件事：
-   1) 把「现在到底能不能上网、卡在哪」用三层结构说清楚（ND.verdict）
-   2) 把同一份结果的原始数字摊开（ND.panel），每行都能复制 Wireshark 过滤器
+   三段报告由 report.js 统一渲染，首页与五个模式页**同一套**：
+   这里只负责「什么时候有报告可画」，不参与报告长什么样。
 
-   有任务在跑时：KPI 显示「诊断中…」，左边不摆结论（还没算出来，摆就是编），
-   右边给出进度摘要。轮询只在有任务时开，任务结束立刻释放。
+   有任务在跑时：KPI 显示「诊断中…」，报告位先摆三段骨架 —— 结构先立住，
+   数字等采集结束再填（不许拿半截数据编结论）。轮询只在有任务时开。
    ========================================================================== */
 (function (ND) {
   "use strict";
@@ -14,7 +13,7 @@
   var U = ND.ui;
   var C = ND.copy || {};
   var R = ND.render;
-  var P = C.panel || {};
+  var RP = C.report || {};
 
   var page = null;
 
@@ -34,47 +33,25 @@
     view.appendChild(kpis);
     view.appendChild(src);
 
-    /* ---- 实时与专业数据：一张卡，左说人话右给数据 ---- */
-    var card = U.el("section", "card livecard");
-    var hd = U.el("div", "card-hd");
-    hd.appendChild(U.el("h2", "", P.title || ""));
-    hd.appendChild(U.el("span", "card-sub", P.sub || ""));
-
-    var sw = U.el("label", "pro-sw");
-    var cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = ND.state.isPro();
-    cb.setAttribute("aria-label", P.pro || "");
-    cb.addEventListener("change", function () {
-      ND.state.setPro(cb.checked);
-      U.toast(cb.checked ? (C.pro || {}).on : (C.pro || {}).off, "");
-    });
-    sw.appendChild(cb);
-    sw.appendChild(U.el("span", "pro-sw-t", P.pro || ""));
-    sw.title = P.proHint || "";
-    hd.appendChild(sw);
-
-    var fold = U.btn(P.fold || "", { kind: "ghost", size: "sm", onClick: function () { togglePanel(fold); } });
-    hd.appendChild(fold);
-    card.appendChild(hd);
-
-    var prow = U.el("div", "prow");
-    var left = U.el("div", "p-left");
-    var right = U.el("div", "p-right");
-    prow.appendChild(left);
-    prow.appendChild(right);
-    card.appendChild(prow);
-    view.appendChild(card);
+    /* 三段报告（结论 / 证据 / 数据）—— 首页与模式页同一组件 */
+    var reportHost = U.el("div", "home-report");
+    view.appendChild(reportHost);
 
     var envHost = U.el("div", "home-env");
     view.appendChild(envHost);
 
-    page = { kpis: kpis, src: src, left: left, right: right, prow: prow,
-             envHost: envHost, foldBtn: fold, envDrawn: false, sig: "" };
+    /* 没有诊断结果时，网络参数仍是可单独使用的表，所以给它一个独立卡片位 */
+    var wifiHost = U.el("div", "home-wifi");
+    view.appendChild(wifiHost);
+
+    page = { kpis: kpis, src: src, reportHost: reportHost, envHost: envHost,
+             wifiHost: wifiHost, envDrawn: false, sig: "" };
 
     paint(true);
-    left.appendChild(skeletonBlock());
-    right.appendChild(skeletonBlock());
+    U.clear(reportHost);
+    var sk = R.card(RP.title || "", { sub: RP.sub || "" });
+    sk.body.appendChild(R.skeleton(4, 52));
+    reportHost.appendChild(sk.section);
 
     page.unsub = ND.state.subscribe(function (S, evt) {
       if (evt === "job" || evt === "last" || evt === "init" || evt === "pro") apply();
@@ -83,16 +60,6 @@
     if (!(ND.state.get().checks || []).length) ND.state.loadChecks();
 
     ND.state.refreshLastRun().then(function () { ND.state.refreshStatus(); });
-  }
-
-  function togglePanel(btn) {
-    if (!page) return;
-    var show = page.right.hidden;
-    page.right.hidden = !show;
-    page.right.classList.toggle("is-hidden", !show);
-    page.prow.classList.toggle("is-full", !show);
-    var t = btn.querySelector(".btn-t");
-    if (t) t.textContent = show ? (P.fold || "") : (P.unfold || "");
   }
 
   function apply() {
@@ -111,22 +78,13 @@
       S.result ? 1 : 0,
       running ? 1 : 0,
       ND.state.isPro() ? 1 : 0,
-      /* 专业模式的控制台尾巴跟着日志走：日志变了就得重画，否则永远停在打开那一刻 */
+      /* 专业模式的控制台尾巴跟着日志走：日志变了就得重画 */
       ND.state.isPro() ? (((S.job || {}).logs || []).length) : 0
     ].join("|");
     if (page.sig === sig) return;
     page.sig = sig;
 
-    U.clear(page.left);
-    leftPane(running);
-
-    /* 专业面板：运行中给进度摘要，结束后给真实统计。
-       旧记录 / 上次失败没有本次数据，不拿别的记录往上凑。 */
-    var last = S.last;
-    var stale = !!(last && (last.legacy || !last.ok));
-    ND.panel.render(page.right, stale ? null : resultOf(S, running), {
-      bare: true, pro: ND.state.isPro(), job: S.job
-    });
+    drawReport(S, running);
 
     if (!page.envDrawn && (S.checks || []).length) {
       page.envDrawn = true;
@@ -147,47 +105,44 @@
     return S.result || (job.state === "done" ? job.result : null);
   }
 
-  /* ------------------------------------------------------------ 左栏 */
-  function leftPane(running) {
-    var S = ND.state.get();
-    var last = S.last;
-    var host = page.left;
+  /* ------------------------------------------------------------ 报告位 */
+  function drawReport(S, running) {
+    var host = page.reportHost;
+    var opts = { onPro: function () { /* state 已 emit("pro")，这里不用再画 */ } };
+    U.clear(host);
+    page.wifiHost.hidden = true;
 
     if (running) {
-      var jb = S.job || {};
-      host.appendChild(R.empty("speed", P.running || "",
-        U.tpl(P.runningBody || "", {
-          phase: jb.phase || "", elapsed: U.num(jb.elapsed, 0) || "0",
-          lines: (jb.logs || []).length
-        }),
-        [U.btn(C.act.view, {
-          kind: "ghost", size: "sm",
-          onClick: function () { location.hash = "#/" + (jb.mode || "scan"); }
-        })]));
+      ND.report.placeholder(host, S.job, opts);
       return;
     }
 
+    var last = S.last;
     if (!last) {
       host.appendChild(R.empty("report", C.lastRun.emptyTitle, C.lastRun.emptyBody, [startBtn()]));
+      mountWifi();
       return;
     }
 
-    /* 旧记录：没有边界也就没有专业数据，只留横幅 + 重新诊断 */
+    /* 旧记录：没有边界也就没有证据与数据，只留横幅 + 重新诊断 */
     if (last.legacy) {
       host.appendChild(R.banner("warn", C.lastRun.legacyTitle, C.lastRun.legacyBody));
-      host.appendChild(actionsRow(last, false));
+      host.appendChild(actionsRow(last));
+      mountWifi();
       return;
     }
 
     if (!last.ok) {
       host.appendChild(failBlock(last));
+      mountWifi();
       return;
     }
 
     var job = { result: resultOf(S, false), mode: last.mode };
     if (!job.result) {
       host.appendChild(R.banner("warn", C.lastRun.summaryOnly));
-      host.appendChild(actionsRow(last, false));
+      host.appendChild(actionsRow(last));
+      mountWifi();
       return;
     }
     job.conclusion = job.result.conclusion || null;
@@ -195,12 +150,17 @@
     job.link_actions = (S.job || {}).link_actions || [];   /* 复测用后端给的地址，不自己猜 */
     job.mode = (S.job && S.job.mode) || last.mode;
 
-    var card = ND.verdict.card(job, { bare: true });
-    if (card) {
-      host.appendChild(card);
-      host.appendChild(actionsRow(last, false));
-    } else {
+    if (!ND.report.render(host, job, opts)) {
       host.appendChild(R.banner("warn", C.result.title, C.tech.empty));
+      mountWifi();
+    }
+  }
+
+  /* 只有「没有报告可看」时才把网络参数单独摆出来；有报告时它在第三段里 */
+  function mountWifi() {
+    if (page.wifiHost.hidden) {
+      page.wifiHost.hidden = false;
+      if (ND.wifi && ND.wifi.mount) ND.wifi.mount(page.wifiHost);
     }
   }
 
@@ -211,7 +171,7 @@
     return go;
   }
 
-  function actionsRow(last, withExport) {
+  function actionsRow(last) {
     var row = U.el("div", "result-acts");
     row.appendChild(U.btn(C.act.view, {
       kind: "ghost", size: "sm", icon: "report",
@@ -242,12 +202,6 @@
     p.appendChild(U.el("b", "", (label || "") + "："));
     p.appendChild(document.createTextNode(text || ""));
     return p;
-  }
-
-  function skeletonBlock() {
-    var c = U.el("div", "left-sk");
-    c.appendChild(R.skeleton(4, 62));
-    return c;
   }
 
   /* ------------------------------------------------------------ 指标卡 */

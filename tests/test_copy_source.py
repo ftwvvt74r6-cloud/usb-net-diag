@@ -14,8 +14,9 @@
 * **V5 / B1**：证据不足时层状态是 ``na``，指标短语必须是「无样本」类文案，
   不许出现「…正常」的肯定句。
 * **判定与文案解耦**：会话标记、连接建立证据、RST 标题都不许把中文文案当哨兵。
-* **缓存不破坏可测性 + 性能回归守卫**：重复取表不重复解析；1000 条流的标记渲染
-  必须远低于 0.5s（去掉缓存会立刻破线）。
+* **缓存不破坏可测性 + 性能回归守卫**：重复取表不重复解析；标记渲染用「热路径 vs
+  冷路径」的相对比值守卫（缓存命中的单次成本必须比重新解析便宜 5 倍以上），
+  不用绝对毫秒阈值 —— 绝对阈值在负载波动的机器上只会随机翻车。
 """
 
 from __future__ import annotations
@@ -496,17 +497,77 @@ class CopytextCacheTests(unittest.TestCase):
         self.assertLess(elapsed, 0.5,
                         f"1000 条流的标记渲染耗时 {elapsed:.3f}s，疑似缓存失效（应 << 0.5s）")
 
-    def test_repeated_flag_render_under_half_second(self):
-        # 5000 次直接渲染 ≈ 10,000 条流 × 半个标记的调用量：
-        # 缓存命中 ~0.06s；**去掉缓存**后每次重读 35KB JSON ≈ 1s+，必红。
+    #: 同进程内重复测量的次数，取**最小值**。单次绝对耗时会被「同机同时跑别的任务」
+    #: 污染（同一提交实测跨 0.27s~1.09s，4 倍漂移），最小值衡量的是「这段代码自身
+    #: 最快能做到多少」，与机器忙闲无关，因此可复现。
+    _PERF_REPEATS = 5
+    #: 热路径批量：5000 次 ≈ 10,000 条流 × 半个标记的调用量（沿用旧用例口径）。
+    _WARM_CALLS = 5000
+    #: 冷路径批量：每次都要真的 stat + 读盘 + ``json.loads`` 35KB，成本高，样本取小，
+    #: 最后按**单次成本**归一，两边才可比。
+    _COLD_CALLS = 50
+    #: 宽松绝对上限（毫秒）：只做灾难性兜底，不承担「快慢」判断。
+    _WARM_CEILING_MS = 2000.0
+
+    def _best_of(self, fn) -> float:
+        """重复跑 ``fn``，返回最快一次的耗时（秒）。
+
+        Args:
+            fn: 无参可调用对象。
+
+        Returns:
+            float: ``_PERF_REPEATS`` 次里的最小耗时；对 CPU 争抢 / GC 抖动免疫。
+        """
+        best = None
+        for _ in range(self._PERF_REPEATS):
+            started = time.perf_counter()
+            fn()
+            elapsed = time.perf_counter() - started
+            if best is None or elapsed < best:
+                best = elapsed
+        return best
+
+    def test_repeated_flag_render_much_cheaper_than_reparse(self):
+        # 这条测试的真实意图是「缓存命中必须比重新解析便宜一个数量级」，不是
+        # 「绝对耗时必须小于某个毫秒数」。原来的 0.5s 绝对阈值在共享 / 高负载机器
+        # 上必然抖：同一份代码实测 0.274s~1.094s（4 倍），于是它只能随机翻车，
+        # 既抓不到真回归（够快时缓存全废也可能压线过），也会误伤无关提交。
+        #
+        # 现在改成同进程内「热路径 vs 冷路径」相对比较：机器忙时两边同比例变慢，
+        # 比值稳定。**这是换测量方法，不是放宽判据** —— 判据反而更严了：
+        # 旧用例只要绝对时间 < 0.5s 就算过（缓存半失效也可能过），
+        # 新用例要求缓存命中比冷路径快 5 倍以上，缓存失效/半失效一律红。
         copytext.reload()
-        copytext.load_table()                     # 预热
-        started = time.perf_counter()
-        for _ in range(5000):
-            copytext.text("stream_flag", "no_response")
-        elapsed = time.perf_counter() - started
-        self.assertLess(elapsed, 0.5,
-                        f"5000 次标记渲染耗时 {elapsed:.3f}s，疑似每次重读 35KB JSON")
+        copytext.load_table()                     # 预热：把首次读盘排除在计时外
+
+        def warm_batch() -> None:
+            for _ in range(self._WARM_CALLS):
+                copytext.text("stream_flag", "no_response")
+
+        def cold_batch() -> None:
+            for _ in range(self._COLD_CALLS):
+                copytext.reload()                 # 强制缓存失效
+                copytext.load_table()             # 真正 stat + 读盘 + json.loads
+
+        warm_best = self._best_of(warm_batch)
+        cold_best = self._best_of(cold_batch)
+
+        warm_per_call = warm_best / self._WARM_CALLS
+        cold_per_call = cold_best / self._COLD_CALLS
+
+        # 兜底：连绝对上限都破了，说明坏的不是「快慢」而是彻底不堪用（例如每次
+        # 调用都在做重 IO / 死循环）。阈值故意放得很宽，避免再变成抖动源。
+        self.assertLess(
+            warm_best * 1000.0, self._WARM_CEILING_MS,
+            f"{self._WARM_CALLS} 次标记渲染耗时 {warm_best * 1000:.1f}ms，"
+            f"超过 {self._WARM_CEILING_MS:.0f}ms 兜底上限")
+
+        # 核心判据：缓存命中单次成本 < 冷路径单次成本 / 5。
+        self.assertLess(
+            warm_per_call * 5.0, cold_per_call,
+            f"缓存命中单次 {warm_per_call * 1e6:.2f}µs，冷路径单次 "
+            f"{cold_per_call * 1e6:.2f}µs，前者未比后者快 5 倍 —— 疑似缓存失效"
+            f"（每次都在重读 35KB JSON）")
 
 
 if __name__ == "__main__":

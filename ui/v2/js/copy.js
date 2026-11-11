@@ -73,9 +73,9 @@
       session: "会话数",
       healthSub: "来自四层结论",
       healthSubLegacy: "旧记录只有等级，没有四层结论",
-      latencySub: "TCP 往返均值",
-      lossSub: "按 TCP 重传率估算",
-      sessionSub: "本次抓到的会话数",
+      latencySub: "TCP 往返时延均值",
+      lossSub: "TCP 重传率估算值",
+      sessionSub: "本次捕获会话数",
       noSample: "本次没有样本",
       thin: "样本不足，不给数值",
       failed: "上次任务失败，没有指标",
@@ -115,22 +115,22 @@
       pathPh: "例如 D:\\Tools\\Wireshark\\tshark.exe",
       pathEmpty: "请先填入路径",
       pathBrowse: "浏览…",
-      pathBrowseFail: "浏览器读不到完整路径：请手动粘贴，或用系统的文件管理器复制路径",
+      pathBrowseFail: "无法读取完整路径：请手动粘贴，或从系统文件管理器复制路径",
       pathSaveUnsupported: "当前版本还不能自动保存路径。请把 {name} 加到系统的 PATH（或装到默认目录），然后点「重新检测」。",
       pathSaved: "已保存，正在重新检测…",
       pathSaveFail: "保存失败：{reason}",
       elevate: "以管理员身份重启",
       elevateAsk: "已请求管理员权限，请在系统弹窗里点「是」",
       elevateFail: "提权请求失败：{reason}",
-      elevateManual: "请关掉这个页面，右键启动器选「以管理员身份运行」。",
+      elevateManual: "请关闭本页面，右键启动器并选择「以管理员身份运行」。",
       recheckDone: "重新检测完成：{count} 项没有通过。",
       recheckAllOk: "重新检测完成：全部通过。",
       recheckFail: "重新检测失败：{reason}",
       groupOther: "其他检查",
       otherHint: "这两项只在特定场景才影响结果，不影响上面的四项。",
-      none: "没有读到环境检查结果，点右上角「重新检测」再试。",
+      none: "未读取到环境检查结果，请点击右上角「重新检测」。",
       fixHint: "补齐后点「重新检测」，不需要重启程序。",
-      allOk: "四项都已就绪，抓包、抓文件分析、逐跳路径都可用。",
+      allOk: "四项均已就绪：抓包、离线分析、逐跳路径可用。",
       locked: "暂不可用：环境里缺依赖，到「总览 → 环境与依赖」补齐后点「重新检测」",
       missingLead: "{count} 项没通过，相关入口已置灰；连通与速度测试、报告与导出仍然可用。"
     },
@@ -138,12 +138,12 @@
     /* 最近一次结果 */
     lastRun: {
       emptyTitle: "还没有诊断结果",
-      emptyBody: "从左侧任一入口开始一次诊断，结果会留在这里。",
+      emptyBody: "从左侧任一入口发起诊断，结果将保留在此处。",
       when: "{when} · {mode}{target}",
       counters: "严重 {critical} · 警告 {warning} · 用时 {duration}",
       summaryOnly: "完整结果已不在内存（服务重启过，或超出保留上限），只能看摘要；重新诊断一次就能看到完整结论。",
       summaryTitle: "上次结果摘要",
-      summaryKept: "完整结果还在内存里，可以重新打开结果页查看四层结论。",
+      summaryKept: "完整结果仍在内存中，可重新打开结果页查看四层结论。",
       summaryGone: "完整结果已不在内存，只有这份摘要。",
       legacyTitle: "这是旧版本的诊断结果，缺少结论边界信息",
       legacyBody: "旧记录没有结论适用范围与边界，不能给出可复核的结论；本页只保留「重新诊断」，不提供含边界的导出。",
@@ -165,8 +165,8 @@
       title: "这次诊断没有完成",
       reasonLabel: "原因",
       adviceLabel: "建议",
-      reasonGeneric: "没有拿到结论。具体原因记录在日志里，最后一条错误通常是根因。",
-      advice: "先看日志里最后一条错误，按提示补齐环境（驱动 / 权限 / 网卡）后再重试一次。",
+      reasonGeneric: "未取得结论；具体原因见日志，末条错误通常为根因。",
+      advice: "查看日志末条错误，补齐环境（驱动 / 权限 / 网卡）后重试。",
       legacy: "上一次任务没有成功，所以没有可展示的结论。"
     },
 
@@ -236,12 +236,12 @@
     form: {
       target: "诊断目标",
       targetPh: "域名、IP 或网段，例如 oa.example.com",
-      targetHint: "只抓和这个目标相关的流量；留空等于不过滤，等于看全部流量。",
+      targetHint: "仅采集与该目标相关的流量；留空表示不过滤，采集全部流量。",
       duration: "抓包时长（秒）",
-      durationHint: "窗口越短越容易只看到零星流量；排查建议 30~60 秒。",
+      durationHint: "采集窗口过短会遗漏流量；排查建议 30–60 秒。",
       iface: "网卡",
       ifaceAuto: "自动选择（推荐）",
-      ifaceHint: "自动选择会先探测哪块网卡真有流量，再开始抓包。",
+      ifaceHint: "自动选择会先探测有流量的网卡，再开始采集。",
       ifaceEmpty: "没有读到网卡列表，先到「总览 → 环境与依赖」看一眼 Npcap。",
       engine: "采集引擎",
       engineAuto: "自动（优先 Scapy，失败回落 tshark）",
@@ -250,18 +250,18 @@
       engineHint: "通信观察只读不发包；会话表按「端口 + 首包特征」识别协议。",
       pcap: "已有抓包文件",
       pcapPh: "— 选择 captures 目录中的文件 —",
-      pcapEmpty: "captures 目录里还没有 pcap 文件：先用实时模式抓一次再来。",
+      pcapEmpty: "captures 目录中没有 pcap 文件：请先完成一次实时采集。",
       port: "端口",
       portHint: "留空按协议画像自动选（HTTPS 443 / HTTP 80）。",
       path: "同时做逐跳路径（MTR / tracert）",
       shadow: "抓包同时做路径剖面与探针基线（每 5 秒，少量探测包）",
-      shadowHint: "探针只发少量 ICMP / TCP SYN / DNS 查询，并做一次 TTL 递增的逐跳探测；都已从业务统计里排除。",
+      shadowHint: "探针仅发送少量 ICMP / TCP SYN / DNS 查询，并执行一次 TTL 递增的逐跳探测；均已从业务统计中排除。",
       needTarget: "请先填写要诊断的域名或 IP",
       needPcap: "请先选择一个 pcap 文件",
       startFail: "启动失败：{reason}",
       starting: "正在启动…",
-      noAdmin: "当前不是管理员：抓包类模式需要关掉页面，右键启动器选「以管理员身份运行」后再试。",
-      locked: "这个模式现在不可用：环境里缺依赖，到「总览 → 环境与依赖」补齐。"
+      noAdmin: "当前未以管理员身份运行：抓包类模式需关闭本页面，右键启动器选择「以管理员身份运行」后重试。",
+      locked: "该模式当前不可用：环境缺少依赖，请到「总览 → 环境与依赖」补齐。"
     },
 
     /* ---------------------------------------------------------- 运行态 */
@@ -274,13 +274,13 @@
       percent: "{percent}%",
       consoleTitle: "采集控制台",
       consoleHint: "采集层的原样输出，等宽字体；结束时自动折叠成一行。",
-      consoleEmpty: "还没有输出…",
+      consoleEmpty: "暂无输出…",
       consoleDone: "采集结束 · {count} 行输出",
       consoleExpand: "展开输出",
       consoleCollapse: "收起输出",
       consoleFollow: "自动滚到底",
       live: "实时追加",
-      noJob: "还没有开始。填好参数后点下面的按钮。",
+      noJob: "尚未开始采集：填写参数后点击下方按钮启动。",
       starting: "正在启动…",
       runningLabel: "运行中…",
       cardTitle: "运行"
@@ -289,9 +289,9 @@
     /* ---------------------------------------------------------- 技术详情 */
     tech: {
       title: "技术详情",
-      hint: "原始参数与中间结果，报问题时连同截图一起给对方最快。",
+      hint: "原始参数与中间结果；提交问题时随截图一并提供。",
       command: "抓包命令",
-      commandNote: "按本次下发参数推算；实际命令行由采集层拼装（需求单 R6-1 会直接下发）。",
+      commandNote: "依据本次下发参数推算；实际命令行由采集层生成（需求单 R6-1 待后端下发）。",
       runningNote: "任务还在运行，这些数据结束后才会出现。",
       bpf: "BPF 过滤器",
       iface: "网卡",
@@ -336,7 +336,7 @@
       layersHeading: "四层",
       evidenceHeading: "证据",
       adviceHeading: "建议",
-      evidenceEmpty: "本次没有可列出的证据条目。",
+      evidenceEmpty: "未发现达到判定阈值的异常条目。",
       adviceEmpty: "本次没有给出建议条目。",
       evidenceCount: "{count} 条",
       exportMd: "导出报告（.md）",
@@ -362,138 +362,153 @@
     /* 硬要求：横幅标题 ≤14 字、问题句 ≤40 字、每条动作 ≤30 字且动词开头。
        这里所有句子都按这个预算写，UI 侧另有一道 clip 兜底。 */
     verdict: {
-      kicker: "本次结论",
+      kicker: "定性结论",
       scopeLabel: "影响范围",
       scope: {
-        peer: "只影响这个对端",
+        peer: "仅影响该对端",
         some: "影响部分目标",
-        all: "影响整机上网",
+        all: "影响整机出网",
         none: "全部正常",
         unknown: "无法判断"
       },
       titleSuffix: "异常",
-      titleOk: "四层全部正常",
-      titleZero: "一个报文都没抓到",
-      titleThin: "证据不足，先别下结论",
-      okProblem: "没有发现影响上网的问题",
-      zeroProblem: "网卡选错，或过滤把流量挡住了",
-      thinProblem: "样本太少，任何一层都判不准",
-      stepsHeading: "现在怎么做",
+      titleOk: "四层指标未见异常",
+      titleZero: "未采集到任何报文",
+      titleThin: "证据不足，暂不下结论",
+      okProblem: "四层指标均未见异常",
+      zeroProblem: "采集网卡或过滤条件导致零报文",
+      thinProblem: "样本量不足，四层判定均不可信",
+      /* ① 的一句话定性：按故障类型给规范表述，不复述后端口语原文。
+         后端的 verdict.plain 原文仍保留在「明细 → 后端结论原文」里可追溯。 */
+      problemByKind: {
+        single: "连接建立失败或超时：目标端口未响应或连接被拒绝",
+        refused: "连接被对端主动拒绝：目标端口无监听，或访问控制未放行",
+        retrans: "应用响应延迟升高：页面加载停滞、远程桌面帧率下降、批量传输吞吐降低",
+        both: "应用响应延迟升高：页面加载停滞、远程桌面帧率下降、批量传输吞吐降低",
+        icmp: "网络层不可达：目标网段或主机路由被阻断，连接无法建立",
+        dns: "域名解析失败率升高：部分域名无法解析，应用表现为连接超时",
+        "5xx": "服务端返回 5xx：请求被服务端拒绝，与链路质量无关",
+        arp: "本地链路不可达：网关地址解析无响应，出网流量无法转发",
+        win: "本机接收窗口耗尽：应用侧读取缓慢，链路被动丢包",
+        hop: "链路中途劣化：逐跳路径上出现丢包，应用响应随之抖动"
+      },
+      stepsHeading: "处置步骤",
       stepNo: "第 {n} 步",
-      ownerHeading: "找谁解决",
-      ownerBasis: "判断依据",
-      ownerPartner: "需要谁配合",
-      ownerNone: "四层没有异常项，本次不需要找人协作。",
-      copyFooter: "需要协作时发给对方的内容：结论 + 依据 + 请对方做的事",
+      ownerHeading: "责任归属",
+      ownerBasis: "判定依据",
+      ownerPartner: "协作建议",
+      ownerNone: "四层无异常项，本次无需跨方协作。",
+      copyFooter: "跨方协作材料：结论 · 依据 · 请求事项",
       copySummary: "复制摘要",
       copySummaryOk: "摘要已复制",
       copySummaryFail: "复制失败，请手动选择文本",
-      prefillLive: "已把 {target} 填进单目标诊断，确认参数后点开始",
-      noTarget: "这次结果里没有可复测的地址，请手动填写目标",
-      evFold: "展开证据",
+      prefillLive: "已将 {target} 填入单目标诊断，确认参数后开始采集",
+      noTarget: "本次结果中没有可复测的地址，请手动填写目标",
+      evFold: "展开明细",
       evBasis: "依据",
       evCoverage: "本次覆盖",
       evNot: "明确未覆盖",
       evConf: "置信度",
       evItems: "证据",
-      evAdvice: "完整排查思路",
+      evAdvice: "完整处置建议",
       evProbe: "探针基线",
-      evPath: "路径剖面",
-      evEmpty: "本次没有可列出的证据条目。",
+      evPath: "路径剖面（MTR / Traceroute）",
+      evEmpty: "未发现达到判定阈值的异常条目；阈值内指标见下方关键指标表。",
       boundaryLead: "适用范围",
       boundaryFull: "完整边界",
-      boundaryNone: "旧记录没有边界信息",
+      boundaryNone: "旧记录缺少边界信息",
+      /* 后端没给 key_limit / 覆盖清单时的兜底：一行也要说清「这套结论用到哪」 */
+      boundaryFallback: "仅覆盖本次抓包窗口内经本机网卡的 TCP/IPv4 流量",
       confidence: "{level}（{value}）",
       confidenceNone: "未给出",
       /* 动作按钮：只允许这几个真实动作，宁可少一个也不放不能点的文字 */
       act: {
         retest: "立即复测",
-        hops: "查看逐跳",
+        hops: "逐跳定位",
         copy: "复制摘要",
         logs: "查看日志",
-        rerun: "改参数再测",
-        fold: "展开证据"
+        rerun: "调整参数复测",
+        fold: "展开明细"
       },
-      /* 责任归属四格 */
-      /* 每格一句「需要谁配合」，控制在 12 字内：四格在总览左栏只有 100 多像素宽 */
+      /* 责任归属四格：一格给「是谁」，一格给「建议怎么协作」 */
       owners: {
-        host: { label: "本机", partner: "需要你：关掉占带宽的程序" },
-        lan: { label: "本地网络", partner: "需要网管：查交换机与网线" },
+        host: { label: "本机", partner: "建议本机侧操作：降低并发占用（关闭大流量下载/上传）" },
+        lan: { label: "本地网络", partner: "建议网络管理员核查交换机与链路" },
         carrier: {
           label: "运营商·承载网",
-          partner: "需要运营商：查线路丢包",
-          byKind: { icmp: "需要运营商：查路由与拦截策略" }
+          partner: "建议提交运营商核查承载网",
+          byKind: { icmp: "建议提交运营商核查路由与拦截策略" }
         },
-        peer: { label: "对端服务", partner: "需要对方：查服务与防火墙" }
+        peer: { label: "对端服务", partner: "建议对端服务方核查服务与防火墙" }
       },
       /* 判断依据的模板（数字会被加粗） */
       basis: {
-        hostWin: "本机接收窗口被塞满 {n} 次",
-        hostOk: "本机网卡与协议栈没有异常",
-        lanArp: "网关 ARP 无应答",
-        lanHop: "第 {hop} 跳（网关）开始丢包",
-        carrierHop: "第 {hop} 跳之后开始丢包，共 {loss}%",
-        carrierBoth: "两侧都在丢包，网关侧也丢 {loss}%",
-        peerSingle: "只有 {target} 连不上，其他对端正常",
+        hostWin: "本机接收窗口耗尽 {n} 次",
+        hostOk: "本机网卡与协议栈未见异常",
+        lanArp: "网关 ARP 无响应",
+        lanHop: "第 {hop} 跳（网关）出现丢包",
+        carrierHop: "第 {hop} 跳起出现丢包，累计 {loss}%",
+        carrierBoth: "双向均存在丢包，网关侧 {loss}%",
+        peerSingle: "仅 {target} 不可达，其余对端正常",
         peer5xx: "对端返回 {n} 次 5xx",
-        peerRefused: "对端明确拒绝连接",
+        peerRefused: "对端主动拒绝连接",
         dnsFail: "DNS 解析失败率 {rate}%（服务器 {srv}）",
-        carrierIcmp: "收到 {n} 条 ICMP 不可达，链路中途被拦"
+        carrierIcmp: "收到 {n} 条 ICMP 不可达，链路中途阻断"
       },
       boundaryCount: "{a} 条覆盖 · {b} 项未覆盖",
       /* 没被高亮的三格也要各给一句，否则只剩标签像半成品 */
       clear: {
-        host: "本机能看到的项目都正常",
-        lan: "网关与本地链路正常",
-        carrier: "链路侧没有丢包",
-        peer: "对端响应正常"
+        host: "本机侧指标未见异常",
+        lan: "网关与本地链路未见异常",
+        carrier: "链路侧未见丢包",
+        peer: "对端响应未见异常"
       },
       /* 三步动作（动词开头、≤30 字）。按故障类型取，最多 3 条 */
       steps: {
         connFail: [
-          { text: "复测确认端口是否可达", act: "retest" },
-          { text: "看第几跳开始不通", act: "hops" },
-          { text: "把报告发给对端服务方", act: "copy" }
+          { text: "复测确认目标端口可达性", act: "retest" },
+          { text: "逐跳定位，确认阻断起始跳", act: "hops" },
+          { text: "将对端连通性证据提交服务方", act: "copy" }
         ],
         retrans: [
-          { text: "复测确认丢包是否持续", act: "retest" },
-          { text: "看第几跳开始变慢", act: "hops" },
-          { text: "把丢包数据发给运营商", act: "copy" }
+          { text: "复测确认丢包持续性", act: "retest" },
+          { text: "逐跳定位（Traceroute/MTR），确认劣化起始跳", act: "hops" },
+          { text: "将逐跳与丢包证据提交运营商核查承载网", act: "copy" }
         ],
         /* ICMP 不可达 / 超时：报文被中途拒掉，「变慢」那套动作会误导用户 */
         icmp: [
-          { text: "确认哪些地址连不上", act: "retest" },
-          { text: "看第几跳回 ICMP 不可达", act: "hops" },
-          { text: "把 ICMP 记录发给运营商", act: "copy" }
+          { text: "确认受影响目标范围", act: "retest" },
+          { text: "逐跳定位 ICMP 不可达来源", act: "hops" },
+          { text: "将 ICMP 记录提交运营商核查", act: "copy" }
         ],
         dns: [
-          { text: "换一个公共 DNS 再测", act: "retest" },
-          { text: "查本机 DNS 设置是否正确", act: "logs" },
-          { text: "把 DNS 结果发给网管", act: "copy" }
+          { text: "切换公共 DNS 服务器复测", act: "retest" },
+          { text: "核查本机 DNS 配置", act: "logs" },
+          { text: "将 DNS 解析结果提交网络管理员", act: "copy" }
         ],
         http: [
-          { text: "查服务端日志确认 5xx", act: "logs" },
-          { text: "复测确认是否稳定复现", act: "retest" },
-          { text: "把状态码发给服务方", act: "copy" }
+          { text: "核查服务端日志确认 5xx", act: "logs" },
+          { text: "复测确认问题可复现性", act: "retest" },
+          { text: "将 HTTP 状态码提交服务方", act: "copy" }
         ],
         arp: [
-          { text: "插回网线或换个端口", act: "retest" },
-          { text: "确认网关地址是否正确", act: "logs" },
-          { text: "找网管查交换机", act: "copy" }
+          { text: "检查网线与交换机端口连接", act: "retest" },
+          { text: "核对默认网关地址配置", act: "logs" },
+          { text: "提交网络管理员核查交换机", act: "copy" }
         ],
         ok: [
-          { text: "保存本次报告留档", act: "copy" },
-          { text: "过 10 分钟再测一次", act: "retest" },
-          { text: "展开证据看统计口径", act: "fold" }
+          { text: "归档本次报告", act: "copy" },
+          { text: "间隔 10 分钟后复测", act: "retest" },
+          { text: "查看明细核对统计口径", act: "fold" }
         ],
         /* 0 包 / 样本不足：不指着「找谁」发力，先让用户把采集搞对 */
         zero: [
-          { text: "换一块网卡再测一次", act: "rerun" },
-          { text: "看采集日志找原因", act: "logs" }
+          { text: "更换采集网卡后重新采集", act: "rerun" },
+          { text: "查看采集日志定位原因", act: "logs" }
         ],
         thin: [
-          { text: "把时长调到 30-60 秒再测", act: "rerun" },
-          { text: "换一个确定可达的目标", act: "rerun" }
+          { text: "将采集时长调整为 30–60 秒", act: "rerun" },
+          { text: "更换可达目标后复测", act: "rerun" }
         ]
       },
       /* 复制给协作方的摘要骨架 */
@@ -505,10 +520,75 @@
       summaryReport: "【报告】"
     },
 
+    /* ---------------------------------------------------------- 三段报告骨架 */
+    report: {
+      title: "诊断报告",
+      sub: "结论 · 证据 · 数据",
+      sec1: "定性结论",
+      sec2: "证据",
+      sec3: "数据",
+      sec1sub: "一句话定性 · 影响范围 · 处置路径",
+      sec2sub: "证据条目与关键指标",
+      sec3sub: "专业统计与网络参数",
+      /** 第二段：证据条目四列 */
+      evTitle: "证据条目",
+      evCount: "{n} 条",
+      evLayer: "层级",
+      evWhat: "现象",
+      evNum: "关键数值",
+      evJudge: "判定",
+      evEmpty: "未发现达到判定阈值的异常条目；阈值内指标见下方关键指标表。",
+      /** 第二段：关键指标表 */
+      metricsTitle: "关键指标",
+      metricsSub: "阈值色标识：正常 / 关注 / 异常",
+      colItem: "指标",
+      colValue: "数值",
+      colState: "判定",
+      mRtt: "RTT 均值",
+      mJitter: "RTT 抖动",
+      mLoss: "丢包率",
+      mRetrans: "重传率",
+      mDupAck: "重复 ACK",
+      mRst: "RST",
+      mDns: "DNS 查询 / 响应",
+      mDnsMs: "DNS 平均耗时",
+      mL7: "L7 协议分布",
+      mL7Note: "按 TCP 会话数",
+      mLossProbe: "探针",
+      mLossNone: "未启用探针",
+      metricsNote: "丢包率取自探针基线；未启用探针时以重传率作为链路劣化指标。",
+      stOk: "正常",
+      stWarn: "关注",
+      stCrit: "异常",
+      /** 第三段：数据 */
+      dataPanels: "专业统计",
+      /* 连通与速度测试没有抓包统计，第三段的正文是逐跳路径，标题不能叫「专业统计」 */
+      dataPath: "逐跳路径（Traceroute）",
+      netTitle: "网络参数",
+      netSub: "无线链路与主机网关（本机可采集字段）",
+      netRefresh: "刷新参数",
+      netEmpty: "当前无可用无线连接信息（可能为有线连接，或无线接口未连接）。",
+      netFail: "读取网络参数失败",
+      netGroupWireless: "无线链路",
+      netGroupHost: "主机与网关",
+      /** 明细折叠 */
+      detail: "展开明细",
+      detailSub: "探针基线 / 路径剖面 / 抓包命令与 BPF / 统计口径",
+      originTitle: "后端结论原文",
+      originSub: "core/copy/zh-CN.json 的原始表述，保留可追溯",
+      captureTitle: "抓包命令与 BPF",
+      scaleTitle: "统计口径",
+      /** 运行中占位 */
+      running: "采集中，三段内容在采集结束后生成",
+      runningBody: "{phase} · 已用 {elapsed} 秒 · 控制台 {lines} 行",
+      pro: "专业模式",
+      proHint: "开启后数据段显示全部字段，采集控制台默认展开"
+    },
+
     /* ---------------------------------------------------------- 专业数据面板 */
     panel: {
-      title: "实时与专业数据",
-      sub: "左边说人话，右边给原始数据",
+      title: "专业数据",
+      sub: "原始抓包统计",
       pro: "专业模式",
       proOn: "专业模式已开启",
       proOff: "专业模式已关闭",
@@ -531,7 +611,7 @@
       qDupAck: "重复 ACK",
       times: "{n} 次",
       ofRate: "{n} 次 · {rate}%",
-      streamsHint: "点任意一行复制对应的 Wireshark 过滤器",
+      streamsHint: "选择任一记录可复制对应 Wireshark 过滤器",
       colFlow: "源 → 目标",
       colPkts: "包",
       colBytes: "字节",
@@ -541,7 +621,7 @@
       filterCopied: "过滤器已复制：{f}",
       filterFail: "复制失败，请手动复制：{f}",
       more: "显示全部 {n} 条会话",
-      l7Note: "按 TCP 会话数统计；DNS 走 UDP，见下一行",
+      l7Note: "按 TCP 会话数统计；DNS 为 UDP，单独统计",
       l7Sample: "样本 {n}/{total} 个会话",
       l7Missing: "后端未下发应用层报文占比（需求单 R8-1），这里按会话类型统计",
       l7Empty: "本次没有可归类的会话",
@@ -552,9 +632,9 @@
       dnsResp: "响应",
       dnsAvg: "平均耗时",
       dnsFail: "失败率",
-      empty: "完成一次诊断后，这里会出现本次的专业数据",
-      running: "正在采集，结束后这里出统计",
-      runningFill: "采集中，下面这些位置结束后依次填数",
+      empty: "完成一次诊断后展示本次专业统计",
+      running: "采集中，结束后生成统计",
+      runningFill: "采集中，各指标在采集结束后依次生成",
       runningBody: "{phase} · 已用 {elapsed} 秒 · 控制台 {lines} 行",
       noData: "—",
       secExtra: "更多字段",
@@ -586,7 +666,7 @@
       close: "关闭"
     },
     toast: {
-      network: "连不上本地服务，请确认工具还在运行",
+      network: "无法连接本地服务，请确认工具进程仍在运行",
       http: "本地服务返回 {status}",
       timeout: "本地服务响应超时"
     },
