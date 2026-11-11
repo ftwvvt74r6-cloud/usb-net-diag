@@ -134,3 +134,105 @@ HTTP 大流（2000 包）按会话数是「TLS 91%」，按报文数才是「HTT
    报告快照会跟着变。
 3. `l7_packets` 一旦出现在 `reports/*.json` 里，说明有人改了 `report.save()` 的
    块清单，违反「只落五块」的约定。
+
+---
+
+## 7. 历史接口（`/api/history*`，T2）
+
+数据源是常驻 agent 写的 `logs/history/YYYY-MM-DD.jsonl`（字段见 `docs/agent.md` §4）。
+读取、分桶、覆盖率、导出全部收在 `core/history.py` 一层里，`server` 只做参数解析 ——
+同一个缺口不能一处算 3 分钟、另一处算 5 分钟。
+
+### 7.1 `GET /api/history?from&to&bucket=1m|5m|1h`
+
+```json
+{
+  "ok": true,
+  "from": "2026-11-11T10:00:00+08:00",
+  "to": "2026-11-11T11:00:00+08:00",
+  "from_epoch": 1794362400.0,
+  "to_epoch": 1794366000.0,
+  "bucket": "1m",
+  "bucket_s": 60,
+  "samples": 355,
+  "series": [
+    {"key": "gateway", "kind": "gateway", "label": "网关",
+     "points": [{"t": "2026-11-11T10:00:00+08:00", "epoch": 1794362400.0, "n": 6,
+                 "rtt_ms": {"avg": 12.3, "max": 20.0, "min": 8.1},
+                 "loss_pct": {"avg": 0.0, "max": 0.0, "min": 0.0},
+                 "jitter_ms": {"avg": 2.1, "max": 5.0, "min": 0.5},
+                 "bssid": "aa:bb:cc:00:00:01"}]}
+  ],
+  "marks": [{"t": "...", "epoch": 1794363000.0, "note": "换了 AP"}],
+  "coverage": {
+    "samples": 355, "expected": 360, "ratio": 0.986,
+    "interval_s": 10,
+    "gaps": [{"from": "...", "to": "...", "seconds": 300, "missing": 30}]
+  }
+}
+```
+
+| 字段 | 口径 |
+|---|---|
+| `series[].key` | `gateway` / `dns` / `target:<目标名>`。**目标带前缀**：用户可以把它命名为 `gateway`，不带前缀就和网关序列撞名 |
+| `series[].kind` | `gateway` / `dns` / `target` |
+| `points[].n` | 该桶里的样本条数（`n=1` 表示这一分钟只采到一次） |
+| `points[].rtt_ms` | `avg` / `max` / `min`，1 位小数。**没测到就是 `null`** |
+| `points[].bssid` | 该桶内出现次数最多的 BSSID（主 AP）；全空时 `null` |
+
+### 7.2 `coverage.gaps`：缺口必须显式
+
+三条规则，改之前先读完：
+
+1. **没有数据的桶不出现在 `series` 里**，不补 0 点。补 0 会在图上画出一条贴着
+   横轴的完美直线，看起来像「网络很好」，实际是「没采到」。
+2. **`gaps` 为空数组只代表「这段采齐了」**，不代表「没采到所以没缺口」。
+   空区间（一条样本都没有）也照样给一段覆盖整个查询区间的缺口。
+3. `missing` 是「该有但没有」的样本数，恒 ≥ 1；`seconds` 是真实时长。
+
+缺口判定容差是 `interval_s × 1.5`：一轮采样本身要花几百毫秒到几秒，严格按
+`interval_s` 判会每轮都多出一个假缺口。
+
+`expected` / `ratio` 是**估算**：`expected = ceil((to-from)/interval_s)`，
+`ratio = samples / expected`（`expected = 0` 时 `ratio` 为 `null`）。区间长度不是
+采样间隔整数倍时，`ratio` 会略大于 1，属于正常现象 —— 它表达的是「采到的条数 /
+按长度该有的条数」，不是严格覆盖率。
+
+### 7.3 `GET /api/history/export?format=csv|md&from&to`
+
+CSV 列头**固定**（列序即契约，逐字符不得改）：
+
+```text
+time,interval_s,gateway_rtt_ms,gateway_loss_pct,gateway_jitter_ms,dns_rtt_ms,target_key,target_rtt_ms,target_loss_pct,bssid,rssi_dbm,rx_mbps,band,channel
+```
+
+| 规则 | 说明 |
+|---|---|
+| 行粒度 | 一行 = 一个样本 × 一个目标（宽表，方便在 Excel 里按目标筛选） |
+| 没有目标 | 每个样本仍出一行，`target_*` 三列留空 |
+| 缺失值 | **留空**，不写 `0`（同上：0 会在图上连出一条假线） |
+| 编码 | UTF-8，**无 BOM**（列头逐字节可比）；`\n` 换行 |
+| 转义 | 含逗号/引号/换行的格子加双引号，内部引号翻倍 |
+
+`md` 是人读摘要：时段、样本数/期望、覆盖率、缺口段数与最长缺口、异常 Top5
+（时间/目标/类型/实测/阈值/**当时 AP 与信号**）、缺口明细表。异常取 `events.jsonl`
+里区间内的事件，按「实测/阈值」降序取前 5 —— 与「连续 2 次才落一条」的判定同源，
+不另算一套阈值。
+
+### 7.4 `POST /api/history/mark` / `GET /api/history/marks`
+
+`{"note": "15:20 换了 AP"}` → 追加一行到 `logs/history/marks.jsonl`，
+返回 `{"ok": true, "mark": {"t", "epoch", "note"}}`。正文去空白后不能为空、
+最长 500 字（超出返回 400）。写盘失败返回 500 —— 不假装成功，否则下次查 marks
+对不上会变成另一个谜。
+
+### 7.5 错误码
+
+| 情况 | 响应 |
+|---|---|
+| 时间格式无法识别 / `from` 晚于 `to` / `bucket` 不在三档内 / `format` 非 `csv|md` | `400` + `{"ok": false, "error": "..."}` |
+| `/api/history/` 后接未知子路径 | `404` |
+| 目录不存在 / 文件为空 | `200` + 空 `series` / 空 `events` + 一段显式缺口（**不是错误**） |
+
+时间参数接受 epoch 秒（数字或数字串）与 ISO 8601（`2026-11-11`、`2026-11-11 10:00`、
+`2026-11-11T10:00:00+08:00`、结尾 `Z` 的 UTC）。**无时区按本地时间**解释。

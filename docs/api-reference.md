@@ -7,9 +7,9 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**36** 个（有模块说明 36 个）
-- 公开符号：**358** 个（有 docstring 358 个，合格 356 个）
-- 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
+- 扫描模块：**37** 个（有模块说明 37 个）
+- 公开符号：**375** 个（有 docstring 375 个，合格 373 个）
+- 合格率：**99.5%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
 
@@ -3082,6 +3082,384 @@ Returns:
         （不做类型转换，交给 :func:`parse_flag` 等函数按需解析）。
 ```
 
+## `core/history.py`
+
+**职责**：历史样本的读取 / 聚合 / 导出（``/api/history*`` 的数据层）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `iso` | function | 99 | ✅ |
+| `parse_time` | function | 116 | ✅ |
+| `parse_range` | function | 154 | ✅ |
+| `bucket_seconds` | function | 178 | ✅ |
+| `bucket_start` | function | 197 | ✅ |
+| `history_dir` | function | 226 | ✅ |
+| `shards` | function | 235 | ✅ |
+| `read_samples` | function | 295 | ✅ |
+| `read_events` | function | 318 | ✅ |
+| `read_marks` | function | 340 | ✅ |
+| `add_mark` | function | 361 | ✅ |
+| `aggregate_series` | function | 456 | ✅ |
+| `coverage` | function | 540 | ✅ |
+| `build_history` | function | 602 | ✅ |
+| `export_csv` | function | 661 | ✅ |
+| `export_markdown` | function | 737 | ✅ |
+| `export_document` | function | 811 | ✅ |
+
+### `iso`
+
+```python
+def iso(when: float) -> str
+```
+
+```text
+epoch 秒 → 本地时区带偏移的 ISO 字符串。
+
+Args:
+    when: Unix 时间戳（秒）。
+
+Returns:
+    str: 精确到秒，如 ``2026-11-11T16:50:01+08:00``。
+```
+
+### `parse_time`
+
+```python
+def parse_time(value: Any, *, default: float) -> float
+```
+
+```text
+把查询参数解析成 epoch 秒。
+
+Args:
+    value: ``None`` / 空串 / epoch 秒（数字或数字串）/ ISO 8601 字符串
+        （``2026-11-11``、``2026-11-11 10:00``、``2026-11-11T10:00:00+08:00``、
+        结尾 ``Z`` 的 UTC 写法）。
+    default: 值为空时返回的默认 epoch。
+
+Returns:
+    float: epoch 秒。无时区的字符串按**本地时间**解释（与界面显示一致）。
+
+Raises:
+    ValueError: 给了值但既不是数字也不是 ISO 时间；调用方据此回 400。
+```
+
+### `parse_range`
+
+```python
+def parse_range(from_value: Any=None, to_value: Any=None, *, now: float | None=None) -> tuple[float, float]
+```
+
+```text
+解析 ``from`` / ``to`` 两个查询参数。
+
+Args:
+    from_value: 起始时间（见 :func:`parse_time`）；省略时取 ``to - 1 小时``。
+    to_value: 结束时间；省略时取当前时间。
+    now: 当前 epoch（测试注入）。
+
+Returns:
+    tuple[float, float]: ``(start, end)``，闭区间。
+
+Raises:
+    ValueError: 格式非法，或 ``from`` 晚于 ``to``。
+```
+
+### `bucket_seconds`
+
+```python
+def bucket_seconds(name: Any) -> tuple[str, int]
+```
+
+```text
+把 ``bucket`` 参数解析成秒数。
+
+Args:
+    name: ``1m`` / ``5m`` / ``1h``；空值时用 :data:`DEFAULT_BUCKET`。
+
+Returns:
+    tuple[str, int]: ``(归一化档位名, 秒数)``。
+
+Raises:
+    ValueError: 不在三档之内。
+```
+
+### `bucket_start`
+
+```python
+def bucket_start(epoch: float, seconds: int) -> float
+```
+
+```text
+求某个时间戳所属桶的起点。
+
+Args:
+    epoch: Unix 时间戳（秒）。
+    seconds: 桶宽（60 / 300 / 3600）。
+
+Returns:
+    float: 桶起点 epoch。**按本地时区对齐**：1h 桶落在整点、5m 桶落在
+        ``:00/:05/:10…``，这样图上刻度与人对表的方式一致（按 UTC 对齐的话，
+        UTC+8 看到的是 ``:00`` 对应的本地 ``08:00``，但 5m 桶会整体偏移，
+        凌晨的桶还会跨到前一天）。
+
+    Note:
+    有夏令时的时区里，一天可能有 23 或 25 小时，``replace()`` 理论上会撞到
+    不存在的本地时间。中国无夏令时，先按此实现；真有该需求时再按 UTC 桶对齐。
+```
+
+### `history_dir`
+
+```python
+def history_dir() -> pathlib.Path
+```
+
+```text
+历史样本目录（``<日志根>/history``，跟随 ``NETDIAG_LOG_DIR``）。
+
+Returns:
+    Path: 目录路径（不保证存在）。
+```
+
+### `shards`
+
+```python
+def shards(start: float, end: float) -> list[pathlib.Path]
+```
+
+```text
+列出与 ``[start, end]`` 有交集的分片文件（含滚动分片）。
+
+Args:
+    start: 区间起点 epoch。
+    end: 区间终点 epoch。
+
+Returns:
+    list[Path]: 按文件名排序；目录不存在时返回空表。**只按文件名挑日期**，
+        不做全目录扫描式读取 —— 7 天数据最多十几个分片。
+```
+
+### `read_samples`
+
+```python
+def read_samples(start: float, end: float) -> list[dict]
+```
+
+```text
+读取 ``[start, end]`` 内的样本，按时间升序。
+
+Args:
+    start: 区间起点 epoch（闭）。
+    end: 区间终点 epoch（闭）。
+
+Returns:
+    list[dict]: 样本记录。跨分片合并后**按 epoch 重排**：滚动分片
+        （``YYYY-MM-DD.1.jsonl``）与当天主分片之间没有文件名顺序关系，
+        只能靠时间戳排。
+```
+
+### `read_events`
+
+```python
+def read_events(start: float, end: float) -> list[dict]
+```
+
+```text
+读取 ``[start, end]`` 内的事件。
+
+Args:
+    start: 区间起点 epoch（闭）。
+    end: 区间终点 epoch（闭）。
+
+Returns:
+    list[dict]: 事件记录（``t`` / ``epoch`` / ``target`` / ``type`` / ``value``
+        / ``threshold`` / ``duration_s`` …），按时间升序。
+```
+
+### `read_marks`
+
+```python
+def read_marks(start: float, end: float) -> list[dict]
+```
+
+```text
+读取 ``[start, end]`` 内的人工标记。
+
+Args:
+    start: 区间起点 epoch（闭）。
+    end: 区间终点 epoch（闭）。
+
+Returns:
+    list[dict]: 形如 ``{"t","epoch","note"}``，按时间升序。
+```
+
+### `add_mark`
+
+```python
+def add_mark(note: str, *, now: float | None=None) -> dict
+```
+
+```text
+追加一条人工标记（「这台机器 15:20 换过 AP」这类上下文）。
+
+Args:
+    note: 标记正文（去首尾空白后不能为空，最长 :data:`MAX_MARK_CHARS` 字）。
+    now: 时间（测试注入）；省略取当前。
+
+Returns:
+    dict: 落盘的那条记录 ``{"t","epoch","note"}``。
+
+Raises:
+    ValueError: 正文为空或过长。
+    OSError: 目录/文件不可写（U 盘只读、被占用）。
+```
+
+### `aggregate_series`
+
+```python
+def aggregate_series(samples: Sequence[Mapping[str, Any]], seconds: int) -> list[dict]
+```
+
+```text
+按桶聚合出「每条序列一条曲线」。
+
+Args:
+    samples: :func:`read_samples` 的产物（按时间升序）。
+    seconds: 桶宽（见 :func:`bucket_seconds`）。
+
+Returns:
+    list[dict]: 每条序列一项::
+
+        {"key": "gateway", "kind": "gateway", "label": "网关",
+         "points": [{"t": "...", "epoch": 1, "n": 6,
+                     "rtt_ms": {"avg": 12.3, "max": 20.0, "min": 8.1},
+                     "loss_pct": {...}, "jitter_ms": {...},
+                     "bssid": "aa:bb:cc:dd:ee:ff"}]}
+
+    **没有数据的桶不出现**（不补 0 点），缺口由 :func:`coverage` 显式列出。
+    ``bssid`` 是该桶内出现次数最多的 BSSID（主 AP），用于回答「这段是不是
+    挂在同一个 AP 上」。
+```
+
+### `coverage`
+
+```python
+def coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float, interval_s: int | None=None) -> dict
+```
+
+```text
+算区间内的样本覆盖率与缺口。
+
+Args:
+    samples: 区间内的样本（按时间升序）。
+    start: 区间起点 epoch。
+    end: 区间终点 epoch。
+    interval_s: 采样间隔；省略时取样本里的众数。
+
+Returns:
+    dict: ``{"samples", "expected", "ratio", "interval_s", "gaps": [...]}``。
+
+    * ``expected``：``(end-start)/interval_s`` 的向上取整，估算值（闭区间两端
+      各算一个样本会让 1 小时 10 秒间隔算出 361，读起来别扭，这里只用长度估）；
+    * ``ratio``：``samples/expected``，保留 3 位；``expected`` 为 0 时是 ``None``
+      （不写 0，避免「覆盖率 0%」被当成「一条也没采到」）；
+    * ``gaps``：每段 ``{"from","to","seconds","missing"}``。**空区间也照样给
+      一段缺口**（覆盖整个查询区间）——「这段没数据」必须说出来，不能返回
+      一个空数组让人误以为「一切正常」。
+
+    Note:
+    相邻样本间隔小于 ``interval_s * 1.5`` 视为「按时采到」：一轮采样本身要花
+    几百毫秒到几秒，严格按 ``interval_s`` 判会每桶都多出一个假缺口。
+```
+
+### `build_history`
+
+```python
+def build_history(from_value: Any=None, to_value: Any=None, bucket: Any=None, *, now: float | None=None) -> dict
+```
+
+```text
+``GET /api/history`` 的完整载荷。
+
+Args:
+    from_value: 起始时间（epoch 或 ISO）。
+    to_value: 结束时间（epoch 或 ISO）。
+    bucket: ``1m`` / ``5m`` / ``1h``。
+    now: 当前 epoch（测试注入）。
+
+Returns:
+    dict: ``{"ok", "from", "to", "from_epoch", "to_epoch", "bucket",
+    "bucket_s", "samples", "series", "marks", "coverage"}``。
+
+Raises:
+    ValueError: 参数非法（调用方回 400）。
+```
+
+### `export_csv`
+
+```python
+def export_csv(samples: Sequence[Mapping[str, Any]]) -> str
+```
+
+```text
+把样本导成逐行 CSV（一行 = 一个样本 × 一个目标）。
+
+Args:
+    samples: 区间内的样本（按时间升序）。
+
+Returns:
+    str: 含表头、以 ``\n`` 结尾（每行都以 ``\n`` 结束）的文本。列头固定为
+    :data:`CSV_COLUMNS`；网关/DNS 列在不同目标行里重复出现（宽表，方便直接
+    在 Excel 里按目标筛选）。
+
+    Note:
+    没有配置目标时每个样本仍出一行，``target_*`` 三列留空 —— 这样「有采集
+    但没有目标」与「完全没有采集」在 CSV 里能分开。
+```
+
+### `export_markdown`
+
+```python
+def export_markdown(samples: Sequence[Mapping[str, Any]], start: float, end: float, events: Sequence[Mapping[str, Any]] | None=None, *, top: int=5) -> str
+```
+
+```text
+生成人读的历史摘要（时段 / 样本数 / 覆盖率 / 异常 Top5）。
+
+Args:
+    samples: 区间内的样本（按时间升序）。
+    start: 区间起点 epoch。
+    end: 区间终点 epoch。
+    events: 区间内的事件（``None`` 时按区间现读 ``events.jsonl``）。
+    top: 异常列几条。
+
+Returns:
+    str: Markdown 文本（``\n`` 换行）。每条异常带**当时**的 AP 与信号：
+    用户看到「15:20 丢包 30%」时，下一个问题一定是「那会儿是不是换 AP 了」。
+```
+
+### `export_document`
+
+```python
+def export_document(fmt: str, from_value: Any=None, to_value: Any=None, *, now: float | None=None) -> tuple[str, str, str]
+```
+
+```text
+按格式生成导出内容。
+
+Args:
+    fmt: ``csv`` / ``md``。
+    from_value: 起始时间。
+    to_value: 结束时间。
+    now: 当前 epoch（测试注入）。
+
+Returns:
+    tuple[str, str, str]: ``(内容, Content-Type, 建议文件名)``。
+
+Raises:
+    ValueError: 格式不支持或时间非法。
+```
+
 ## `core/logstore.py`
 
 **职责**：唯一日志出口：目录、按日文件、裁剪、环境快照、分析记录、崩溃快照。
@@ -5978,37 +6356,37 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `static_asset` | function | 108 | ✅ |
-| `ui_entry` | function | 179 | ✅ |
-| `touch` | function | 301 | ✅ |
-| `request_quit` | function | 306 | ✅ |
-| `cleanup_pid` | function | 354 | ✅ |
-| `BodyTooLarge` | class | 364 | ✅ |
-| `doctor_cached` | function | 443 | ✅ |
-| `log` | function | 560 | ✅ |
-| `evidence_payload` | function | 656 | ✅ |
-| `conclusion_report_id` | function | 780 | ✅ |
-| `build_status_conclusion` | function | 811 | ✅ |
-| `start_job` | function | 1237 | ✅ |
-| `report_index` | function | 1298 | ✅ |
-| `request_elevation` | function | 1332 | ✅ |
-| `preflight_payload` | function | 1370 | ✅ |
-| `validate_component_path` | function | 1424 | ✅ |
-| `log_files` | function | 1464 | ✅ |
-| `resolve_log_file` | function | 1522 | ✅ |
-| `engine_info` | function | 1555 | ✅ |
-| `passive_start` | function | 1598 | ✅ |
-| `passive_status` | function | 1633 | ✅ |
-| `link_actions` | function | 1707 | ✅ |
-| `Handler` | class | 1788 | ✅ |
-| `Handler.handle_one_request` | method | 1814 | ✅ |
-| `Handler.log_message` | method | 1866 | ✅ |
-| `Handler.do_GET` | method | 2042 | ✅ |
-| `Handler.do_POST` | method | 2064 | ✅ |
-| `DiagServer` | class | 2461 | ✅ |
-| `DiagServer.handle_error` | method | 2472 | ✅ |
-| `create_server` | function | 2500 | ✅ |
-| `main` | function | 2547 | ✅ |
+| `static_asset` | function | 114 | ✅ |
+| `ui_entry` | function | 185 | ✅ |
+| `touch` | function | 307 | ✅ |
+| `request_quit` | function | 312 | ✅ |
+| `cleanup_pid` | function | 360 | ✅ |
+| `BodyTooLarge` | class | 370 | ✅ |
+| `doctor_cached` | function | 449 | ✅ |
+| `log` | function | 566 | ✅ |
+| `evidence_payload` | function | 662 | ✅ |
+| `conclusion_report_id` | function | 786 | ✅ |
+| `build_status_conclusion` | function | 817 | ✅ |
+| `start_job` | function | 1243 | ✅ |
+| `report_index` | function | 1304 | ✅ |
+| `request_elevation` | function | 1338 | ✅ |
+| `preflight_payload` | function | 1376 | ✅ |
+| `validate_component_path` | function | 1430 | ✅ |
+| `log_files` | function | 1470 | ✅ |
+| `resolve_log_file` | function | 1528 | ✅ |
+| `engine_info` | function | 1561 | ✅ |
+| `passive_start` | function | 1604 | ✅ |
+| `passive_status` | function | 1639 | ✅ |
+| `link_actions` | function | 1713 | ✅ |
+| `Handler` | class | 1794 | ✅ |
+| `Handler.handle_one_request` | method | 1820 | ✅ |
+| `Handler.log_message` | method | 1872 | ✅ |
+| `Handler.do_GET` | method | 2048 | ✅ |
+| `Handler.do_POST` | method | 2070 | ✅ |
+| `DiagServer` | class | 2536 | ✅ |
+| `DiagServer.handle_error` | method | 2547 | ✅ |
+| `create_server` | function | 2575 | ✅ |
+| `main` | function | 2622 | ✅ |
 
 ### `static_asset`
 
