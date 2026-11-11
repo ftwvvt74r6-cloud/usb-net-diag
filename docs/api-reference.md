@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**37** 个（有模块说明 37 个）
-- 公开符号：**375** 个（有 docstring 375 个，合格 373 个）
+- 公开符号：**382** 个（有 docstring 382 个，合格 380 个）
 - 合格率：**99.5%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -3088,23 +3088,30 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `iso` | function | 99 | ✅ |
-| `parse_time` | function | 116 | ✅ |
-| `parse_range` | function | 154 | ✅ |
-| `bucket_seconds` | function | 178 | ✅ |
-| `bucket_start` | function | 197 | ✅ |
-| `history_dir` | function | 226 | ✅ |
-| `shards` | function | 235 | ✅ |
-| `read_samples` | function | 295 | ✅ |
-| `read_events` | function | 318 | ✅ |
-| `read_marks` | function | 340 | ✅ |
-| `add_mark` | function | 361 | ✅ |
-| `aggregate_series` | function | 456 | ✅ |
-| `coverage` | function | 540 | ✅ |
-| `build_history` | function | 602 | ✅ |
-| `export_csv` | function | 661 | ✅ |
-| `export_markdown` | function | 756 | ✅ |
-| `export_document` | function | 830 | ✅ |
+| `iso` | function | 100 | ✅ |
+| `parse_time` | function | 117 | ✅ |
+| `parse_range` | function | 155 | ✅ |
+| `bucket_seconds` | function | 179 | ✅ |
+| `bucket_start` | function | 198 | ✅ |
+| `history_dir` | function | 227 | ✅ |
+| `shards` | function | 236 | ✅ |
+| `read_samples` | function | 296 | ✅ |
+| `read_events` | function | 319 | ✅ |
+| `read_marks` | function | 341 | ✅ |
+| `add_mark` | function | 362 | ✅ |
+| `series_keys` | function | 421 | ✅ |
+| `pick_block` | function | 493 | ✅ |
+| `primary_key` | function | 528 | ✅ |
+| `aggregate_points` | function | 551 | ✅ |
+| `sample_coverage` | function | 636 | ✅ |
+| `bucket_coverage` | function | 700 | ✅ |
+| `event_type_name` | function | 764 | ✅ |
+| `event_view` | function | 789 | ✅ |
+| `mark_view` | function | 814 | ✅ |
+| `build_history` | function | 832 | ✅ |
+| `export_csv` | function | 913 | ✅ |
+| `export_markdown` | function | 1008 | ✅ |
+| `export_document` | function | 1082 | ✅ |
 
 ### `iso`
 
@@ -3314,41 +3321,108 @@ Raises:
     OSError: 目录/文件不可写（U 盘只读、被占用）。
 ```
 
-### `aggregate_series`
+### `series_keys`
 
 ```python
-def aggregate_series(samples: Sequence[Mapping[str, Any]], seconds: int) -> list[dict]
+def series_keys(samples: Sequence[Mapping[str, Any]]) -> list[str]
 ```
 
 ```text
-按桶聚合出「每条序列一条曲线」。
+区间内出现过的序列 key（按首次出现排序）。
+
+Args:
+    samples: 区间内的样本。
+
+Returns:
+    list[str]: 如 ``["gateway", "dns", "target:公司官网"]``。给 ``target``
+        参数写错时拼错误提示用 —— 让人一眼看到可选值，比回一个空图强。
+```
+
+### `pick_block`
+
+```python
+def pick_block(sample: Mapping[str, Any], target: str | None=None) -> Mapping[str, Any] | None
+```
+
+```text
+选出一条样本里「这条曲线看哪一段测量」。
+
+默认顺序：**配置里的第一个目标** → DNS → 网关。
+
+为什么不把三条平均成一条：网关 1 ms 与公网目标 30 ms 平均出 15 ms，
+这个数不代表任何一台设备，图上还会随着「网关抖一下」上下跳 —— 读的人只会
+更糊涂。画一条就必须说清是哪条，所以 ``/api/history`` 的响应里带 ``target``
+说明当前曲线是什么，并支持 ``?target=`` 显式切换。
+
+Args:
+    sample: 一条样本记录。
+    target: 指定序列：``gateway`` / ``dns`` / ``target:<key>`` / ``<key>``；
+        ``None`` 按上面的默认顺序。
+
+Returns:
+    Mapping | None: 测量块；该样本没有对应测量时 ``None``。
+```
+
+### `primary_key`
+
+```python
+def primary_key(samples: Sequence[Mapping[str, Any]], target: str | None=None) -> str
+```
+
+```text
+算出「这条曲线实际画的是哪条序列」的 key。
+
+Args:
+    samples: 区间内的样本（按时间升序）。
+    target: 用户指定的 ``target`` 参数。
+
+Returns:
+    str: 序列 key（如 ``target:公司官网``）；区间内没有任何测量时为空串。
+        与 :func:`pick_block` 的选法必须同源，否则图上的线与响应里的
+        ``target`` 会对不上。
+```
+
+### `aggregate_points`
+
+```python
+def aggregate_points(samples: Sequence[Mapping[str, Any]], seconds: int, target: str | None=None) -> list[dict]
+```
+
+```text
+按桶聚合出一条扁平的时间轴（界面的折线/色块直接用这个）。
 
 Args:
     samples: :func:`read_samples` 的产物（按时间升序）。
     seconds: 桶宽（见 :func:`bucket_seconds`）。
+    target: 看哪条序列，见 :func:`pick_block`。
 
 Returns:
-    list[dict]: 每条序列一项::
+    list[dict]: 每个**有数据的桶**一项::
 
-        {"key": "gateway", "kind": "gateway", "label": "网关",
-         "points": [{"t": "...", "epoch": 1, "n": 6,
-                     "rtt_ms": {"avg": 12.3, "max": 20.0, "min": 8.1},
-                     "loss_pct": {...}, "jitter_ms": {...},
-                     "bssid": "aa:bb:cc:dd:ee:ff"}]}
+        {"t": 1762833600.0, "ts": "2026-11-11T10:00:00+08:00", "n": 6,
+         "rtt_ms": 12.3, "loss_pct": 0.0, "jitter_ms": 1.2,
+         "rssi_dbm": -55.0, "rx_mbps": 300.0, "bssid": "aa:bb:cc:dd:ee:ff"}
 
-    **没有数据的桶不出现**（不补 0 点），缺口由 :func:`coverage` 显式列出。
-    ``bssid`` 是该桶内出现次数最多的 BSSID（主 AP），用于回答「这段是不是
-    挂在同一个 AP 上」。
+    聚合口径（前端直接画，不再二次加工）：
+
+    * ``rtt_ms`` / ``jitter_ms`` / ``rssi_dbm`` / ``rx_mbps``：桶内**均值**；
+    * ``loss_pct``：桶内**最大值**（最差那一笔）；
+    * ``bssid``：桶内**样本数最多**的那个（主 AP）。
+
+    **没有数据的桶不出现**：不补 0、也不补 ``null`` 占位 —— 补点会让
+    「没采到」和「采到了但数值是 0」在图上长得一样。缺口由
+    :func:`bucket_coverage` 单独说。``t`` 是 epoch 秒（前端用它画横轴），
+    ``ts`` 是给人看的带时区文本。
 ```
 
-### `coverage`
+### `sample_coverage`
 
 ```python
-def coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float, interval_s: int | None=None) -> dict
+def sample_coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float, interval_s: int | None=None) -> dict
 ```
 
 ```text
-算区间内的样本覆盖率与缺口。
+算区间内的**样本级**覆盖率与缺口（导出摘要用）。
 
 Args:
     samples: 区间内的样本（按时间升序）。
@@ -3370,29 +3444,123 @@ Returns:
     Note:
     相邻样本间隔小于 ``interval_s * 1.5`` 视为「按时采到」：一轮采样本身要花
     几百毫秒到几秒，严格按 ``interval_s`` 判会每桶都多出一个假缺口。
+    这是**导出报告**用的口径（一次 21 秒的断档也要列出来）；界面画图用的是
+    :func:`bucket_coverage`（按桶算，桶内有样本即算「有线」）。
+```
+
+### `bucket_coverage`
+
+```python
+def bucket_coverage(points: Sequence[Mapping[str, Any]], start: float, end: float, seconds: int, *, samples: int=0) -> dict
+```
+
+```text
+算区间内的**桶级**覆盖率与缺口（界面断线用）。
+
+Args:
+    points: :func:`aggregate_points` 的产物（有数据的桶）。
+    start: 区间起点 epoch。
+    end: 区间终点 epoch。
+    seconds: 桶宽。
+    samples: 原始样本条数（原样回填到响应里）。
+
+Returns:
+    dict: ``{"from","to","samples","gaps","expected","ratio","bucket_s",
+    "gap_ranges"}``。
+
+    * ``gaps``：**缺失的桶数**（界面契约）。区间内一条数据都没有时，
+      它等于全部桶数 —— **不会填 0**，否则前端会显示「0 个缺口」；
+    * ``gap_ranges``：每段 ``{"from","to","seconds","missing"}``，``missing``
+      是这段缺了几个桶。图上的断线要靠它说清「断的是 10:03 那一分钟」；
+    * ``ratio``：有数据的桶 / 应有桶数，保留 3 位。
+
+    Note:
+    桶按**本地时区**对齐后逐个累加求边界，不用 ``epoch // seconds``：
+    UTC+5:30 这类时区的本地整点落在 ``:30``，整除会整体错位。
+```
+
+### `event_type_name`
+
+```python
+def event_type_name(kind: Any) -> str
+```
+
+```text
+事件类型改成界面契约的写法：``rtt`` → ``latency``。
+
+Args:
+    kind: 采样侧的类型（``rtt`` / ``jitter`` / ``loss``）。
+
+Returns:
+    str: ``latency`` / ``jitter`` / ``loss``。``rtt`` 在界面文案里叫
+    「时延」，契约里写 ``latency``；两者指同一个测量，改名只是为了和前端
+    的 ``type`` 枚举对齐（未识别的类型原样透传，不吞数据）。
+```
+
+### `event_view`
+
+```python
+def event_view(event: Mapping[str, Any]) -> dict
+```
+
+```text
+把 ``events.jsonl`` 的一条事件整理成界面契约的形状。
+
+Args:
+    event: :func:`read_events` 的一条记录。
+
+Returns:
+    dict: ``{"t","ts","target","type","value","threshold","duration_s",
+    "bssid","rssi_dbm"}``。``t`` 是 epoch 秒（前端按它画竖线），``ts`` 是
+    带时区的可读时间。缺字段一律 ``None``，不补 0。
+```
+
+### `mark_view`
+
+```python
+def mark_view(mark: Mapping[str, Any]) -> dict
+```
+
+```text
+把一条人工标记整理成界面契约的形状（``{"t","ts","note"}``）。
+
+Args:
+    mark: :func:`read_marks` 的一条记录。
+
+Returns:
+    dict: ``t`` 是 epoch 秒 —— 界面用它算横坐标，传 ISO 字符串会在
+    ``Number(...)`` 里变成 ``NaN``，标记就整条画不出来。
 ```
 
 ### `build_history`
 
 ```python
-def build_history(from_value: Any=None, to_value: Any=None, bucket: Any=None, *, now: float | None=None) -> dict
+def build_history(from_value: Any=None, to_value: Any=None, bucket: Any=None, target: Any=None, *, now: float | None=None) -> dict
 ```
 
 ```text
 ``GET /api/history`` 的完整载荷。
 
 Args:
-    from_value: 起始时间（epoch 或 ISO）。
-    to_value: 结束时间（epoch 或 ISO）。
+    from_value: 起始时间（epoch 秒或 ISO 8601）。
+    to_value: 结束时间。
     bucket: ``1m`` / ``5m`` / ``1h``。
+    target: 看哪条序列（``gateway`` / ``dns`` / ``<目标 key>``）；省略时按
+        「第一个目标 → DNS → 网关」的默认顺序。
     now: 当前 epoch（测试注入）。
 
 Returns:
-    dict: ``{"ok", "from", "to", "from_epoch", "to_epoch", "bucket",
-    "bucket_s", "samples", "series", "marks", "coverage"}``。
+    dict: ``{"ok","from","to","from_epoch","to_epoch","bucket","bucket_s",
+    "target","targets","samples","series","marks","coverage"}``。
+
+    * ``series``：**扁平**的一串桶，一个桶一项（见 :func:`aggregate_points`）；
+    * ``target``：这条曲线实际画的是哪条序列（空区间时是空串）；
+    * ``targets``：区间内可选的序列清单 —— 让调用方知道还能切什么；
+    * ``coverage.gaps``：缺失桶数；``coverage.gap_ranges``：缺口的真实起止。
 
 Raises:
-    ValueError: 参数非法（调用方回 400）。
+    ValueError: 参数非法（时间格式 / ``from`` 晚于 ``to`` / ``bucket``
+        越界 / ``target`` 在该区间的样本里不存在）。
 ```
 
 ### `export_csv`
@@ -6367,26 +6535,26 @@ Example:
 | `evidence_payload` | function | 662 | ✅ |
 | `conclusion_report_id` | function | 786 | ✅ |
 | `build_status_conclusion` | function | 817 | ✅ |
-| `start_job` | function | 1243 | ✅ |
-| `report_index` | function | 1304 | ✅ |
-| `request_elevation` | function | 1338 | ✅ |
-| `preflight_payload` | function | 1376 | ✅ |
-| `validate_component_path` | function | 1430 | ✅ |
-| `log_files` | function | 1470 | ✅ |
-| `resolve_log_file` | function | 1528 | ✅ |
-| `engine_info` | function | 1561 | ✅ |
-| `passive_start` | function | 1604 | ✅ |
-| `passive_status` | function | 1639 | ✅ |
-| `link_actions` | function | 1713 | ✅ |
-| `Handler` | class | 1794 | ✅ |
-| `Handler.handle_one_request` | method | 1820 | ✅ |
-| `Handler.log_message` | method | 1872 | ✅ |
-| `Handler.do_GET` | method | 2048 | ✅ |
-| `Handler.do_POST` | method | 2070 | ✅ |
-| `DiagServer` | class | 2536 | ✅ |
-| `DiagServer.handle_error` | method | 2547 | ✅ |
-| `create_server` | function | 2575 | ✅ |
-| `main` | function | 2622 | ✅ |
+| `start_job` | function | 1251 | ✅ |
+| `report_index` | function | 1312 | ✅ |
+| `request_elevation` | function | 1346 | ✅ |
+| `preflight_payload` | function | 1384 | ✅ |
+| `validate_component_path` | function | 1438 | ✅ |
+| `log_files` | function | 1478 | ✅ |
+| `resolve_log_file` | function | 1536 | ✅ |
+| `engine_info` | function | 1569 | ✅ |
+| `passive_start` | function | 1612 | ✅ |
+| `passive_status` | function | 1647 | ✅ |
+| `link_actions` | function | 1721 | ✅ |
+| `Handler` | class | 1802 | ✅ |
+| `Handler.handle_one_request` | method | 1828 | ✅ |
+| `Handler.log_message` | method | 1880 | ✅ |
+| `Handler.do_GET` | method | 2056 | ✅ |
+| `Handler.do_POST` | method | 2078 | ✅ |
+| `DiagServer` | class | 2549 | ✅ |
+| `DiagServer.handle_error` | method | 2560 | ✅ |
+| `create_server` | function | 2588 | ✅ |
+| `main` | function | 2635 | ✅ |
 
 ### `static_asset`
 

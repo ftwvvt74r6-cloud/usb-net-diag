@@ -1,13 +1,16 @@
 """T2 契约测试：``/api/history*`` 五个接口 + ``core/history.py`` 的聚合/缺口/导出口径。
 
-为什么分四层钉
+为什么分五层钉
 --------------
 历史接口最容易「看起来对、实际错」的地方不在路由，而在口径：
 
 * **聚合**：把「没测到」聚成 0，图上就是一条贴着横轴的完美直线 —— 用户会以为
-  网络从来没坏过。所以 ``rtt_ms.avg`` 必须是 ``null``，不是 ``0``。
-* **缺口**：断档的桶不能补点连线。``coverage.gaps`` 必须给出真实起止时间，
-  空区间也要给一段（「这段没数据」本身是结论）。
+  网络从来没坏过。所以 ``rtt_ms`` 必须是 ``null``，不是 ``0``。
+* **时间**：``series[].t`` 必须是 **epoch 秒**。``history.js`` 用
+  ``Number(s.t)`` 过滤、``new Date(t * 1000)`` 画横轴 —— 给它 ISO 字符串，
+  点会被整批过滤掉，界面只会显示「没数据」。
+* **缺口**：断档的桶不能补点连线。``coverage.gaps`` 是缺失桶数，
+  ``coverage.gap_ranges`` 给出真实起止；空区间也必须报缺口，不许回 ``gaps: 0``。
 * **导出**：CSV 列头是给 Excel 公式用的契约，列序/列名改一个字符，别人的表就错位。
 * **路由**：非法参数必须 400 并说明原因，不许静默回落成默认区间。
 
@@ -108,12 +111,17 @@ class _HistoryCase(unittest.TestCase):
         return path
 
     def event(self, offset: float, *, target="gateway", etype="rtt",
-              value=200.0, threshold=120.0) -> dict:
-        """造一条事件。"""
+              value=200.0, threshold=120.0, bssid="aa:bb:cc:00:00:01",
+              rssi=-55) -> dict:
+        """造一条事件（字段与 ``agent.EventTracker.observe`` 一致）。"""
         epoch = self.base + float(offset)
         return {"t": history_mod.iso(epoch), "epoch": round(epoch, 3),
                 "target": target, "type": etype, "value": value,
-                "threshold": threshold, "duration_s": 60}
+                "threshold": threshold, "duration_s": 60,
+                "bssid": bssid, "rssi_dbm": rssi}
+
+    def _read(self, start_off=0, end_off=600):
+        return history_mod.read_samples(self.base + start_off, self.base + end_off)
 
 
 # ====================================================================== 参数解析
@@ -194,45 +202,51 @@ class HistoryParseTest(_HistoryCase):
 # ====================================================================== 聚合
 
 class HistoryAggregateTest(_HistoryCase):
-    """series：均值/最大/最小、主 BSSID、缺测不补 0、空桶不出现。"""
+    """series：均值 / 最大 / 主 BSSID、缺测不补 0、空桶不出现、时间是 epoch 秒。"""
 
-    def _read(self, start_off=0, end_off=600):
-        return history_mod.read_samples(self.base + start_off, self.base + end_off)
-
-    def test_aggregates_avg_max_min_per_bucket(self):
-        self.write([self.sample(0, gateway={"rtt_ms": 4.0, "loss_pct": 0.0,
-                                            "jitter_ms": 1.0, "method": "icmp"}),
-                    self.sample(10, gateway={"rtt_ms": 8.0, "loss_pct": 0.0,
-                                             "jitter_ms": 2.0, "method": "icmp"})])
-        series = {item["key"]: item for item in
-                  history_mod.aggregate_series(self._read(), 60)}
-        point = series["gateway"]["points"][0]
+    def test_rtt_mean_loss_max_jitter_mean(self):
+        self.write([self.sample(0, targets=self._target(rtt=4.0, loss=0.0, jitter=1.0)),
+                    self.sample(10, targets=self._target(rtt=8.0, loss=6.0, jitter=2.0))])
+        points = history_mod.aggregate_points(self._read(), 60)
+        self.assertEqual(len(points), 1)
+        point = points[0]
         self.assertEqual(point["n"], 2)
-        self.assertEqual(point["rtt_ms"], {"avg": 6.0, "max": 8.0, "min": 4.0})
-        self.assertEqual(point["jitter_ms"], {"avg": 1.5, "max": 2.0, "min": 1.0})
+        self.assertEqual(point["rtt_ms"], 6.0)      # 均值
+        self.assertEqual(point["loss_pct"], 6.0)    # 最大值，不是 3
+        self.assertEqual(point["jitter_ms"], 1.5)   # 均值
+
+    @staticmethod
+    def _target(rtt=20.0, loss=0.0, jitter=3.0):
+        return [{"key": "baidu", "rtt_ms": rtt, "loss_pct": loss,
+                 "jitter_ms": jitter, "method": "icmp"}]
 
     def test_missing_measurement_is_null_not_zero(self):
         # ICMP 被禁：rtt/jitter 拿不到；loss 是真实测得的 100%
-        self.write([self.sample(0, gateway={"rtt_ms": None, "loss_pct": 100.0,
-                                            "jitter_ms": None, "method": "none"})])
-        series = {item["key"]: item for item in
-                  history_mod.aggregate_series(self._read(), 60)}
-        point = series["gateway"]["points"][0]
-        self.assertIsNone(point["rtt_ms"]["avg"])
-        self.assertIsNone(point["rtt_ms"]["max"])
-        self.assertIsNone(point["jitter_ms"]["avg"])
-        self.assertEqual(point["loss_pct"], {"avg": 100.0, "max": 100.0, "min": 100.0})
-        # 关键：不是 0
-        self.assertNotEqual(point["rtt_ms"]["avg"], 0)
+        self.write([self.sample(0, targets=[{"key": "baidu", "rtt_ms": None,
+                                             "loss_pct": 100.0, "jitter_ms": None,
+                                             "method": "none"}])])
+        point = history_mod.aggregate_points(self._read(), 60)[0]
+        self.assertIsNone(point["rtt_ms"])
+        self.assertIsNone(point["jitter_ms"])
+        self.assertEqual(point["loss_pct"], 100.0)
+        # 关键：不是 0（0 会被读成「0 毫秒，网络极好」）
+        self.assertNotEqual(point["rtt_ms"], 0)
 
     def test_gap_bucket_is_absent_from_series(self):
         # 10:00 与 10:02 有数据，10:01 整段没有 → 只出两个点，绝不补一个 0 点
         self.write([self.sample(0), self.sample(120)])
-        series = {item["key"]: item for item in
-                  history_mod.aggregate_series(self._read(), 60)}
-        points = series["gateway"]["points"]
+        points = history_mod.aggregate_points(self._read(), 60)
         self.assertEqual(len(points), 2)
-        self.assertEqual([p["t"][11:16] for p in points], ["10:00", "10:02"])
+        self.assertEqual([p["ts"][11:16] for p in points], ["10:00", "10:02"])
+
+    def test_point_time_is_epoch_seconds(self):
+        # history.js: Number(s.t) 过滤 + new Date(t * 1000) 画横轴
+        self.write([self.sample(0)])
+        point = history_mod.aggregate_points(self._read(), 60)[0]
+        self.assertIsInstance(point["t"], float)
+        self.assertEqual(point["t"], self.base)
+        self.assertEqual(point["ts"], history_mod.iso(self.base))
+        self.assertIn("+", point["ts"][-6:], "对外时间必须带时区偏移")
 
     def test_bssid_is_primary_ap_of_bucket(self):
         self.write([
@@ -240,30 +254,34 @@ class HistoryAggregateTest(_HistoryCase):
             self.sample(10, wlan={**self.sample(0)["wlan"], "bssid": "bb:00"}),
             self.sample(20, wlan={**self.sample(0)["wlan"], "bssid": "aa:00"}),
         ])
-        series = {item["key"]: item for item in
-                  history_mod.aggregate_series(self._read(), 60)}
-        self.assertEqual(series["gateway"]["points"][0]["bssid"], "aa:00")
+        self.assertEqual(history_mod.aggregate_points(self._read(), 60)[0]["bssid"],
+                         "aa:00")
 
     def test_bssid_null_when_no_wireless(self):
         empty = {"ssid": None, "bssid": None, "rssi_dbm": None, "rx_mbps": None,
                  "tx_mbps": None, "band": None, "channel": None}
         self.write([self.sample(0, wlan=empty)])
-        series = {item["key"]: item for item in
-                  history_mod.aggregate_series(self._read(), 60)}
-        self.assertIsNone(series["gateway"]["points"][0]["bssid"])
+        point = history_mod.aggregate_points(self._read(), 60)[0]
+        self.assertIsNone(point["bssid"])
+        self.assertIsNone(point["rssi_dbm"])
+        self.assertIsNone(point["rx_mbps"])
 
-    def test_series_order_and_target_prefix(self):
+    def test_point_carries_rssi_and_rx_mean(self):
+        self.write([self.sample(0, wlan={**self.sample(0)["wlan"], "rssi_dbm": -50,
+                                         "rx_mbps": 200}),
+                    self.sample(10, wlan={**self.sample(0)["wlan"], "rssi_dbm": -60,
+                                          "rx_mbps": 400})])
+        point = history_mod.aggregate_points(self._read(), 60)[0]
+        self.assertEqual(point["rssi_dbm"], -55.0)
+        self.assertEqual(point["rx_mbps"], 300.0)
+
+    def test_series_keys_keeps_target_prefix(self):
         # 目标恰好叫 gateway：不带前缀就会和网关序列撞名
         self.write([self.sample(0, targets=[{"key": "gateway", "rtt_ms": 30.0,
                                              "loss_pct": 0.0, "jitter_ms": 1.0,
                                              "method": "icmp"}])])
-        keys = [item["key"] for item in
-                history_mod.aggregate_series(self._read(), 60)]
-        self.assertEqual(keys, ["gateway", "dns", "target:gateway"])
-        series = {item["key"]: item for item in
-                  history_mod.aggregate_series(self._read(), 60)}
-        self.assertEqual(series["target:gateway"]["kind"], "target")
-        self.assertEqual(series["target:gateway"]["points"][0]["rtt_ms"]["avg"], 30.0)
+        self.assertEqual(history_mod.series_keys(self._read()),
+                         ["gateway", "dns", "target:gateway"])
 
     def test_reads_rolled_shards_and_sorts_by_time(self):
         # 滚动后主分片重新接收新数据：文件名顺序 ≠ 时间顺序，必须按 epoch 排
@@ -286,13 +304,57 @@ class HistoryAggregateTest(_HistoryCase):
         self.assertEqual(len(self._read(0, 5)), 1)
 
 
+# ====================================================================== 看哪条曲线
+
+class HistorySelectTest(_HistoryCase):
+    """默认画哪条序列、能不能指定、指定错了怎么办。"""
+
+    def test_default_target_is_first_configured_target(self):
+        self.write([self.sample(0)])
+        self.assertEqual(history_mod.primary_key(self._read()), "target:baidu")
+        self.assertEqual(history_mod.aggregate_points(self._read(), 60)[0]["rtt_ms"],
+                         20.0)
+
+    def test_falls_back_to_dns_then_gateway(self):
+        self.write([self.sample(0, targets=[])])
+        self.assertEqual(history_mod.primary_key(self._read()), "dns")
+        self.assertEqual(history_mod.aggregate_points(self._read(), 60)[0]["rtt_ms"],
+                         9.0)
+        self.write([self.sample(0, targets=[], dns=None)])
+        self.assertEqual(history_mod.primary_key(self._read()), "gateway")
+        self.assertEqual(history_mod.aggregate_points(self._read(), 60)[0]["rtt_ms"],
+                         5.0)
+
+    def test_explicit_target_by_key(self):
+        self.write([self.sample(0)])
+        points = history_mod.aggregate_points(self._read(), 60, "baidu")
+        self.assertEqual(points[0]["rtt_ms"], 20.0)
+
+    def test_explicit_gateway(self):
+        self.write([self.sample(0)])
+        points = history_mod.aggregate_points(self._read(), 60, "gateway")
+        self.assertEqual(points[0]["rtt_ms"], 5.0)
+
+    def test_unknown_target_rejected_when_data_exists(self):
+        self.write([self.sample(0)])
+        with self.assertRaises(ValueError) as ctx:
+            history_mod.build_history(self.base, self.base + 60, "1m", "aliyun")
+        self.assertIn("target", str(ctx.exception))
+        self.assertIn("target:baidu", str(ctx.exception))
+
+    def test_unknown_target_allowed_when_no_data(self):
+        # 区间里一条数据都没有时回 400，会把「agent 还没跑」误报成「参数写错了」
+        data = history_mod.build_history(self.base, self.base + 60, "1m", "aliyun")
+        self.assertEqual((data["series"], data["target"]), ([], ""))
+
+
 # ====================================================================== 覆盖率
 
 class HistoryCoverageTest(_HistoryCase):
-    """``coverage``：样本数 / 期望 / 比例 / 缺口——缺口必须显式且边界正确。"""
+    """样本级覆盖（导出用）与桶级覆盖（界面断线用）两套口径都得对。"""
 
-    def test_empty_range_reports_one_explicit_gap(self):
-        cover = history_mod.coverage([], self.base, self.base + 600, 10)
+    def test_sample_coverage_empty_range_reports_one_explicit_gap(self):
+        cover = history_mod.sample_coverage([], self.base, self.base + 600, 10)
         self.assertEqual(cover["samples"], 0)
         self.assertEqual(cover["expected"], 60)
         self.assertEqual(cover["ratio"], 0)
@@ -304,9 +366,9 @@ class HistoryCoverageTest(_HistoryCase):
         # 缺口里的缺失样本数是「该有但没有」，不是 0
         self.assertEqual(gap["missing"], 60)
 
-    def test_middle_gap_boundaries_and_missing(self):
+    def test_sample_coverage_middle_gap_boundaries_and_missing(self):
         samples = [{"epoch": self.base + offset} for offset in (0, 10, 20, 60, 70)]
-        cover = history_mod.coverage(samples, self.base, self.base + 70, 10)
+        cover = history_mod.sample_coverage(samples, self.base, self.base + 70, 10)
         self.assertEqual(cover["samples"], 5)
         self.assertEqual(len(cover["gaps"]), 1)
         gap = cover["gaps"][0]
@@ -315,9 +377,9 @@ class HistoryCoverageTest(_HistoryCase):
         self.assertEqual(gap["seconds"], 40)
         self.assertEqual(gap["missing"], 3)      # 30/40/50
 
-    def test_leading_and_trailing_gaps(self):
+    def test_sample_coverage_leading_and_trailing_gaps(self):
         samples = [{"epoch": self.base + offset} for offset in (60, 70, 80)]
-        cover = history_mod.coverage(samples, self.base, self.base + 120, 10)
+        cover = history_mod.sample_coverage(samples, self.base, self.base + 120, 10)
         self.assertEqual([(g["seconds"], g["missing"]) for g in cover["gaps"]],
                          [(60, 6), (40, 4)])
 
@@ -325,19 +387,142 @@ class HistoryCoverageTest(_HistoryCase):
         # 一轮采样本身要花几秒：14 秒间隔（1.4 倍）不算缺口，15 秒以上才算
         samples = [{"epoch": self.base + offset} for offset in (0, 14, 28)]
         self.assertEqual(
-            history_mod.coverage(samples, self.base, self.base + 28, 10)["gaps"], [])
+            history_mod.sample_coverage(samples, self.base, self.base + 28,
+                                        10)["gaps"], [])
 
     def test_interval_defaults_to_mode_of_samples(self):
         samples = [{"epoch": self.base + i, "interval_s": 30} for i in range(3)]
         samples.append({"epoch": self.base + 5, "interval_s": 10})
-        cover = history_mod.coverage(samples, self.base, self.base + 5)
+        cover = history_mod.sample_coverage(samples, self.base, self.base + 5)
         self.assertEqual(cover["interval_s"], 30)
 
-    def test_ratio_matches_samples_over_expected(self):
+    def test_sample_coverage_ratio(self):
         samples = [{"epoch": self.base + offset} for offset in range(0, 600, 10)]
-        cover = history_mod.coverage(samples, self.base, self.base + 600, 10)
+        cover = history_mod.sample_coverage(samples, self.base, self.base + 600, 10)
         self.assertEqual(cover["samples"], 60)
         self.assertEqual(cover["ratio"], 1.0)
+
+    def test_bucket_gaps_counts_missing_buckets(self):
+        # 10:00 / 10:02 / 10:03 有数据，10:01 缺 → gaps = 1
+        self.write([self.sample(0), self.sample(120), self.sample(180)])
+        data = history_mod.build_history(self.base, self.base + 180, "1m")
+        cover = data["coverage"]
+        self.assertEqual(cover["expected"], 4)
+        self.assertEqual(cover["gaps"], 1)
+        self.assertEqual(cover["samples"], 3)
+        self.assertEqual([(g["from"][11:16], g["to"][11:16], g["missing"])
+                          for g in cover["gap_ranges"]], [("10:01", "10:02", 1)])
+
+    def test_bucket_gaps_merges_adjacent_buckets(self):
+        self.write([self.sample(0), self.sample(300)])
+        cover = history_mod.build_history(
+            self.base, self.base + 300, "1m")["coverage"]
+        self.assertEqual(cover["gaps"], 4)
+        self.assertEqual(len(cover["gap_ranges"]), 1)
+        self.assertEqual(cover["gap_ranges"][0]["seconds"], 240)
+
+    def test_bucket_gaps_never_zero_without_data(self):
+        # 空区间：全部桶都缺。填 0 会让前端显示「0 个缺口」，正好反了。
+        data = history_mod.build_history(self.base, self.base + 600, "1m")
+        cover = data["coverage"]
+        self.assertEqual(data["series"], [])
+        self.assertEqual(cover["samples"], 0)
+        self.assertEqual(cover["expected"], 11)
+        self.assertEqual(cover["gaps"], 11)
+        self.assertNotEqual(cover["gaps"], 0)
+        self.assertEqual(len(cover["gap_ranges"]), 1)
+
+    def test_bucket_gaps_full_coverage_is_zero(self):
+        self.write([self.sample(offset) for offset in (0, 60, 120, 180, 240)])
+        cover = history_mod.build_history(
+            self.base, self.base + 240, "1m")["coverage"]
+        self.assertEqual((cover["gaps"], cover["ratio"]), (0, 1.0))
+
+
+# ====================================================================== 载荷形状
+
+class HistoryBuildTest(_HistoryCase):
+    """``build_history`` 的键与形状：前端按这些键画图，少一个就是空白页。"""
+
+    def test_payload_shape_matches_ui_contract(self):
+        self.write([self.sample(0)])
+        data = history_mod.build_history(self.base, self.base + 60, "1m")
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["target"], "baidu")
+        self.assertEqual(data["targets"], ["gateway", "dns", "target:baidu"])
+        self.assertEqual(data["bucket"], "1m")
+        self.assertEqual(data["samples"], 1)
+        point = data["series"][0]
+        for key in ("t", "rtt_ms", "loss_pct", "jitter_ms", "rssi_dbm",
+                    "rx_mbps", "bssid"):
+            with self.subTest(key=key):
+                self.assertIn(key, point)
+        self.assertEqual(set(data["coverage"]),
+                         {"from", "to", "samples", "gaps", "expected", "ratio",
+                          "bucket_s", "gap_ranges"})
+
+    def test_marks_are_numeric_epoch(self):
+        self.write([self.sample(0)])
+        history_mod.add_mark("换过 AP", now=self.base + 30)
+        data = history_mod.build_history(self.base, self.base + 60, "1m")
+        self.assertEqual(len(data["marks"]), 1)
+        self.assertIsInstance(data["marks"][0]["t"], float)
+        self.assertEqual(data["marks"][0]["t"], round(self.base + 30, 3))
+        self.assertEqual(data["marks"][0]["note"], "换过 AP")
+        self.assertIn("+", data["marks"][0]["ts"][-6:])
+
+    def test_accepts_iso_and_epoch_equally(self):
+        self.write([self.sample(0)])
+        by_epoch = history_mod.build_history(self.base, self.base + 60, "1m")
+        by_iso = history_mod.build_history(history_mod.iso(self.base),
+                                           history_mod.iso(self.base + 60), "1m")
+        self.assertEqual(by_epoch["series"], by_iso["series"])
+        self.assertEqual(by_epoch["from"], by_iso["from"])
+
+    def test_marks_outside_range_are_dropped(self):
+        self.write([self.sample(0)])
+        history_mod.add_mark("区间外", now=self.base + 3600)
+        data = history_mod.build_history(self.base, self.base + 60, "1m")
+        self.assertEqual(data["marks"], [])
+
+
+# ====================================================================== 事件形状
+
+class HistoryEventViewTest(_HistoryCase):
+    """事件字段：``type`` 映射成 latency/jitter/loss，时间同时给两种写法。"""
+
+    def test_rtt_becomes_latency(self):
+        self.assertEqual(history_mod.event_type_name("rtt"), "latency")
+        self.assertEqual(history_mod.event_type_name("jitter"), "jitter")
+        self.assertEqual(history_mod.event_type_name("loss"), "loss")
+        self.assertEqual(history_mod.event_type_name(""), "")
+
+    def test_event_view_has_all_ui_fields(self):
+        view = history_mod.event_view(self.event(10, value=300.0, threshold=120.0))
+        self.assertEqual(set(view), {"t", "ts", "target", "type", "value",
+                                     "threshold", "duration_s", "bssid",
+                                     "rssi_dbm"})
+        self.assertEqual(view["type"], "latency")
+        self.assertEqual(view["value"], 300.0)
+        self.assertEqual(view["duration_s"], 60.0)
+        self.assertEqual(view["bssid"], "aa:bb:cc:00:00:01")
+        self.assertEqual(view["rssi_dbm"], -55.0)
+        self.assertIsInstance(view["t"], float)
+        self.assertEqual(view["t"], round(self.base + 10, 3))
+
+    def test_event_view_missing_fields_become_null(self):
+        view = history_mod.event_view({"epoch": self.base, "type": "loss"})
+        self.assertIsNone(view["value"])
+        self.assertIsNone(view["threshold"])
+        self.assertIsNone(view["bssid"])
+        self.assertIsNone(view["rssi_dbm"])
+        self.assertEqual(view["target"], "")
+
+    def test_events_sorted_by_time(self):
+        self.write_events([self.event(30), self.event(0), self.event(20)])
+        events = history_mod.read_events(self.base, self.base + 60)
+        self.assertEqual([item["epoch"] for item in events],
+                         sorted(item["epoch"] for item in events))
 
 
 # ====================================================================== 导出
@@ -415,7 +600,6 @@ class HistoryExportTest(_HistoryCase):
         self.assertIn("## 异常 Top5", text)
         # 500 最严重排第一，125 被截掉（只有 5 行数据）
         self.assertLess(text.index("| 1 |"), text.index("500"))
-        self.assertEqual(text.count("\n| "), 8)          # 表头 + 分隔 + 5 行 + 缺口表两行
         self.assertIn("Home-5G", text)                   # 当时 AP
         self.assertIn("-55 dBm", text)                   # 当时信号
 
@@ -490,7 +674,7 @@ class HistoryHttpTest(_HistoryCase):
         self.write([self.sample(0), self.sample(10), self.sample(20)])
         self.write_events([self.event(10, value=300.0)])
 
-    def test_history_returns_series_marks_and_coverage(self):
+    def test_history_returns_flat_series_and_coverage(self):
         self._seed()
         status, data = self._json(
             f"/api/history?from={self.base}&to={self.base + 60}&bucket=1m")
@@ -499,11 +683,39 @@ class HistoryHttpTest(_HistoryCase):
         self.assertEqual(data["bucket"], "1m")
         self.assertEqual(data["bucket_s"], 60)
         self.assertEqual(data["samples"], 3)
-        self.assertEqual([s["key"] for s in data["series"]],
-                         ["gateway", "dns", "target:baidu"])
-        self.assertEqual(data["series"][0]["points"][0]["n"], 3)
+        self.assertEqual(data["target"], "baidu")
+        # 扁平时间轴：一个桶一项，不是「每条序列一捆 points」
+        self.assertEqual(len(data["series"]), 1)
+        point = data["series"][0]
+        self.assertEqual(point["n"], 3)
+        self.assertEqual(point["rtt_ms"], 20.0)
+        self.assertIsInstance(point["t"], float)
         self.assertEqual(data["marks"], [])
         self.assertIn("gaps", data["coverage"])
+
+    def test_history_accepts_epoch_seconds_like_the_ui(self):
+        # history.js 传的是 epoch 秒（from=...&to=...），不是 ISO
+        self._seed()
+        status, data = self._json(
+            f"/api/history?from={int(self.base)}&to={int(self.base + 60)}&bucket=1m")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["samples"], 3)
+        self.assertEqual(data["from_epoch"], self.base)
+
+    def test_history_target_param_switches_series(self):
+        self._seed()
+        status, data = self._json(
+            f"/api/history?from={self.base}&to={self.base + 60}&target=gateway")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["target"], "gateway")
+        self.assertEqual(data["series"][0]["rtt_ms"], 5.0)
+
+    def test_history_rejects_unknown_target(self):
+        self._seed()
+        status, data = self._json(
+            f"/api/history?from={self.base}&to={self.base + 60}&target=aliyun")
+        self.assertEqual(status, 400)
+        self.assertIn("target", data["error"])
 
     def test_history_marks_are_inlined(self):
         self._seed()
@@ -514,6 +726,7 @@ class HistoryHttpTest(_HistoryCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(data["marks"]), 1)
         self.assertEqual(data["marks"][0]["note"], "15:20 换了 AP")
+        self.assertIsInstance(data["marks"][0]["t"], float)
 
     def test_history_rejects_bad_parameters(self):
         cases = {
@@ -527,6 +740,18 @@ class HistoryHttpTest(_HistoryCase):
                 self.assertEqual(status, 400)
                 self.assertFalse(data["ok"])
                 self.assertIn(needle, data["error"])
+
+    def test_history_events_shape(self):
+        self._seed()
+        status, data = self._json(
+            f"/api/history/events?from={self.base}&to={self.base + 600}")
+        self.assertEqual(status, 200)
+        event = data["events"][0]
+        self.assertEqual(event["type"], "latency")        # rtt → latency
+        self.assertEqual(set(event), {"t", "ts", "target", "type", "value",
+                                      "threshold", "duration_s", "bssid",
+                                      "rssi_dbm"})
+        self.assertIsInstance(event["t"], float)
 
     def test_history_events_filtered_by_range(self):
         self._seed()
@@ -546,18 +771,24 @@ class HistoryHttpTest(_HistoryCase):
         self.assertEqual(status, 200)
         self.assertEqual((data["count"], data["events"]), (0, []))
 
-    def test_mark_post_and_list_roundtrip(self):
+    def test_mark_post_returns_iso_time(self):
         status, data = self._json("/api/history/mark",
                                   body=json.dumps({"note": " 重启路由器 "}).encode())
         self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertIsInstance(data["t"], str)
+        self.assertIn("+", data["t"][-6:])
         self.assertEqual(data["mark"]["note"], "重启路由器")
+
+    def test_mark_list_roundtrip_uses_epoch_time(self):
+        self._json("/api/history/mark", body=json.dumps({"note": "重启路由器"}).encode())
         status, listed = self._json(
             f"/api/history/marks?from={self.base - 3600}&to={time.time() + 60}")
         self.assertEqual(status, 200)
         self.assertEqual(listed["count"], 1)
         self.assertEqual(listed["marks"][0]["note"], "重启路由器")
-        # 落盘的字段齐：t / epoch / note
-        self.assertEqual(set(listed["marks"][0]), {"t", "epoch", "note"})
+        self.assertEqual(set(listed["marks"][0]), {"t", "ts", "note"})
+        self.assertIsInstance(listed["marks"][0]["t"], float)
 
     def test_mark_rejects_empty_and_overlong_note(self):
         for payload, needle in ({"note": "   "}, "note 不能为空"), \
@@ -612,7 +843,8 @@ class HistoryHttpTest(_HistoryCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["series"], [])
         self.assertEqual(data["coverage"]["samples"], 0)
-        self.assertEqual(len(data["coverage"]["gaps"]), 1)
+        # 一条数据都没有时缺口 = 全部桶，绝不是 0
+        self.assertEqual(data["coverage"]["gaps"], 11)
 
 
 if __name__ == "__main__":

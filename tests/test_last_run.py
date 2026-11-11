@@ -309,9 +309,34 @@ class LastRunHttpTest(unittest.TestCase):
         self.assertEqual(
             server._last_run_target("offline", "", r"D:\secret\captures\a.pcap"),
             "a.pcap")
-        self.assertEqual(server._last_run_target("scan", "", None), "")
+        self.assertEqual(server._last_run_target("scan", "", None), "全网",
+                         "全网体检不允许回空串：空白既可能是「全网」也可能是"
+                         "「界面没拿到数据」，导出报告里分不清")
         self.assertEqual(server._last_run_target("live", " example.com ", None),
                          "example.com")
+
+    def test_summary_target_is_never_empty_on_both_endpoints(self):
+        # A 的导出报告直接读 summary.target：空串会让「目标」一栏在报告里空白，
+        # 而空白既可能是全网也可能是没取到数据 —— 两个接口都必须给字符串。
+        target = server._last_run_target("scan", "", None)
+        server._remember_last_run("scan", target, time.time(), _result())
+        status, body = self._get("/api/last-run")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["last"]["target"], "全网")
+        status, body = self._get("/api/last-run/result")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["summary"]["target"], "全网")
+
+    def test_summary_target_keeps_real_host_and_port(self):
+        # 「域名或 IP:端口」原样保留：用户在报告里要对得上自己填的目标
+        result = _result()
+        result["summary"]["target"] = "www.baidu.com:443"
+        server._remember_last_run("live", "www.baidu.com:443", time.time(), result)
+        status, body = self._get("/api/last-run")
+        self.assertEqual(body["last"]["target"], "www.baidu.com:443")
+        status, body = self._get("/api/last-run/result")
+        self.assertEqual(body["summary"]["target"], "www.baidu.com:443")
+        self.assertEqual(body["result"]["summary"]["target"], "www.baidu.com:443")
 
     # ---------- /api/app 文案下发 ----------
     def test_app_ships_last_run_and_settings_copy(self):

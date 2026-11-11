@@ -11,9 +11,10 @@
 ----------
 1. **不填 0**：某个样本没测到网关 RTT，就是 ``None``（JSON ``null``）。聚合时
    ``rtt_ms.avg`` 也是 ``None`` —— 0 会被读成「0 毫秒，网络极好」，与事实相反。
-2. **缺口必须显式**：没有数据的时段不出现在 ``series`` 里（不画成 0 的平线），
-   而是列进 ``coverage.gaps``，字段是真实起止时间。宁可让图断开，也不许连一条
-   假线过去。
+2. **缺口必须显式**：没有数据的桶不出现在 ``series`` 里（不画成 0 的平线），
+   而是计入 ``coverage.gaps``（缺失桶数）+ ``coverage.gap_ranges``（每段的真实
+   起止时间）。宁可让图断开，也不许连一条假线过去；空区间同样要给缺口，
+   不许返回 ``gaps=0`` 让人读成「采齐了」。
 3. **时间带时区**：对外一律 ``2026-11-11T10:00:00+08:00``。跨时区导出、跨机汇总
    时，没有偏移的字符串会被当成本地时间，差 8 小时没人看得出来。
 
@@ -389,45 +390,81 @@ def add_mark(note: str, *, now: float | None = None) -> dict:
 
 # ------------------------------------------------------------------ 聚合
 
-def _blocks(sample: Mapping[str, Any]) -> list[tuple[str, str, str, Mapping[str, Any]]]:
+def _blocks(sample: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
     """抽出一条样本里所有「被监测的序列」。
 
     Args:
         sample: 一条样本记录。
 
     Returns:
-        list[tuple[str, str, str, Mapping]]: ``(序列 key, kind, 展示名, 测量块)``。
-            target 的 key 带 ``target:`` 前缀 —— 用户可以把目标命名为 ``gateway``，
-            不带前缀就会和网关序列撞名。
+        list[tuple[str, Mapping]]: ``(序列 key, 测量块)``，顺序固定为
+        ``gateway`` → ``dns`` → 各目标。目标用 ``target:<key>`` 前缀 ——
+        用户可以把目标命名为 ``gateway``，不带前缀就会和网关序列撞名。
     """
-    out: list[tuple[str, str, str, Mapping[str, Any]]] = []
-    for name, label in (("gateway", "网关"), ("dns", "DNS")):
+    out: list[tuple[str, Mapping[str, Any]]] = []
+    for name in ("gateway", "dns"):
         block = sample.get(name)
         if isinstance(block, Mapping):
-            out.append((name, name, label, block))
+            out.append((name, block))
     for item in sample.get("targets") or []:
         if not isinstance(item, Mapping):
             continue
-        label = str(item.get("key") or "target")
-        out.append((f"target:{label}", "target", label, item))
+        out.append((f"target:{item.get('key') or 'target'}", item))
     return out
 
 
-def _triple(values: Sequence[float]) -> dict:
-    """把一组数值算成 ``avg`` / ``max`` / ``min``（保留 1 位小数）。
+def _match(key: str, wanted: str) -> bool:
+    """序列 key 是否匹配用户给的 ``target`` 参数（``target:<key>`` 可省前缀）。"""
+    return key == wanted or key.split(":", 1)[-1] == wanted
+
+
+def series_keys(samples: Sequence[Mapping[str, Any]]) -> list[str]:
+    """区间内出现过的序列 key（按首次出现排序）。
 
     Args:
-        values: 数值列表，允许为空。
+        samples: 区间内的样本。
 
     Returns:
-        dict: 空列表时三个值都是 ``None`` —— **不写 0**（0 会被当成「极快/无损」）。
+        list[str]: 如 ``["gateway", "dns", "target:公司官网"]``。给 ``target``
+            参数写错时拼错误提示用 —— 让人一眼看到可选值，比回一个空图强。
     """
-    vals = [float(v) for v in values]
-    if not vals:
-        return {"avg": None, "max": None, "min": None}
-    return {"avg": round(sum(vals) / len(vals), 1),
-            "max": round(max(vals), 1),
-            "min": round(min(vals), 1)}
+    seen: list[str] = []
+    for sample in samples:
+        for key, _ in _blocks(sample):
+            if key not in seen:
+                seen.append(key)
+    return seen
+
+
+
+def _mean(values: Sequence[float]) -> float | None:
+    """一组数值的均值（保留 1 位小数）；**空列表返回 ``None``**。
+
+    Args:
+        values: 数值列表。
+
+    Returns:
+        float | None: ``None`` 表示「这段没测到」—— 写 0 会被读成
+            「0 毫秒，网络极好」，图上是一条贴着横轴的完美直线。
+    """
+    if not values:
+        return None
+    return round(sum(values) / len(values), 1)
+
+
+def _peak(values: Sequence[float]) -> float | None:
+    """一组数值的最大值（保留 1 位小数）；空列表返回 ``None``。
+
+    Args:
+        values: 数值列表。
+
+    Returns:
+        float | None: 丢包按桶取**最差**那一笔 —— 一桶里 5 个样本有 1 个丢 20%，
+            平均值（4%）会把这次断流抹平。
+    """
+    if not values:
+        return None
+    return round(max(values), 1)
 
 
 def _mode(values: Iterable[Any]) -> Any:
@@ -453,74 +490,133 @@ def _mode(values: Iterable[Any]) -> Any:
     return best
 
 
-def aggregate_series(samples: Sequence[Mapping[str, Any]], seconds: int
-                     ) -> list[dict]:
-    """按桶聚合出「每条序列一条曲线」。
+def pick_block(sample: Mapping[str, Any],
+               target: str | None = None) -> Mapping[str, Any] | None:
+    """选出一条样本里「这条曲线看哪一段测量」。
+
+    默认顺序：**配置里的第一个目标** → DNS → 网关。
+
+    为什么不把三条平均成一条：网关 1 ms 与公网目标 30 ms 平均出 15 ms，
+    这个数不代表任何一台设备，图上还会随着「网关抖一下」上下跳 —— 读的人只会
+    更糊涂。画一条就必须说清是哪条，所以 ``/api/history`` 的响应里带 ``target``
+    说明当前曲线是什么，并支持 ``?target=`` 显式切换。
+
+    Args:
+        sample: 一条样本记录。
+        target: 指定序列：``gateway`` / ``dns`` / ``target:<key>`` / ``<key>``；
+            ``None`` 按上面的默认顺序。
+
+    Returns:
+        Mapping | None: 测量块；该样本没有对应测量时 ``None``。
+    """
+    blocks = _blocks(sample)
+    if not blocks:
+        return None
+    if target:
+        wanted = str(target).strip()
+        for key, block in blocks:
+            if _match(key, wanted):
+                return block
+        return None
+    for key, block in blocks:
+        if key.startswith("target:"):
+            return block
+    by_key = dict(blocks)
+    return by_key.get("dns") or by_key.get("gateway")
+
+
+def primary_key(samples: Sequence[Mapping[str, Any]], target: str | None = None) -> str:
+    """算出「这条曲线实际画的是哪条序列」的 key。
+
+    Args:
+        samples: 区间内的样本（按时间升序）。
+        target: 用户指定的 ``target`` 参数。
+
+    Returns:
+        str: 序列 key（如 ``target:公司官网``）；区间内没有任何测量时为空串。
+            与 :func:`pick_block` 的选法必须同源，否则图上的线与响应里的
+            ``target`` 会对不上。
+    """
+    for sample in samples:
+        block = pick_block(sample, target)
+        if block is None:
+            continue
+        wanted = str(target).strip() if target else ""
+        for key, candidate in _blocks(sample):
+            if candidate is block and (not wanted or _match(key, wanted)):
+                return key
+    return ""
+
+
+def aggregate_points(samples: Sequence[Mapping[str, Any]], seconds: int,
+                     target: str | None = None) -> list[dict]:
+    """按桶聚合出一条扁平的时间轴（界面的折线/色块直接用这个）。
 
     Args:
         samples: :func:`read_samples` 的产物（按时间升序）。
         seconds: 桶宽（见 :func:`bucket_seconds`）。
+        target: 看哪条序列，见 :func:`pick_block`。
 
     Returns:
-        list[dict]: 每条序列一项::
+        list[dict]: 每个**有数据的桶**一项::
 
-            {"key": "gateway", "kind": "gateway", "label": "网关",
-             "points": [{"t": "...", "epoch": 1, "n": 6,
-                         "rtt_ms": {"avg": 12.3, "max": 20.0, "min": 8.1},
-                         "loss_pct": {...}, "jitter_ms": {...},
-                         "bssid": "aa:bb:cc:dd:ee:ff"}]}
+            {"t": 1762833600.0, "ts": "2026-11-11T10:00:00+08:00", "n": 6,
+             "rtt_ms": 12.3, "loss_pct": 0.0, "jitter_ms": 1.2,
+             "rssi_dbm": -55.0, "rx_mbps": 300.0, "bssid": "aa:bb:cc:dd:ee:ff"}
 
-        **没有数据的桶不出现**（不补 0 点），缺口由 :func:`coverage` 显式列出。
-        ``bssid`` 是该桶内出现次数最多的 BSSID（主 AP），用于回答「这段是不是
-        挂在同一个 AP 上」。
+        聚合口径（前端直接画，不再二次加工）：
+
+        * ``rtt_ms`` / ``jitter_ms`` / ``rssi_dbm`` / ``rx_mbps``：桶内**均值**；
+        * ``loss_pct``：桶内**最大值**（最差那一笔）；
+        * ``bssid``：桶内**样本数最多**的那个（主 AP）。
+
+        **没有数据的桶不出现**：不补 0、也不补 ``null`` 占位 —— 补点会让
+        「没采到」和「采到了但数值是 0」在图上长得一样。缺口由
+        :func:`bucket_coverage` 单独说。``t`` 是 epoch 秒（前端用它画横轴），
+        ``ts`` 是给人看的带时区文本。
     """
-    order: list[str] = []
-    meta: dict[str, dict] = {}
-    #: 序列 key → {桶起点 epoch: 该桶的累加槽}
-    buckets: dict[str, dict[float, dict]] = {}
-
+    #: 桶起点 → 该桶的累加槽
+    slots: dict[float, dict] = {}
     for sample in samples:
         stamp = _epoch_of(sample)
         if stamp is None:
             continue
-        key_ts = bucket_start(stamp, seconds)
+        block = pick_block(sample, target)
+        if not isinstance(block, Mapping):
+            continue          # 这条样本没测到该序列 → 这个桶不算「有数据」
         link = sample.get("wlan") if isinstance(sample.get("wlan"), Mapping) else {}
-        for key, kind, label, block in _blocks(sample):
-            if key not in meta:
-                meta[key] = {"key": key, "kind": kind, "label": label}
-                order.append(key)
-            slot = buckets.setdefault(key, {}).setdefault(key_ts, {
-                "rtt": [], "loss": [], "jitter": [], "bssid": [], "n": 0})
-            slot["n"] += 1
-            slot["bssid"].append(link.get("bssid") if isinstance(link, Mapping) else None)
-            for field, bucket_name in (("rtt_ms", "rtt"), ("loss_pct", "loss"),
-                                       ("jitter_ms", "jitter")):
-                value = block.get(field)
-                if value is None:
-                    continue          # 没测到就不进样本，绝不当 0
-                try:
-                    slot[bucket_name].append(float(value))
-                except (TypeError, ValueError):
-                    continue
+        slot = slots.setdefault(bucket_start(stamp, seconds), {
+            "rtt": [], "loss": [], "jitter": [], "rssi": [], "rx": [],
+            "bssid": [], "n": 0})
+        slot["n"] += 1
+        slot["bssid"].append(link.get("bssid"))
+        for field, bucket_name in (("rtt_ms", "rtt"), ("loss_pct", "loss"),
+                                   ("jitter_ms", "jitter"), ("rssi_dbm", "rssi"),
+                                   ("rx_mbps", "rx")):
+            value = block.get(field) if field in block else link.get(field)
+            if value is None:
+                continue          # 没测到就不进样本，绝不当 0
+            try:
+                slot[bucket_name].append(float(value))
+            except (TypeError, ValueError):
+                continue
 
-    out: list[dict] = []
-    for key in order:
-        base = dict(meta[key])
-        points: list[dict] = []
-        for key_ts in sorted(buckets.get(key, {})):
-            slot = buckets[key][key_ts]
-            points.append({
-                "t": iso(key_ts),
-                "epoch": round(key_ts, 3),
-                "n": slot["n"],
-                "rtt_ms": _triple(slot["rtt"]),
-                "loss_pct": _triple(slot["loss"]),
-                "jitter_ms": _triple(slot["jitter"]),
-                "bssid": _mode(slot["bssid"]),
-            })
-        base["points"] = points
-        out.append(base)
-    return out
+    points: list[dict] = []
+    for key_ts in sorted(slots):
+        slot = slots[key_ts]
+        points.append({
+            "t": round(key_ts, 3),
+            "ts": iso(key_ts),
+            "n": slot["n"],
+            "rtt_ms": _mean(slot["rtt"]),
+            "loss_pct": _peak(slot["loss"]),
+            "jitter_ms": _mean(slot["jitter"]),
+            "rssi_dbm": _mean(slot["rssi"]),
+            "rx_mbps": _mean(slot["rx"]),
+            "bssid": _mode(slot["bssid"]),
+        })
+    return points
+
 
 
 def _interval_of(samples: Sequence[Mapping[str, Any]]) -> int:
@@ -537,9 +633,9 @@ def _interval_of(samples: Sequence[Mapping[str, Any]]) -> int:
     return max(counts, key=lambda key: counts[key])
 
 
-def coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float,
-             interval_s: int | None = None) -> dict:
-    """算区间内的样本覆盖率与缺口。
+def sample_coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float,
+                    interval_s: int | None = None) -> dict:
+    """算区间内的**样本级**覆盖率与缺口（导出摘要用）。
 
     Args:
         samples: 区间内的样本（按时间升序）。
@@ -561,6 +657,8 @@ def coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float,
         Note:
         相邻样本间隔小于 ``interval_s * 1.5`` 视为「按时采到」：一轮采样本身要花
         几百毫秒到几秒，严格按 ``interval_s`` 判会每桶都多出一个假缺口。
+        这是**导出报告**用的口径（一次 21 秒的断档也要列出来）；界面画图用的是
+        :func:`bucket_coverage`（按桶算，桶内有样本即算「有线」）。
     """
     step = max(1, int(interval_s if interval_s is not None else _interval_of(samples)))
     span = max(0.0, float(end) - float(start))
@@ -599,26 +697,177 @@ def coverage(samples: Sequence[Mapping[str, Any]], start: float, end: float,
     }
 
 
+def bucket_coverage(points: Sequence[Mapping[str, Any]], start: float, end: float,
+                    seconds: int, *, samples: int = 0) -> dict:
+    """算区间内的**桶级**覆盖率与缺口（界面断线用）。
+
+    Args:
+        points: :func:`aggregate_points` 的产物（有数据的桶）。
+        start: 区间起点 epoch。
+        end: 区间终点 epoch。
+        seconds: 桶宽。
+        samples: 原始样本条数（原样回填到响应里）。
+
+    Returns:
+        dict: ``{"from","to","samples","gaps","expected","ratio","bucket_s",
+        "gap_ranges"}``。
+
+        * ``gaps``：**缺失的桶数**（界面契约）。区间内一条数据都没有时，
+          它等于全部桶数 —— **不会填 0**，否则前端会显示「0 个缺口」；
+        * ``gap_ranges``：每段 ``{"from","to","seconds","missing"}``，``missing``
+          是这段缺了几个桶。图上的断线要靠它说清「断的是 10:03 那一分钟」；
+        * ``ratio``：有数据的桶 / 应有桶数，保留 3 位。
+
+        Note:
+        桶按**本地时区**对齐后逐个累加求边界，不用 ``epoch // seconds``：
+        UTC+5:30 这类时区的本地整点落在 ``:30``，整除会整体错位。
+    """
+    present = {int(round(float(point.get("t") or 0))) for point in points}
+    first = bucket_start(start, seconds)
+    last = bucket_start(end, seconds)
+
+    expected = 0
+    runs: list[dict] = []
+    run: dict | None = None
+    cursor = first
+    while cursor <= last + 0.5:
+        expected += 1
+        if int(round(cursor)) in present:
+            if run is not None:
+                runs.append(run)
+                run = None
+        elif run is None:
+            run = {"start": cursor, "count": 1}
+        else:
+            run["count"] += 1
+        cursor += seconds
+    if run is not None:
+        runs.append(run)
+
+    ranges = [{"from": iso(item["start"]),
+               "to": iso(item["start"] + item["count"] * seconds),
+               "seconds": int(item["count"] * seconds),
+               "missing": int(item["count"])} for item in runs]
+    missing = sum(item["missing"] for item in ranges)
+    return {
+        "from": iso(start),
+        "to": iso(end),
+        "samples": int(samples),
+        "gaps": missing,
+        "expected": expected,
+        "ratio": round(len(present) / expected, 3) if expected else None,
+        "bucket_s": int(seconds),
+        "gap_ranges": ranges,
+    }
+
+
+def event_type_name(kind: Any) -> str:
+    """事件类型改成界面契约的写法：``rtt`` → ``latency``。
+
+    Args:
+        kind: 采样侧的类型（``rtt`` / ``jitter`` / ``loss``）。
+
+    Returns:
+        str: ``latency`` / ``jitter`` / ``loss``。``rtt`` 在界面文案里叫
+        「时延」，契约里写 ``latency``；两者指同一个测量，改名只是为了和前端
+        的 ``type`` 枚举对齐（未识别的类型原样透传，不吞数据）。
+    """
+    text = str(kind or "").strip()
+    return "latency" if text == "rtt" else text
+
+
+def _number(value: Any) -> float | None:
+    """数值化；``None`` / 空串 / 非数字一律 ``None``（**不写 0**）。"""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def event_view(event: Mapping[str, Any]) -> dict:
+    """把 ``events.jsonl`` 的一条事件整理成界面契约的形状。
+
+    Args:
+        event: :func:`read_events` 的一条记录。
+
+    Returns:
+        dict: ``{"t","ts","target","type","value","threshold","duration_s",
+        "bssid","rssi_dbm"}``。``t`` 是 epoch 秒（前端按它画竖线），``ts`` 是
+        带时区的可读时间。缺字段一律 ``None``，不补 0。
+    """
+    stamp = _epoch_of(event)
+    return {
+        "t": round(stamp, 3) if stamp is not None else None,
+        "ts": str(event.get("t") or (iso(stamp) if stamp is not None else "")),
+        "target": str(event.get("target") or ""),
+        "type": event_type_name(event.get("type")),
+        "value": _number(event.get("value")),
+        "threshold": _number(event.get("threshold")),
+        "duration_s": _number(event.get("duration_s")),
+        "bssid": event.get("bssid") or None,
+        "rssi_dbm": _number(event.get("rssi_dbm")),
+    }
+
+
+def mark_view(mark: Mapping[str, Any]) -> dict:
+    """把一条人工标记整理成界面契约的形状（``{"t","ts","note"}``）。
+
+    Args:
+        mark: :func:`read_marks` 的一条记录。
+
+    Returns:
+        dict: ``t`` 是 epoch 秒 —— 界面用它算横坐标，传 ISO 字符串会在
+        ``Number(...)`` 里变成 ``NaN``，标记就整条画不出来。
+    """
+    stamp = _epoch_of(mark)
+    return {
+        "t": round(stamp, 3) if stamp is not None else None,
+        "ts": str(mark.get("t") or (iso(stamp) if stamp is not None else "")),
+        "note": str(mark.get("note") or ""),
+    }
+
+
 def build_history(from_value: Any = None, to_value: Any = None,
-                  bucket: Any = None, *, now: float | None = None) -> dict:
+                  bucket: Any = None, target: Any = None, *,
+                  now: float | None = None) -> dict:
     """``GET /api/history`` 的完整载荷。
 
     Args:
-        from_value: 起始时间（epoch 或 ISO）。
-        to_value: 结束时间（epoch 或 ISO）。
+        from_value: 起始时间（epoch 秒或 ISO 8601）。
+        to_value: 结束时间。
         bucket: ``1m`` / ``5m`` / ``1h``。
+        target: 看哪条序列（``gateway`` / ``dns`` / ``<目标 key>``）；省略时按
+            「第一个目标 → DNS → 网关」的默认顺序。
         now: 当前 epoch（测试注入）。
 
     Returns:
-        dict: ``{"ok", "from", "to", "from_epoch", "to_epoch", "bucket",
-        "bucket_s", "samples", "series", "marks", "coverage"}``。
+        dict: ``{"ok","from","to","from_epoch","to_epoch","bucket","bucket_s",
+        "target","targets","samples","series","marks","coverage"}``。
+
+        * ``series``：**扁平**的一串桶，一个桶一项（见 :func:`aggregate_points`）；
+        * ``target``：这条曲线实际画的是哪条序列（空区间时是空串）；
+        * ``targets``：区间内可选的序列清单 —— 让调用方知道还能切什么；
+        * ``coverage.gaps``：缺失桶数；``coverage.gap_ranges``：缺口的真实起止。
 
     Raises:
-        ValueError: 参数非法（调用方回 400）。
+        ValueError: 参数非法（时间格式 / ``from`` 晚于 ``to`` / ``bucket``
+            越界 / ``target`` 在该区间的样本里不存在）。
     """
     name, seconds = bucket_seconds(bucket)
     start, end = parse_range(from_value, to_value, now=now)
     samples = read_samples(start, end)
+
+    wanted = str(target).strip() if target else ""
+    available = series_keys(samples)
+    # 只有「区间里明明有数据，但都不是要的那条」才算参数错：区间整个没数据时
+    # 回 400 会把「agent 还没跑」误报成「你参数写错了」，那是另一码事。
+    if wanted and available and not any(_match(key, wanted) for key in available):
+        raise ValueError(
+            f"target 不在本区间的样本里：{wanted!r}（可选：{', '.join(available)}）")
+
+    points = aggregate_points(samples, seconds, wanted or None)
     return {
         "ok": True,
         "from": iso(start),
@@ -627,10 +876,13 @@ def build_history(from_value: Any = None, to_value: Any = None,
         "to_epoch": round(end, 3),
         "bucket": name,
         "bucket_s": seconds,
+        "target": primary_key(samples, wanted or None).split(":", 1)[-1],
+        "targets": available,
         "samples": len(samples),
-        "series": aggregate_series(samples, seconds),
-        "marks": read_marks(start, end),
-        "coverage": coverage(samples, start, end),
+        "series": points,
+        "marks": [mark_view(item) for item in read_marks(start, end)],
+        "coverage": bucket_coverage(points, start, end, seconds,
+                                    samples=len(samples)),
     }
 
 
@@ -771,7 +1023,7 @@ def export_markdown(samples: Sequence[Mapping[str, Any]], start: float, end: flo
     """
     if events is None:
         events = read_events(start, end)
-    cover = coverage(samples, start, end)
+    cover = sample_coverage(samples, start, end)
     lines = [
         "# 网络历史摘要",
         "",

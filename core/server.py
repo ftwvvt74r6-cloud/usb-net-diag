@@ -902,11 +902,16 @@ def _last_run_target(mode: str, target: str, pcap: str | None) -> str:
         pcap: 离线模式选中的抓包文件（只取文件名，不写绝对路径）。
 
     Returns:
-        str: 目标文本；全网体检返回空串，由界面按 copy 表回退成「全网」。
+        str: 目标文本。**永不为空串**：全网体检回「全网」字符串 —— 接口里给空串
+        会让「目标」一栏在导出报告 / 提示条上变成空白，而空白既可能是「全网」
+        也可能是「界面没拿到数据」，读的人分不清。离线模式且没填目标时退回
+        抓包文件名（那是这次分析真正的输入）。
     """
     text = (target or "").strip()
     if not text and mode == "offline" and pcap:
         text = Path(str(pcap)).name
+    if not text:
+        text = copytext.text("common", "all_network")
     return text
 
 
@@ -1016,6 +1021,9 @@ def _last_run_from_runs(limit: int = 50) -> dict | None:
         target = str(params.get("target") or "").strip()
         if not target and mode == "offline":
             target = str(params.get("pcap") or "").strip()
+        if not target:
+            # 与 _last_run_target 同口径：接口里不给空串，全网体检写「全网」。
+            target = copytext.text("common", "all_network")
         epoch = _mtime(path)
         # 旧记录兼容：没有 schema 版本字段的历史记录标记 legacy，前端据此只显示
         # 「旧版本结果」横幅、禁用导出，而不是渲染四层「未知」卡。
@@ -2117,16 +2125,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not sub:
                 return self._json(history.build_history(
-                    arg("from"), arg("to"), arg("bucket")))
+                    arg("from"), arg("to"), arg("bucket"), arg("target")))
             if sub == "events":
                 start, end = history.parse_range(arg("from"), arg("to"))
-                events = history.read_events(start, end)
+                events = [history.event_view(item)
+                          for item in history.read_events(start, end)]
                 return self._json({"ok": True, "from": history.iso(start),
                                    "to": history.iso(end),
                                    "count": len(events), "events": events})
             if sub == "marks":
                 start, end = history.parse_range(arg("from"), arg("to"))
-                marks = history.read_marks(start, end)
+                marks = [history.mark_view(item)
+                         for item in history.read_marks(start, end)]
                 return self._json({"ok": True, "from": history.iso(start),
                                    "to": history.iso(end),
                                    "count": len(marks), "marks": marks})
@@ -2465,7 +2475,10 @@ class Handler(BaseHTTPRequestHandler):
                 # 绝不假装成功（下次查 marks 对不上会变成另一个谜）。
                 return self._json({"ok": False, "error": f"写入标记失败：{exc}"}, 500)
             log(f"历史标记已记录：{mark['t']} {mark['note']}")
-            return self._json({"ok": True, "mark": mark})
+            # 契约：``t`` 是**带时区的 ISO 文本**（前端只判断 ok，不做数值运算）；
+            # 列表接口里的 ``t`` 才是 epoch 秒 —— 两处的用途不同，别混。
+            return self._json({"ok": True, "t": mark["t"],
+                               "epoch": mark["epoch"], "mark": mark})
         if parsed.path == "/api/scan":
             payload = self._read_json()
             return self._json(start_job(payload))

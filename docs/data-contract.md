@@ -143,7 +143,15 @@ HTTP 大流（2000 包）按会话数是「TLS 91%」，按报文数才是「HTT
 读取、分桶、覆盖率、导出全部收在 `core/history.py` 一层里，`server` 只做参数解析 ——
 同一个缺口不能一处算 3 分钟、另一处算 5 分钟。
 
-### 7.1 `GET /api/history?from&to&bucket=1m|5m|1h`
+**契约以 `ui/v2/js/history.js` 的实际读法为准**（S6 已实现）。两个容易写错的地方：
+
+1. `series[].t` 是 **epoch 秒（数字）**，不是 ISO 字符串。前端用 `Number(s.t)`
+   过滤、`new Date(t * 1000)` 画横轴 —— 给字符串会让点被整批过滤掉，界面只剩
+   「没数据」。可读时间放在 `ts`（带时区偏移）。
+2. `coverage.gaps` 是 **缺失桶数（数字）**，不是缺口数组。具体缺口段的起止放在
+   `gap_ranges`（加法字段）。数字给「概览」，数组给「断的是哪一分钟」。
+
+### 7.1 `GET /api/history?from&to&bucket=1m|5m|1h[&target=]`
 
 ```json
 {
@@ -154,51 +162,86 @@ HTTP 大流（2000 包）按会话数是「TLS 91%」，按报文数才是「HTT
   "to_epoch": 1794366000.0,
   "bucket": "1m",
   "bucket_s": 60,
+  "target": "公司官网",
+  "targets": ["gateway", "dns", "target:公司官网"],
   "samples": 355,
   "series": [
-    {"key": "gateway", "kind": "gateway", "label": "网关",
-     "points": [{"t": "2026-11-11T10:00:00+08:00", "epoch": 1794362400.0, "n": 6,
-                 "rtt_ms": {"avg": 12.3, "max": 20.0, "min": 8.1},
-                 "loss_pct": {"avg": 0.0, "max": 0.0, "min": 0.0},
-                 "jitter_ms": {"avg": 2.1, "max": 5.0, "min": 0.5},
-                 "bssid": "aa:bb:cc:00:00:01"}]}
+    {"t": 1794362400.0, "ts": "2026-11-11T10:00:00+08:00", "n": 6,
+     "rtt_ms": 12.3, "loss_pct": 0.0, "jitter_ms": 2.1,
+     "rssi_dbm": -55.0, "rx_mbps": 300.0, "bssid": "aa:bb:cc:00:00:01"}
   ],
-  "marks": [{"t": "...", "epoch": 1794363000.0, "note": "换了 AP"}],
+  "marks": [{"t": 1794363000.0, "ts": "2026-11-11T10:10:00+08:00", "note": "换了 AP"}],
   "coverage": {
-    "samples": 355, "expected": 360, "ratio": 0.986,
-    "interval_s": 10,
-    "gaps": [{"from": "...", "to": "...", "seconds": 300, "missing": 30}]
+    "from": "2026-11-11T10:00:00+08:00", "to": "2026-11-11T11:00:00+08:00",
+    "samples": 355, "gaps": 5, "expected": 60, "ratio": 0.917, "bucket_s": 60,
+    "gap_ranges": [{"from": "2026-11-11T10:31:00+08:00",
+                    "to": "2026-11-11T10:36:00+08:00",
+                    "seconds": 300, "missing": 5}]
   }
 }
 ```
 
 | 字段 | 口径 |
 |---|---|
-| `series[].key` | `gateway` / `dns` / `target:<目标名>`。**目标带前缀**：用户可以把它命名为 `gateway`，不带前缀就和网关序列撞名 |
-| `series[].kind` | `gateway` / `dns` / `target` |
-| `points[].n` | 该桶里的样本条数（`n=1` 表示这一分钟只采到一次） |
-| `points[].rtt_ms` | `avg` / `max` / `min`，1 位小数。**没测到就是 `null`** |
-| `points[].bssid` | 该桶内出现次数最多的 BSSID（主 AP）；全空时 `null` |
+| `series[].t` | 桶起点的 **epoch 秒**；`ts` 是同一时刻的可读文本 |
+| `series[].rtt_ms` / `jitter_ms` | 桶内**均值**，1 位小数。**没测到就是 `null`** |
+| `series[].loss_pct` | 桶内**最大值**（最差那一笔）—— 5 条样本里 1 条丢 20%，均值 4% 会把断流抹平 |
+| `series[].rssi_dbm` / `rx_mbps` | 桶内均值，取自样本的 `wlan` 块 |
+| `series[].bssid` | 该桶内样本数最多的 BSSID（主 AP）；全空时 `null` |
+| `series[].n` | 该桶里的样本条数（`n=1` 表示这一分钟只采到一次） |
+| `target` | 这条曲线**实际画的**是哪条序列（见 7.2） |
+| `targets` | 区间内可选的序列清单，用来切 `?target=` |
 
-### 7.2 `coverage.gaps`：缺口必须显式
+### 7.2 一条线画哪条序列
+
+界面只有一个 RTT 折线，但一次采样有网关 / DNS / 至多 3 个目标。默认取
+**配置里的第一个目标** → DNS → 网关。
+
+为什么不把三条平均成一条：网关 1 ms 与公网目标 30 ms 平均出 15 ms，这个数不代表
+任何一台设备，还会随着「网关抖一下」上下跳。所以响应里明确写 `target`，并支持
+`?target=gateway|dns|<目标 key>` 显式切换。目标 key 来自 `config/agent.json`
+（默认 `target-1`，建议起成「公司官网」这种能直接看懂的名字）。
+
+`?target=` 指定的序列在区间样本里不存在时返回 400 并列出可选值（`targets`）——
+静默回空图会让人以为「这段时间没数据」。**但区间里一条样本都没有时不报 400**：
+那时该说的是「agent 还没跑」，不是「你参数写错了」。
+
+### 7.3 `coverage`：缺口必须显式
 
 三条规则，改之前先读完：
 
-1. **没有数据的桶不出现在 `series` 里**，不补 0 点。补 0 会在图上画出一条贴着
-   横轴的完美直线，看起来像「网络很好」，实际是「没采到」。
-2. **`gaps` 为空数组只代表「这段采齐了」**，不代表「没采到所以没缺口」。
-   空区间（一条样本都没有）也照样给一段覆盖整个查询区间的缺口。
-3. `missing` 是「该有但没有」的样本数，恒 ≥ 1；`seconds` 是真实时长。
+1. **没有数据的桶不出现在 `series` 里**，也不补 `null` 占位。补点会让「没采到」
+   和「采到了但值是 0」在图上长得一模一样；前端的作法是折线断开。
+2. **`gaps` 是缺失桶数**，一条数据都没有时它等于全部桶数 —— **绝不为 0**。
+   `0` 会被读成「这段采齐了」，正好把结论说反。
+3. `gap_ranges[].missing` 是这段缺了几个桶，`seconds` 是真实时长；相邻的缺失桶会
+   合并成一段，不按桶拆成一堆碎行。
 
-缺口判定容差是 `interval_s × 1.5`：一轮采样本身要花几百毫秒到几秒，严格按
-`interval_s` 判会每轮都多出一个假缺口。
+桶边界按**本地时区**对齐（1h 落整点、5m 落 `:00/:05`），逐个累加求边界而不用
+`epoch // seconds` 整除 —— UTC+5:30 这类时区的本地整点落在 `:30`，整除会整体错位。
 
-`expected` / `ratio` 是**估算**：`expected = ceil((to-from)/interval_s)`，
-`ratio = samples / expected`（`expected = 0` 时 `ratio` 为 `null`）。区间长度不是
-采样间隔整数倍时，`ratio` 会略大于 1，属于正常现象 —— 它表达的是「采到的条数 /
-按长度该有的条数」，不是严格覆盖率。
+### 7.4 `GET /api/history/events?from&to`
 
-### 7.3 `GET /api/history/export?format=csv|md&from&to`
+```json
+{"ok": true, "count": 2, "from": "...", "to": "...",
+ "events": [{"t": 1794363000.0, "ts": "2026-11-11T10:10:00+08:00",
+             "target": "target:公司官网", "type": "latency",
+             "value": 300.0, "threshold": 120.0, "duration_s": 30.0,
+             "bssid": "aa:bb:cc:00:00:01", "rssi_dbm": -55.0}]}
+```
+
+| 字段 | 口径 |
+|---|---|
+| `type` | `latency` / `jitter` / `loss`。采集侧写的是 `rtt`，接口层映射成 `latency`；**改名不改值**，未识别的类型原样透传 |
+| `t` / `ts` | 事件触发时刻的 epoch 秒 / 带时区文本 |
+| `value` / `threshold` | 实测值与当时的阈值，单位随 `type`（ms 或 %） |
+| `duration_s` | 从首次越线到落这条事件的持续时长 |
+| `bssid` / `rssi_dbm` | **当时**的主 AP 与信号 —— 看到「10:10 时延 300 ms」时，下一个问题必然是「那会儿是不是换 AP 了」 |
+
+事件不是「一超阈值就落一条」：连续 2 次越线才算一次故障，同一次故障只落一条，
+恢复后重新武装（见 `core/agent.py::EventTracker`）。所以列表里没有单点尖刺。
+
+### 7.5 `GET /api/history/export?format=csv|md&from&to`
 
 CSV 列头**固定**（列序即契约，逐字符不得改）：
 
@@ -219,20 +262,45 @@ time,interval_s,gateway_rtt_ms,gateway_loss_pct,gateway_jitter_ms,dns_rtt_ms,tar
 里区间内的事件，按「实测/阈值」降序取前 5 —— 与「连续 2 次才落一条」的判定同源，
 不另算一套阈值。
 
-### 7.4 `POST /api/history/mark` / `GET /api/history/marks`
+**导出用样本级缺口（`interval_s × 1.5` 判定），接口用桶级缺口**：一次 21 秒的断档
+在 1m 桶里可能落在同一个桶内、桶看不出缺口，但报告必须把它写成「21 秒」。
+两套口径服务两个问题，不要合并。
 
-`{"note": "15:20 换了 AP"}` → 追加一行到 `logs/history/marks.jsonl`，
-返回 `{"ok": true, "mark": {"t", "epoch", "note"}}`。正文去空白后不能为空、
-最长 500 字（超出返回 400）。写盘失败返回 500 —— 不假装成功，否则下次查 marks
-对不上会变成另一个谜。
+### 7.6 `POST /api/history/mark` / `GET /api/history/marks?from&to`
 
-### 7.5 错误码
+`{"note": "15:20 换了 AP"}` → 追加一行到 `logs/history/marks.jsonl`。
+
+| 接口 | 响应 |
+|---|---|
+| `POST /api/history/mark` | `{"ok": true, "t": "2026-11-11T10:10:00+08:00", "epoch": ..., "mark": {...}}` —— `t` 是 **ISO 文本**（前端只判 `ok`） |
+| `GET /api/history/marks` | `{"ok": true, "count": N, "marks": [{"t": <epoch 秒>, "ts": "...", "note": "..."}]}` —— 列表里 `t` 是 **数字**（前端 `Number(m.t)` 算横坐标） |
+
+正文去空白后不能为空、最长 500 字（超出 400）。写盘失败返回 500 —— 不假装成功，
+否则下次查 marks 对不上会变成另一个谜。
+
+### 7.7 错误码
 
 | 情况 | 响应 |
 |---|---|
-| 时间格式无法识别 / `from` 晚于 `to` / `bucket` 不在三档内 / `format` 非 `csv|md` | `400` + `{"ok": false, "error": "..."}` |
+| 时间格式无法识别 / `from` 晚于 `to` / `bucket` 不在三档内 / `format` 非 `csv|md` / `target` 在本区间样本里不存在 | `400` + `{"ok": false, "error": "..."}` |
 | `/api/history/` 后接未知子路径 | `404` |
-| 目录不存在 / 文件为空 | `200` + 空 `series` / 空 `events` + 一段显式缺口（**不是错误**） |
+| 目录不存在 / 文件为空 | `200` + 空 `series` / 空 `events` + 全量缺口（**不是错误**） |
 
 时间参数接受 epoch 秒（数字或数字串）与 ISO 8601（`2026-11-11`、`2026-11-11 10:00`、
 `2026-11-11T10:00:00+08:00`、结尾 `Z` 的 UTC）。**无时区按本地时间**解释。
+
+## 8. 「目标」字段（`summary.target`）
+
+导出报告与人读摘要里的「目标」直接读 `summary.target`（`ui/v2/js/reporter.js`）。
+两种接口都必须给**非空字符串**：
+
+| 场景 | 值 |
+|---|---|
+| 单目标诊断 | 用户填的原样：`www.baidu.com:443` / `192.168.1.10` |
+| 全网体检（`mode=scan`，不设过滤） | `全网` |
+| 离线分析且有 `--target` | 该目标 |
+| 离线分析未填目标 | 抓包文件名（`a.pcap`，不含本机绝对路径） |
+
+空串是禁止的：它在报告里表现为空白，而空白既可能是「全网」也可能是「界面没拿到
+数据」，读的人分不清。全网体检以前给空串、让前端按文案表回退，现在由后端直接给
+（`core.copy/zh-CN.json` 的 `common.all_network`，仍是单一文案来源）。
