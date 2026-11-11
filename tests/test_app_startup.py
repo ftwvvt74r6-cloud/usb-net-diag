@@ -141,29 +141,29 @@ class AppStartupTest(unittest.TestCase):
         self.assertNotIn("请把 Wireshark 便携版解压到", output)
         self.assertNotIn("没找到 tshark，抓包与分析抓包文件都不可用", output)
 
-    # --------------------------------------------------------- 端口全被占用
-    def test_all_ports_busy_still_uses_friendly_msgbox_and_exit_1(self):
+    # --------------------------------------------- 连端口 0 都绑不上（罕见）
+    def test_bind_failure_still_uses_friendly_msgbox_and_exit_1(self):
+        """8787~8796 全被占不再是失败（会自动落端口 0）；只有连端口 0 都绑不上才退 1。"""
         rc, _output, fake, msgbox, create_server, _ = self._run_main(
             create_server_result="busy")
-        self.assertEqual(rc, 1, "端口全占是物理无法启动，保持退出码 1")
+        self.assertEqual(rc, 1, "一个端口都绑不上是真的起不来，保持退出码 1")
         create_server.assert_called_once()
         msgbox.assert_called_once()
         text = msgbox.call_args.args[0]
-        self.assertIn("8787", text)
-        self.assertIn("关掉占用", text, "提示必须可操作")
+        self.assertIn("重启", text, "提示必须可操作")
         self.assertNotIn(str(ROOT), text, "面向一线的提示不许出现本机绝对路径")
         self.assertNotIn("tools", text)
         self.assertFalse(fake.served)
         self.assertFalse(fake.closed)
 
-    def test_missing_tshark_plus_busy_ports_only_reports_the_port_exception(self):
+    def test_missing_tshark_plus_bind_failure_only_reports_the_port_exception(self):
         """两个缺项同时出现时，不能误报缺 tshark，也不能弹两次框。"""
         rc, _output, _fake, msgbox, _create, _gen = self._run_main(
             tshark_found=False, create_server_result="busy")
         self.assertEqual(rc, 1)
         msgbox.assert_called_once()
         text = msgbox.call_args.args[0]
-        self.assertIn("8787", text)
+        self.assertIn("端口", text)
         self.assertNotIn("tshark", text.lower())
         self.assertNotIn("Wireshark", text)
 

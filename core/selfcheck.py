@@ -344,15 +344,17 @@ def check_npcap() -> dict:
 
 
 def check_port() -> dict:
-    """检查 8787~8796 是否有可用端口，或已有本程序实例在跑。
+    """检查能否起本地服务：已有实例 → 区间有空端口 → 端口 0（系统分配）。
 
-    两件事都复用 :mod:`app` 的既有实现：:func:`app.find_running` 探测本程序
-    实例（读 ``/api/ping``），:func:`app.first_free_port` 只做 bind/close。
-    已有实例时不需要空闲端口 —— 启动器会直接打开那个地址。
+    三件事都复用 :mod:`app` 的既有实现：:func:`app.find_running` 探测本程序
+    实例（读 ``/api/ping``），:func:`app.port_plan` 给「这次要监听哪个端口」
+    （区间内第一个空闲；都被占则 ``0``，交给系统分配）。已有实例时不需要空闲
+    端口 —— 启动器会直接打开那个地址。
 
     Returns:
-        dict: 已有实例 ``detail`` 带地址；有空闲端口 ``detail`` 带端口号；
-            两者都没有 ``ok=False``，``fix_command`` 是查看端口占用的命令。
+        dict: 已有实例 ``detail`` 带地址；区间有空端口带端口号；只能由系统分配时
+            也算 ``ok=True``（服务照样起得来，只是地址每次不同）；
+            连端口 0 都绑不上才 ``ok=False``，``fix_command`` 是查看端口占用的命令。
     """
     try:
         url = app.find_running()
@@ -361,14 +363,17 @@ def check_port() -> dict:
     if url:
         return _check("port", True, _t("port_running", url=url))
     try:
-        port = app.first_free_port()
-    except Exception:  # noqa: BLE001  端口探测失败按「全被占用」处理
-        port = None
-    if port:
-        return _check("port", True, _t("port_free", port=port))
-    return _check("port", False, _t("port_busy"),
-                  fix_kind="command",
-                  fix_command="netstat -ano | findstr :8787")
+        plan = app.port_plan()
+    except Exception:  # noqa: BLE001  端口探测失败按「一个都绑不上」处理
+        plan = None
+    if plan is None:
+        return _check("port", False, _t("port_busy"),
+                      fix_kind="command",
+                      fix_command="netstat -ano | findstr :8787")
+    if plan == 0:
+        # 0 是「系统分配」的标记，不是端口号，所以不能拿它去填 {port}。
+        return _check("port", True, _t("port_ephemeral"))
+    return _check("port", True, _t("port_free", port=plan))
 
 
 def check_admin() -> dict:

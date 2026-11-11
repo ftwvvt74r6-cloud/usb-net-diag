@@ -83,6 +83,9 @@ REQUIRED_SOURCE_MARKERS = (
     "startup.log",
     "launcher-cache.json",
     "/api/preflight",
+    # 端口文件：8787~8796 全被占时服务绑端口 0，启动器只能靠这个文件找到真实端口。
+    # 删掉它 = 「端口区间被占满 → 界面打不开」，所以列进契约。
+    "netdiag.port",
     "SplashForm",
 )
 

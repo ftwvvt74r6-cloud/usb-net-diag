@@ -137,13 +137,18 @@ def is_admin() -> bool:
         return False
 
 
-def relaunch_as_admin() -> bool:
+def relaunch_as_admin(port: int | None = None) -> bool:
     """用 UAC 提权重启自己。
 
     提权只重启**服务进程**，界面标签页已经开着；所以提权后的新进程必须继承
     ``NETDIAG_NO_BROWSER=1``（H1：否则用户会在提权后再被弹出第二个标签页）。
     ``ShellExecuteW`` 创建的子进程继承当前进程环境，这里在调用前显式置位，
     也覆盖「直接从命令行启动、没经过 launcher」的情况。
+
+    Args:
+        port: 当前实例监听的端口；给了就通过 ``--port`` 传给新进程，让它优先绑回
+            同一个端口。**端口 0（系统分配）时必须传**，否则新进程会拿到另一个随机
+            端口，已经开着的标签页就指向了一个不存在的地址。
 
     Returns:
         bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
@@ -161,10 +166,46 @@ def relaunch_as_admin() -> bool:
         os.environ[NO_BROWSER_ENV] = "1"
         # pythonw 提权后仍无控制台；__file__ 用绝对路径，工作目录设为 ROOT
         params = f'"{Path(__file__).resolve()}" --elevated'
+        try:
+            wanted = int(port) if port else 0
+        except (TypeError, ValueError):
+            wanted = 0
+        if 0 < wanted < 65536:
+            params += f" --port {wanted}"
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, str(ROOT), 1)
         return int(rc) > 32
     except Exception:  # noqa: BLE001
         return False
+
+
+def preferred_port(argv: list[str] | None = None) -> int | None:
+    """从命令行取 ``--port N``（提权重启用来「绑回同一个端口」）。
+
+    Args:
+        argv: 参数列表；省略时用 ``sys.argv``。
+
+    Returns:
+        int | None: 合法端口（1~65535）；没传或值非法时 ``None``（回落配置端口）。
+
+    Note:
+        非法值**不报错**：这条参数只在提权链路自动追加，用户不会手敲；
+        真写坏了也只该退回默认端口，不该让服务起不来。
+    """
+    args = list(sys.argv if argv is None else argv)
+    for index, item in enumerate(args):
+        value = ""
+        if item == "--port" and index + 1 < len(args):
+            value = args[index + 1]
+        elif item.startswith("--port="):
+            value = item.split("=", 1)[1]
+        if not value:
+            continue
+        try:
+            port = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+        return port if 0 < port < 65536 else None
+    return None
 
 
 def _port_open(port: int, timeout: float = 0.15) -> bool:
@@ -195,29 +236,55 @@ def _port_open(port: int, timeout: float = 0.15) -> bool:
 def find_running() -> str:
     """探测本机是否已有实例在跑（单实例保护）。
 
-    逐个试 8787~8796 的 ``/api/ping``，并核对 ``app`` 字段是本程序，
-    避免把别的服务误认成自己。先用 :func:`_port_open` 过滤没人监听的端口，
-    不对关闭端口发 HTTP（H2：否则 10 个端口会白等 7 秒）。
+    先读 ``logs/netdiag.port``（服务自己写的真实端口）—— 8787~8796 全被占时服务会
+    绑端口 0，那种实例按固定区间永远扫不到；文件里的端口敲不通（进程已死留下的陈旧
+    文件）再退回按区间扫。扫的时候逐个试 8787~8796 的 ``/api/ping``，并核对 ``app``
+    字段是本程序，避免把别的服务误认成自己。先用 :func:`_port_open` 过滤没人监听的
+    端口，不对关闭端口发 HTTP（H2：否则 10 个端口会白等 7 秒）。
 
     Returns:
         str: 已运行实例的界面地址（如 ``http://127.0.0.1:8787/``）；没有则空串。
     """
     try:
         import server  # noqa: PLC0415
-
+    except Exception:  # noqa: BLE001  导入失败（打包缺文件）不影响退回按区间扫
+        server = None
+    if server is not None:
+        hint = server.read_port_file() or {}
+        port = hint.get("port")
+        if port and _port_open(int(port)):
+            url = _probe_ping(int(port))
+            if url:
+                return url
+    try:
         base = int(server.diagnose.load_config().get("server_port", 8787))
     except Exception:  # noqa: BLE001
         base = 8787
     for port in range(base, base + 10):
         if not _port_open(port):
             continue
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=0.7) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
-            if data.get("app") == "USBNetDiag" and data.get("ok"):
-                return data.get("url") or f"http://127.0.0.1:{port}/"
-        except Exception:  # noqa: BLE001
-            continue
+        url = _probe_ping(port)
+        if url:
+            return url
+    return ""
+
+
+def _probe_ping(port: int) -> str:
+    """对单个端口敲一次 ``/api/ping``；确认是本程序才返回界面地址。
+
+    Args:
+        port: 待探测的本机端口。
+
+    Returns:
+        str: 本程序返回的界面地址；端口没人应答 / 不是本程序时是空串。
+    """
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=0.7) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        if data.get("app") == "USBNetDiag" and data.get("ok"):
+            return data.get("url") or f"http://127.0.0.1:{port}/"
+    except Exception:  # noqa: BLE001
+        return ""
     return ""
 
 
@@ -233,18 +300,41 @@ def first_free_port(base: int = 8787, count: int = 10) -> int | None:
         count: 顺延个数，默认 10（8787~8796）；非正数时返回 ``None``。
 
     Returns:
-        int | None: 第一个可绑定的端口号；全部被占用时 ``None``。
+        int | None: 第一个可绑定的端口号；全部被占用时 ``None``。传 ``base=0`` 时
+            返回的是系统当场分配的那个端口（用于判断「端口 0 能不能绑」）。
     """
     for port in range(int(base), int(base) + max(0, int(count))):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.bind(("127.0.0.1", port))
-            return port
+            return int(sock.getsockname()[1])
         except OSError:
             continue
         finally:
             sock.close()
     return None
+
+
+def port_plan(base: int = 8787, count: int = 10) -> int | None:
+    """决定**本次要监听哪个端口**：区间内第一个空闲 → 0（系统分配）→ 真没有。
+
+    Args:
+        base: 起始端口，默认 8787。
+        count: 顺延个数，默认 10（8787~8796）。
+
+    Returns:
+        int | None: 可用的端口号；``0`` 表示「区间都被占用，交给系统分配」；
+            ``None`` 表示连端口 0 都绑不上（本机回环栈不可用，界面确实起不来）。
+
+    Note:
+        0 是一个**合法返回值**而不是「假值」：调用方必须按 ``is None`` 判断，
+        写成 ``if port:`` 会把「交给系统分配」误当成「没端口可用」。
+        这与 ``server.create_server`` 的顺延策略一一对应。
+    """
+    port = first_free_port(base, count)
+    if port:
+        return port
+    return 0 if first_free_port(0, 1) is not None else None
 
 
 # --------------------------------------------------------------------- 主流程
@@ -324,18 +414,27 @@ def main() -> int:
     # 4. 起服务。idle_exit_min：浏览器关了没人访问就自动退出，
     #    避免「窗口看不见、进程还在」的僵尸状态
     idle_min = int(cfg.get("idle_exit_min", 30) or 0)
-    httpd, url = server.create_server(int(cfg.get("server_port", 8787)),
-                                      idle_exit_min=idle_min, quiet=True)
+    # 提权重启会带 --port <当前端口>：优先绑回同一个，已开着的标签页才不会指向空地址。
+    # 常规启动没有这个参数，仍按配置端口 → 顺延 → 端口 0 走。
+    wanted = preferred_port() or int(cfg.get("server_port", 8787))
+    httpd, url = server.create_server(wanted, idle_exit_min=idle_min, quiet=True)
     if httpd is None:
-        # 8787~8796 全被占 = 物理上无法起本地服务，属于 SPEC 声明的例外；
-        # 提示面向普通使用者、可操作，不出现本机绝对路径/开发者口吻。
-        msgbox("本地服务端口 8787~8796 都被占用了，界面暂时打不开。\n\n"
-               "请关掉占用这些端口的程序（可能是另一个 NetDiag 窗口或调试工具），"
-               "或重启电脑后再试。", flags=MB_ICONERROR)
+        # 到这一步说明连「端口 0（系统分配）」都绑不上 —— 本机回环栈不可用，
+        # 属于 SPEC 声明的物理例外（8787~8796 全被占**不再是**例外，那时会自动
+        # 落到端口 0）。提示面向普通使用者、可操作，不出现本机绝对路径。
+        msgbox("本地服务端口绑不上，界面暂时打不开。\n\n"
+               "请重启电脑后再试；仍不行请把 logs 目录下的日志发给技术支持。",
+               flags=MB_ICONERROR)
         return 1
 
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 启动 {url} pid={os.getpid()} "
           f"admin={is_admin()} idle_exit={idle_min}min")
+    if server.SERVER.get("ephemeral"):
+        # 端口 0：地址每次启动都不同，日志里写清「为什么不是 8787」比排查时再猜便宜。
+        base_port = int(cfg.get("server_port", 8787))
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [提示] 配置端口 "
+              f"{base_port}~{base_port + 9} 都被占用，本次由系统分配端口 "
+              f"{server.SERVER.get('port')}（已写 logs/netdiag.port 供启动器读取）")
 
     def _open() -> None:
         time.sleep(0.4)  # 等 serve_forever 起来，避免瞬间 502

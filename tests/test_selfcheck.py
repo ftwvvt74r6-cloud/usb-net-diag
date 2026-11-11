@@ -75,7 +75,7 @@ def _mock_env():
     stack.enter_context(mock.patch.object(selfcheck, "_tracert_available",
                                            return_value=True))
     stack.enter_context(mock.patch.object(selfcheck.app, "find_running", return_value=""))
-    stack.enter_context(mock.patch.object(selfcheck.app, "first_free_port", return_value=8787))
+    stack.enter_context(mock.patch.object(selfcheck.app, "port_plan", return_value=8787))
     return stack
 
 
@@ -157,23 +157,41 @@ class FailureDetailTest(unittest.TestCase):
         self.assertIn("npcap.com", item["fix_url"])
 
     def test_port_busy_has_command_fix(self):
+        # 只有「连端口 0 都绑不上」才算端口不可用（8787~8796 全被占会自动落到
+        # 系统分配端口，那是 ok=True，见下一个用例）。
         with mock.patch.object(selfcheck.app, "find_running", return_value=""), \
-                mock.patch.object(selfcheck.app, "first_free_port", return_value=None):
+                mock.patch.object(selfcheck.app, "port_plan", return_value=None):
             item = selfcheck.check_port()
         self.assertFalse(item["ok"])
-        self.assertIn("8787", item["detail"])
         self.assertEqual(item["fix_kind"], "command")
         self.assertIn("netstat", item["fix_command"])
+        self.assertIn("重启", item["detail"])
+
+    def test_port_ephemeral_is_ok_not_busy(self):
+        """区间全被占 → port_plan() 返回 0（系统分配）：自检要给 ok，不是报死。"""
+        with mock.patch.object(selfcheck.app, "find_running", return_value=""), \
+                mock.patch.object(selfcheck.app, "port_plan", return_value=0):
+            item = selfcheck.check_port()
+        self.assertTrue(item["ok"], "端口 0 是「系统分配」，不该被当成端口不可用")
+        self.assertIn("系统分配", item["detail"])
+        self.assertNotIn("打不开", item["detail"])
+
+    def test_port_free_shows_planned_port(self):
+        with mock.patch.object(selfcheck.app, "find_running", return_value=""), \
+                mock.patch.object(selfcheck.app, "port_plan", return_value=8793):
+            item = selfcheck.check_port()
+        self.assertTrue(item["ok"])
+        self.assertIn("8793", item["detail"])
 
     def test_running_instance_wins_over_free_port(self):
         with mock.patch.object(
                 selfcheck.app, "find_running",
                 return_value="http://127.0.0.1:8787/"), \
-                mock.patch.object(selfcheck.app, "first_free_port") as free:
+                mock.patch.object(selfcheck.app, "port_plan") as plan:
             item = selfcheck.check_port()
         self.assertTrue(item["ok"])
         self.assertIn("127.0.0.1:8787", item["detail"])
-        free.assert_not_called()
+        plan.assert_not_called()
 
     def test_admin_required_has_elevate_fix(self):
         with mock.patch.object(selfcheck, "_is_admin", return_value=False):

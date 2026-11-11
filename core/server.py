@@ -302,6 +302,9 @@ QUIT = threading.Event()            # 置位后主循环退出
 SERVER: dict = {"httpd": None}      # 当前监听实例，供 /api/quit 关停
 LAST_HIT = {"t": time.time()}       # 最后一次有人访问界面的时间
 PID_FILE = ROOT / "logs" / "netdiag.pid"
+#: 本次实例**真实**监听的端口（JSON）。8787~8796 全被占时服务会绑端口 0 由系统分配，
+#: 此时启动器按固定区间扫描永远找不到 —— 它读这个文件才知道该去敲哪个端口。
+PORT_FILE = ROOT / "logs" / "netdiag.port"
 
 
 def touch() -> None:
@@ -357,12 +360,77 @@ def _write_pid() -> None:
         pass
 
 
+def _write_port_file(port: int, url: str, ephemeral: bool) -> None:
+    """把本次监听的**真实端口**写进 ``logs/netdiag.port``。
+
+    启动器要在 Python 起来之前工作，读不到配置文件，只能按 8787~8796 硬扫；
+    一旦服务落到端口 0（系统分配），硬扫必然落空，界面就打不开了。所以由服务
+    自己把端口写到盘上，启动器先读文件、失败再退回硬扫。
+
+    Args:
+        port: 实际绑定的端口（``httpd.server_address[1]``，不是配置里的期望值）。
+        url: 完整界面地址（``http://127.0.0.1:<port>/``）。
+        ephemeral: 是否由系统分配（True 表示 8787~8796 都被占用了）。
+
+    Returns:
+        None: 写盘失败只静默忽略 —— 端口文件是**加速/兜底**通道，
+            它丢了启动器仍能靠硬扫命中常规端口，不该让服务起不来。
+    """
+    try:
+        PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"ok": True, "port": int(port), "url": url,
+                   "pid": os.getpid(), "ephemeral": bool(ephemeral),
+                   "started_at": round(time.time(), 3)}
+        PORT_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def read_port_file() -> dict | None:
+    """读 ``logs/netdiag.port``，返回本次实例的真实端口信息。
+
+    调用方是 :func:`app.find_running`（复用已有实例）与自检的端口项。这里只做
+    「文件读得出来且端口合法」，**不校验进程是否还活着** —— 死进程留下的陈旧端口
+    由调用方用 ``/api/ping`` 否掉，那一步本来就存在。
+
+    Returns:
+        dict | None: ``{"port", "url", "pid", "ephemeral", "started_at"}``；
+            文件不存在 / 不是 JSON / 端口不在 1~65535 时返回 ``None``（不抛）。
+    """
+    try:
+        data = json.loads(PORT_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        port = int(data.get("port"))
+    except (TypeError, ValueError):
+        return None
+    if not 0 < port < 65536:
+        return None
+    return {
+        "port": port,
+        "url": str(data.get("url") or f"http://127.0.0.1:{port}/"),
+        "pid": data.get("pid"),
+        "ephemeral": bool(data.get("ephemeral")),
+        "started_at": data.get("started_at"),
+    }
+
+
 def cleanup_pid() -> None:
-    """只删自己的 PID 文件，避免误删新实例的。"""
+    """只删自己的 PID 文件与端口文件，避免误删新实例的。"""
     try:
         if PID_FILE.is_file() and PID_FILE.read_text(encoding="utf-8").strip() == str(os.getpid()):
             PID_FILE.unlink()
     except OSError:
+        pass
+    try:
+        if PORT_FILE.is_file():
+            data = json.loads(PORT_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and str(data.get("pid")) == str(os.getpid()):
+                PORT_FILE.unlink()
+    except (OSError, ValueError):
         pass
 
 
@@ -1367,7 +1435,9 @@ def request_elevation() -> dict:
                 "message": "当前已是管理员权限"}
     try:
         import app  # noqa: PLC0415  延迟导入：只有提权时才需要启动器模块
-        started = app.relaunch_as_admin()
+        # 把当前端口带过去：端口 0（系统分配）时不给端口，新进程就会换一个随机端口，
+        # 已经开着的标签页随即指向空地址。
+        started = app.relaunch_as_admin(port=int(SERVER.get("port") or 0) or None)
     except Exception as exc:  # noqa: BLE001  提权失败只回可读错误，不影响服务
         return {"ok": False, "restarted": False,
                 "error": f"提权请求失败：{type(exc).__name__}: {exc}"}
@@ -2587,46 +2657,61 @@ class DiagServer(ThreadingHTTPServer):
 
 def create_server(port: int = 8787, idle_exit_min: int = 0,
                   quiet: bool = False, register_pid: bool = True) -> tuple[DiagServer | None, str]:
-    """建监听。端口被占用时顺延最多 10 个。
+    """建监听：配置端口 → 顺延 10 个 → 端口 0（系统分配）。
 
     Args:
         port: 起始端口（默认 8787）。
         idle_exit_min: 无人访问多少分钟后自动退出；0 表示常驻不退出。
         quiet: True 时不打印启动横幅（静默启动用）。
-        register_pid: 是否写 ``logs/netdiag.pid``。自测传 False，
-            避免测试实例覆盖正在运行的应用的 PID 文件。
+        register_pid: 是否写 ``logs/netdiag.pid`` 与 ``logs/netdiag.port``。自测传
+            False，避免测试实例覆盖正在运行的应用的 PID/端口文件。
 
     Returns:
-        tuple[DiagServer | None, str]: ``(实例, 访问地址)``；10 个端口都被占用时返回 ``(None, "")``。
+        tuple[DiagServer | None, str]: ``(实例, 访问地址)``。地址里带的是**真实**
+            绑定的端口；连端口 0 都绑不上（本机回环栈不可用）才返回 ``(None, "")``。
 
     Note:
         ``allow_reuse_address`` 必须是 **False**。Windows 上它等价于 ``SO_REUSEADDR``，
         会让两个进程同时绑同一端口，旧进程继续响应新请求 —— 这正是曾经
         「改了代码却没生效」的根因。
+
+        端口 0 是「不让端口把界面挡在门外」的最后一步：8787~8796 被别的程序占满时，
+        过去只能弹「界面打不开」，但那是**整机端口资源**的问题，不该等于本程序不可用。
+        系统分配的端口写进 ``logs/netdiag.port``，启动器与 ``app.find_running`` 都读它。
     """
     httpd = None
-    url = ""
     bound = port
+    ephemeral = False
     for p in range(port, port + 10):
         try:
             httpd = DiagServer(("127.0.0.1", p), Handler)
-            url = f"http://127.0.0.1:{p}/"
-            bound = p
             break
         except OSError:
             continue
     if httpd is None:
-        return None, ""
-    SERVER.update({"httpd": httpd, "port": bound, "url": url,
+        # 区间内一个都绑不上：交给系统分配（端口 0）。
+        try:
+            httpd = DiagServer(("127.0.0.1", 0), Handler)
+            ephemeral = True
+        except OSError:
+            return None, ""
+    # 真实端口一律从已绑定的 socket 读：端口 0 时这里的值才不是 0。
+    bound = int(httpd.server_address[1])
+    url = f"http://127.0.0.1:{bound}/"
+    SERVER.update({"httpd": httpd, "port": bound, "url": url, "ephemeral": ephemeral,
                    "idle_exit_min": idle_exit_min, "started_at": time.time()})
     if register_pid:
         _write_pid()
+        _write_port_file(bound, url, ephemeral)
     if idle_exit_min > 0:
         threading.Thread(target=_idle_watchdog, args=(idle_exit_min,), daemon=True).start()
     if not quiet:
         print("=" * 62)
         print(f"  NetDiag · 网络矩阵 已启动（v{APP_VERSION}）")
         print(f"  浏览器界面：{url}")
+        if ephemeral:
+            print(f"  [提示] 配置端口 {port}~{port + 9} 都被占用了，"
+                  f"本次由系统分配端口 {bound}（地址每次启动可能不同）")
         print("  界面右上角「退出」可停止服务；关闭此窗口也会停止")
         print("=" * 62)
     return httpd, url

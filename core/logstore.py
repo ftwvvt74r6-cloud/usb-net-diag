@@ -56,7 +56,7 @@ KEEP_RUNS = 200
 KEEP_CRASHES = 50
 
 #: 保护文件：总量裁剪永远不删（正在被读取/写或被别的进程使用）。
-_PROTECTED_NAMES = ("env.json", "netdiag.pid")
+_PROTECTED_NAMES = ("env.json", "netdiag.pid", "netdiag.port")
 
 _LOCK = threading.RLock()
 _SINKS: dict[str, "_DailySink"] = {}
