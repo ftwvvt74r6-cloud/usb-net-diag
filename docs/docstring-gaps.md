@@ -3,20 +3,21 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**99.4%**（325/327）
-- 模块说明：35/35
+- 合格率：**99.4%**（356/358）
+- 模块说明：36/36
 
 ## 按文件汇总
 
 | 文件 | 公开符号 | 有 docstring | 合格 | 合格率 |
 |---|---|---|---|---|
 | `core/__init__.py` | 0 | 0 | 0 | 100% |
+| `core/agent.py` | 27 | 27 | 27 | 100% |
 | `core/ai.py` | 9 | 9 | 9 | 100% |
 | `core/analyzer.py` | 3 | 3 | 3 | 100% |
 | `core/app.py` | 9 | 9 | 9 | 100% |
 | `core/bootstrap.py` | 4 | 4 | 4 | 100% |
 | `core/conclusion.py` | 4 | 4 | 4 | 100% |
-| `core/config.py` | 8 | 8 | 8 | 100% |
+| `core/config.py` | 11 | 11 | 11 | 100% |
 | `core/contracts.py` | 57 | 57 | 57 | 100% |
 | `core/copytext.py` | 5 | 5 | 5 | 100% |
 | `core/diagnose.py` | 8 | 8 | 8 | 100% |
@@ -43,7 +44,7 @@
 | `core/tshark.py` | 13 | 13 | 13 | 100% |
 | `core/verdict.py` | 3 | 3 | 3 | 100% |
 | `core/version.py` | 1 | 1 | 1 | 100% |
-| `core/wlan.py` | 3 | 3 | 3 | 100% |
+| `core/wlan.py` | 4 | 4 | 4 | 100% |
 | `mcp/wireshark-mcp/server.py` | 5 | 5 | 5 | 100% |
 
 ## 待补清单

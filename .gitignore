@@ -13,6 +13,8 @@ config/app-config.json
 config/ai-config.json
 config/mcp-wireshark.json
 config/harness-config.json
+# 常驻 agent 的配置：每台机器的监测目标不同，不入库
+config/agent.json
 
 # ---------------- 运行产物 ----------------
 # 注意：目录要写成 dir/* 而不是 dir/，否则无法用 ! 重新包含示例文件

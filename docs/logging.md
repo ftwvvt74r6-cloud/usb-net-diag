@@ -19,6 +19,11 @@ logs/
 ├─ app-YYYYMMDD.log    启动器日志：pythonw 下的 stdout/stderr（print 原样落盘）
 ├─ diag-YYYYMMDD.log   诊断/服务运行日志：diagnose.log()、server.log()、traceback
 ├─ env.json            本次启动的环境快照（覆盖写，只保留最近一次）
+├─ agent.pid           常驻采集 agent 的单实例锁（只有 PID，进程退出即删）
+├─ history/            常驻 agent 的时序数据（不进诊断包，见 docs/agent.md）
+│   ├─ YYYY-MM-DD.jsonl      每 10 秒一条样本，一天一个分片；超 5 MB 滚动成 .1 / .2
+│   ├─ events.jsonl          事件（连续 2 次超阈值才落一条），保留 30 天
+│   └─ marks.jsonl           人工标记（「这半小时我在重启路由器」）
 ├─ runs/               每次分析一条 JSON：<ts>-<8位随机>.json
 │   └─ 20261107-193245-a1b2c3d4.json
 └─ crashes/            崩溃快照

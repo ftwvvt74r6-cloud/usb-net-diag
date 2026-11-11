@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,6 +29,10 @@ AI_CONFIG = paths.PATHS.config / "ai-config.json"
 #: 不写 .env、不把绝对路径提交进仓库 —— 这是 U 盘便携场景下「这台机器上的路径」，
 #: 属于本地 config，与 ai-config 同一类。
 PATHS_CONFIG = paths.PATHS.config / "paths.json"
+#: 常驻采集 agent 的配置（采样间隔 / 监测目标 / 事件阈值）。
+#: 与 app-config 分开的理由：agent 由**独立进程**（pythonw）读取，
+#: 而 app-config 是界面进程的配置；两者改一个不该牵动另一个。
+AGENT_CONFIG = paths.PATHS.config / "agent.json"
 THRESHOLDS = paths.PATHS.core / "rules" / "thresholds.json"
 COPY_DIR = paths.PATHS.core / "copy"
 
@@ -69,6 +74,28 @@ AI_DEFAULTS: dict[str, Any] = {
 PATH_DEFAULTS: dict[str, Any] = {
     "tshark_path": "",
     "python_path": "",
+}
+
+#: 采样间隔的合法取值（秒）。不在这个集合里的值一律回落默认值 —— 间隔 1 秒会把
+#: 本机 DNS / 网关打成压力测试，间隔 600 秒又让「事件」失去意义，所以只给四档。
+AGENT_INTERVAL_CHOICES: tuple[int, ...] = (5, 10, 30, 60)
+
+#: 监测目标上限。常驻 agent 每轮对所有目标各发一组探测包，目标越多越吵；
+#: 3 个足够覆盖「网关 → 运营商 → 业务」三段。
+AGENT_MAX_TARGETS = 3
+
+AGENT_DEFAULTS: dict[str, Any] = {
+    "interval_s": 10,
+    #: [{"key": "公司官网", "host": "example.com", "port": 443}]；port 省略 = ICMP
+    "targets": [],
+    #: 事件阈值：连续 2 次超阈值才落一条事件（见 core/agent.py::EventTracker）
+    "thresholds": {"rtt_ms": 120.0, "jitter_ms": 40.0, "loss_pct": 2.0},
+    "retain_days": 7,
+    "event_retain_days": 30,
+    #: 单轮每目标发几个探测包（ICMP echo / TCP SYN 各算一个）
+    "icmp_count": 2,
+    "icmp_timeout_ms": 800,
+    "tcp_timeout_s": 1.5,
 }
 
 
@@ -170,6 +197,168 @@ def save_paths(patch: dict) -> dict:
     return cfg
 
 
+def agent_config_path() -> Path:
+    """常驻 agent 配置文件的真实路径（允许测试重定向）。
+
+    Returns:
+        Path: 环境变量 ``NETDIAG_AGENT_CONFIG`` 非空时用它，否则 ``config/agent.json``。
+            与 ``logstore.log_root()`` 认 ``NETDIAG_LOG_DIR`` 是同一套约定：
+            测试注入临时文件，绝不写仓库 ``config/``。
+    """
+    raw = (os.environ.get("NETDIAG_AGENT_CONFIG") or "").strip()
+    return Path(raw) if raw else AGENT_CONFIG
+
+
+def _norm_interval(value: Any, *, strict: bool = False) -> int:
+    """把采样间隔收敛到 :data:`AGENT_INTERVAL_CHOICES`。
+
+    Args:
+        value: 用户填的值（可能是字符串 ``"30"``、浮点 ``30.0`` 或非法值 ``7``）。
+        strict: ``True`` 时非法值抛 ``ValueError``（写配置用：显式动作必须报错）；
+            为 ``False`` 时回落默认值（读配置用：坏文件不该让 agent 起不来）。
+
+    Returns:
+        int: 合法间隔（5 / 10 / 30 / 60）。
+
+    Raises:
+        ValueError: ``strict=True`` 且值不在合法集合内。
+    """
+    try:
+        got = int(float(value))
+    except (TypeError, ValueError):
+        got = None
+    if got in AGENT_INTERVAL_CHOICES:
+        return got
+    if strict:
+        raise ValueError(
+            f"采样间隔必须是 {list(AGENT_INTERVAL_CHOICES)} 之一，收到 {value!r}")
+    return int(AGENT_DEFAULTS["interval_s"])
+
+
+def _norm_targets(raw: Any) -> list[dict]:
+    """归一化监测目标列表：最多 :data:`AGENT_MAX_TARGETS` 个，只留 ``key``/``host``/``port``。
+
+    接受两种写法：字符串（``"example.com"``）或对象
+    （``{"key": "...", "host": "...", "port": 443}``）。没有 ``host`` 的条目丢弃，
+    ``port`` 非法（非数字 / 越界 / 0）时按「无端口」处理 —— 也就是走 ICMP。
+
+    Args:
+        raw: 配置里的 ``targets`` 原值（任何类型都可能，坏数据不能崩）。
+
+    Returns:
+        list[dict]: 每项 ``{"key": str, "host": str, "port": int|None}``；
+            没有 ``port`` 的条目**不带** ``port`` 键（避免下游把 ``None`` 当端口）。
+    """
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for i, item in enumerate(raw):
+        if len(out) >= AGENT_MAX_TARGETS:
+            break
+        if isinstance(item, str):
+            item = {"host": item}
+        if not isinstance(item, dict):
+            continue
+        host = str(item.get("host") or "").strip()
+        if not host:
+            continue
+        entry: dict[str, Any] = {
+            "key": str(item.get("key") or "").strip() or f"target-{i + 1}",
+            "host": host,
+        }
+        try:
+            port = int(item.get("port"))
+        except (TypeError, ValueError):
+            port = 0
+        if 1 <= port <= 65535:
+            entry["port"] = port
+        out.append(entry)
+    return out
+
+
+def load_agent() -> dict:
+    """加载 ``config/agent.json``（常驻采集 agent 的配置）。
+
+    读路径**永不抛异常**：agent 是后台进程，一个坏配置不该让它起不来。
+    非法间隔回落默认、目标超 3 个截断、阈值缺键用默认补齐。
+
+    Returns:
+        dict: 键见 :data:`AGENT_DEFAULTS`；``thresholds`` 已与默认值深合并，
+            所以调用方可以只关心 ``cfg["thresholds"]["rtt_ms"]`` 一定存在。
+    """
+    cfg = read_json(agent_config_path(), AGENT_DEFAULTS)
+    cfg["interval_s"] = _norm_interval(cfg.get("interval_s"))
+    cfg["targets"] = _norm_targets(cfg.get("targets"))
+    merged = dict(AGENT_DEFAULTS["thresholds"])
+    if isinstance(cfg.get("thresholds"), dict):
+        for key, value in cfg["thresholds"].items():
+            if key not in merged:
+                continue
+            try:
+                merged[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+    cfg["thresholds"] = merged
+    for key in ("retain_days", "event_retain_days", "icmp_count"):
+        try:
+            cfg[key] = int(cfg.get(key, AGENT_DEFAULTS[key]))
+        except (TypeError, ValueError):
+            cfg[key] = AGENT_DEFAULTS[key]
+    for key in ("icmp_timeout_ms", "tcp_timeout_s"):
+        try:
+            cfg[key] = float(cfg.get(key, AGENT_DEFAULTS[key]))
+        except (TypeError, ValueError):
+            cfg[key] = AGENT_DEFAULTS[key]
+    cfg["retain_days"] = max(1, cfg["retain_days"])
+    cfg["event_retain_days"] = max(1, cfg["event_retain_days"])
+    cfg["icmp_count"] = max(1, min(10, cfg["icmp_count"]))
+    return cfg
+
+
+def save_agent(patch: dict) -> dict:
+    """把 agent 配置合并进 ``config/agent.json`` 并原子落盘。
+
+    只接受 :data:`AGENT_DEFAULTS` 里的键（其余丢弃，避免前端/脚本写脏配置）。
+    ``targets`` 会被归一化（超 3 个截断），``interval_s`` 非法时**抛异常**而不是
+    静默改成默认 —— 「我刚把间隔改成 7，它却还是 10」比报错更难查。
+
+    Args:
+        patch: 只含需要改的键，如 ``{"interval_s": 30}``。
+
+    Returns:
+        dict: 写回后的完整配置（与 :func:`load_agent` 同构）。
+
+    Raises:
+        ValueError: ``interval_s`` 不在 :data:`AGENT_INTERVAL_CHOICES` 内。
+        OSError: 目标目录不可写。
+    """
+    cfg = load_agent()
+    for key in AGENT_DEFAULTS:
+        if key not in patch or patch[key] is None:
+            continue
+        if key == "interval_s":
+            cfg["interval_s"] = _norm_interval(patch[key], strict=True)
+        elif key == "targets":
+            cfg["targets"] = _norm_targets(patch[key])
+        elif key == "thresholds":
+            merged = dict(cfg["thresholds"])
+            if isinstance(patch[key], dict):
+                for tkey, value in patch[key].items():
+                    if tkey in merged:
+                        try:
+                            merged[tkey] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+            cfg["thresholds"] = merged
+        else:
+            cfg[key] = patch[key]
+    path = agent_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return load_agent()
+
+
 def load_thresholds() -> dict:
     """加载规则阈值 ``core/rules/thresholds.json``（随代码走，不属于用户配置）。
 
@@ -208,8 +397,12 @@ def config_sha256() -> str:
 
 
 __all__ = [
-    "APP_CONFIG", "AI_CONFIG", "PATHS_CONFIG", "THRESHOLDS", "COPY_DIR",
-    "APP_DEFAULTS", "AI_DEFAULTS", "PATH_DEFAULTS", "read_json",
+    "APP_CONFIG", "AI_CONFIG", "PATHS_CONFIG", "AGENT_CONFIG",
+    "THRESHOLDS", "COPY_DIR",
+    "APP_DEFAULTS", "AI_DEFAULTS", "PATH_DEFAULTS",
+    "AGENT_DEFAULTS", "AGENT_INTERVAL_CHOICES", "AGENT_MAX_TARGETS",
+    "read_json",
     "load_app", "load_ai", "load_paths", "save_paths",
+    "agent_config_path", "load_agent", "save_agent",
     "load_thresholds", "load_copy", "config_sha256",
 ]

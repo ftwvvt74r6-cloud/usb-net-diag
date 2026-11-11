@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**35** 个（有模块说明 35 个）
-- 公开符号：**327** 个（有 docstring 327 个，合格 325 个）
+- 扫描模块：**36** 个（有模块说明 36 个）
+- 公开符号：**358** 个（有 docstring 358 个，合格 356 个）
 - 合格率：**99.4%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -20,6 +20,523 @@
 **职责**：NetDiag（网络矩阵）核心包（目标架构骨架）。
 
 _（无公开符号）_
+
+## `core/agent.py`
+
+**职责**：常驻采集 agent：后台按固定间隔采样网关 / DNS / 监测目标 / 无线链路。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `history_dir` | function | 210 | ✅ |
+| `day_file` | function | 219 | ✅ |
+| `events_path` | function | 231 | ✅ |
+| `marks_path` | function | 240 | ✅ |
+| `resolve_ip` | function | 251 | ✅ |
+| `measure_icmp` | function | 321 | ✅ |
+| `measure_tcp` | function | 351 | ✅ |
+| `probe_endpoint` | function | 388 | ✅ |
+| `wlan_block` | function | 427 | ✅ |
+| `collect_sample` | function | 466 | ✅ |
+| `EventTracker` | class | 520 | ✅ |
+| `EventTracker.reset` | method | 548 | ✅ |
+| `EventTracker.observe` | method | 565 | ✅ |
+| `append_record` | function | 632 | ✅ |
+| `append_event` | function | 664 | ✅ |
+| `prune_history` | function | 683 | ✅ |
+| `prune_events` | function | 720 | ✅ |
+| `WarnGate` | class | 773 | ✅ |
+| `WarnGate.warn` | method | 795 | ✅ |
+| `instance_path` | function | 819 | ✅ |
+| `acquire_instance` | function | 861 | ✅ |
+| `release_instance` | function | 893 | ✅ |
+| `Agent` | class | 931 | ✅ |
+| `Agent.cycle` | method | 970 | ✅ |
+| `Agent.run` | method | 1006 | ✅ |
+| `build_agent` | function | 1061 | ✅ |
+| `main` | function | 1140 | ✅ |
+
+### `history_dir`
+
+```python
+def history_dir() -> pathlib.Path
+```
+
+```text
+历史样本目录（``logs/history``）。
+
+Returns:
+    Path: 跟随 ``NETDIAG_LOG_DIR``，测试可把整个日志根指到临时目录。
+```
+
+### `day_file`
+
+```python
+def day_file(day: str | None=None) -> pathlib.Path
+```
+
+```text
+当天的样本分片路径。
+
+Args:
+    day: ``YYYY-MM-DD``；省略时取今天。
+
+Returns:
+    Path: ``<logs>/history/YYYY-MM-DD.jsonl``。
+```
+
+### `events_path`
+
+```python
+def events_path() -> pathlib.Path
+```
+
+```text
+事件文件路径。
+
+Returns:
+    Path: ``<logs>/history/events.jsonl``（每次调用重新解析，跟随 ``NETDIAG_LOG_DIR``）。
+```
+
+### `marks_path`
+
+```python
+def marks_path() -> pathlib.Path
+```
+
+```text
+人工标记文件路径（``POST /api/history/mark`` 写入）。
+
+Returns:
+    Path: ``<logs>/history/marks.jsonl``。
+```
+
+### `resolve_ip`
+
+```python
+def resolve_ip(host: str, *, ttl_s: float=IP_CACHE_TTL_S, now: float | None=None) -> str
+```
+
+```text
+把监测目标解析成 IPv4 字面量（带缓存）。
+
+``winapi.icmp_stats`` 只接受 IPv4 字面量，所以域名必须先解析。解析结果缓存
+:data:`IP_CACHE_TTL_S` 秒：既避免每轮都查 DNS，又能在切换网络后 5 分钟内
+重新解析。
+
+Args:
+    host: 域名或 IP 字符串。
+    ttl_s: 缓存有效期秒数。
+    now: 当前时间（测试注入）；省略时取 ``time.time()``。
+
+Returns:
+    str: IPv4 字面量；解析失败、空串、IPv6 字面量时返回 ``""``
+        （ICMP 探不了 IPv6，宁可显式「测不到」也不冒充成 100% 丢包）。
+```
+
+### `measure_icmp`
+
+```python
+def measure_icmp(host: str, count: int=2, timeout_ms: int=800) -> dict
+```
+
+```text
+对目标做一组 ICMP 回显，返回 RTT / 抖动 / 丢包。
+
+走 ``winapi.icmp_stats``（``IcmpSendEcho``），**不解析 ``ping`` 文本** ——
+中文/英文系统的输出格式不同，做文本匹配会在别的机器上静默失效。
+
+Args:
+    host: 域名或 IPv4 字面量。
+    count: 发包数（内部夹到 1~10）。
+    timeout_ms: 单包等待毫秒（内部夹到 100~5000）。
+
+Returns:
+    dict: :func:`_endpoint` 结构，另含 ``ip`` / ``ok`` / ``error``。
+        解析失败时 ``loss_pct = 100.0`` 且 ``error`` 说明原因。
+```
+
+### `measure_tcp`
+
+```python
+def measure_tcp(host: str, port: int, count: int=2, timeout_s: float=1.5) -> dict
+```
+
+```text
+连续建 ``count`` 次 TCP 连接，用建连耗时当作 RTT。
+
+Args:
+    host: 域名或 IP。
+    port: 目标端口。
+    count: 建连次数。
+    timeout_s: 单次建连超时秒数。
+
+Returns:
+    dict: :func:`_endpoint` 结构（``method="tcp"``），另含 ``ip`` / ``port`` /
+        ``ok`` / ``error``。全部失败时 ``rtt_ms`` 为 ``None``、``loss_pct = 100.0``。
+```
+
+### `probe_endpoint`
+
+```python
+def probe_endpoint(key: str, host: str, port: int | None=None, *, count: int=2, icmp_timeout_ms: int=800, tcp_timeout_s: float=1.5) -> dict
+```
+
+```text
+测一个端点：有端口走 TCP，没端口走 ICMP，ICMP 不通自动降级 TCP。
+
+「ICMP 被禁」在公网上很常见（很多边界设备直接丢弃 echo request），此时
+100% 丢包并不代表目标不可达。降级顺序是 :data:`DEGRADE_TCP_PORTS`，
+命中即用，并在结果里打 ``degraded=true`` / ``method_note="icmp_blocked"``，
+让下游知道**这条 RTT 是建连时间，不是 ICMP 往返**。
+
+Args:
+    key: 目标标识（写进样本的 ``key``，用于事件归属）。
+    host: 域名或 IP；空串直接返回 ``method="none"``。
+    port: 端口；``None`` 表示走 ICMP。
+    count: 探测次数。
+    icmp_timeout_ms: ICMP 单包超时。
+    tcp_timeout_s: TCP 建连超时。
+
+Returns:
+    dict: ``{"key", "rtt_ms", "loss_pct", "jitter_ms", "method", ...}``。
+```
+
+### `wlan_block`
+
+```python
+def wlan_block() -> dict
+```
+
+```text
+取无线链路 7 个字段（取不到写 ``None``，**不删键**）。
+
+Returns:
+    dict: 键恒为 :data:`WLAN_FIELDS`。没有无线连接（有线 / 未连）时全部 ``None``。
+```
+
+### `collect_sample`
+
+```python
+def collect_sample(cfg: Mapping[str, Any] | None=None, *, now: float | None=None) -> dict
+```
+
+```text
+采一轮样本。
+
+Args:
+    cfg: 已归一化的 agent 配置（见 :func:`core.config.load_agent`）；
+        省略时现读 ``config/agent.json``。
+    now: 当前 epoch 秒（测试注入）；省略时取 ``time.time()``。
+
+Returns:
+    dict: 一条样本记录，字段为 ``t`` / ``epoch`` / ``interval_s`` /
+        ``gateway`` / ``dns`` / ``targets`` / ``wlan``。
+
+    * ``gateway`` / ``dns``：测量块；**拿不到该角色时为 ``None``**
+      （没有默认路由 / 没有配置 DNS）——这是「没采样」，不是「0 丢包」；
+    * ``targets``：每个配置目标一项，顺序与配置一致；
+    * ``wlan``：7 个字段恒在。
+```
+
+### `EventTracker`  (class)
+
+```python
+class EventTracker
+```
+
+```text
+把连续样本变成事件：**连续 N 次**超阈值才算一次，同一次故障只落一条。
+
+为什么不是「一超就报」：单次 200ms 的 RTT 尖刺是常态（路由器排队、无线重传），
+报出来会让事件列表全是噪声。连续 2 次才报，等价于「持续了至少一个采样间隔」。
+
+为什么同一次故障只落一条：事件是给人看的列表，不是采样日志。只要条件没恢复，
+就不该每 10 秒再写一条；恢复后再次越线才算新事件。
+
+Args:
+    thresholds: ``{"rtt_ms": 120, "jitter_ms": 40, "loss_pct": 2}``；缺键用默认值。
+    consecutive: 连续命中次数，默认 2。
+```
+
+### `EventTracker.reset`  (method)
+
+```python
+def reset(self) -> None
+```
+
+```text
+清空连续计数（配置变更 / 手动重置时调用）。
+```
+
+### `EventTracker.observe`  (method)
+
+```python
+def observe(self, record: Mapping[str, Any]) -> list[dict]
+```
+
+```text
+吃进一条样本，返回**本条样本触发的新事件**（可能为空）。
+
+Args:
+    record: :func:`collect_sample` 的产物。
+
+Returns:
+    list[dict]: 每个事件形如
+        ``{"t","epoch","target","type","value","threshold","duration_s",
+        "bssid","rssi_dbm"}``。``type`` 取 ``rtt`` / ``jitter`` / ``loss``。
+```
+
+### `append_record`
+
+```python
+def append_record(record: Mapping[str, Any], *, directory: pathlib.Path | None=None, max_bytes: int=MAX_FILE_BYTES, epoch: float | None=None) -> pathlib.Path
+```
+
+```text
+把一条样本追加进当天分片（超限先滚动）。
+
+Args:
+    record: 样本记录。
+    directory: 覆盖历史目录（测试用）；省略时用 :func:`history_dir`。
+    max_bytes: 单文件字节上限，超过就先滚动到 ``.N`` 分片。
+    epoch: 用于决定分片日期的时间戳；省略时取 ``record["epoch"]``。
+
+Returns:
+    Path: 实际写入的文件路径。
+
+Raises:
+    OSError: 目录不可写（调用方按「单次失败不退出」处理）。
+```
+
+### `append_event`
+
+```python
+def append_event(event: Mapping[str, Any], path: pathlib.Path | None=None) -> pathlib.Path
+```
+
+```text
+追加一条事件到 ``events.jsonl``。
+
+Args:
+    event: :meth:`EventTracker.observe` 产出的事件。
+    path: 覆盖事件文件路径（测试用）。
+
+Returns:
+    Path: 实际写入的文件路径。
+```
+
+### `prune_history`
+
+```python
+def prune_history(*, retain_days: int=RETENTION_DAYS, directory: pathlib.Path | None=None, today: dt.date | None=None) -> list[str]
+```
+
+```text
+删除超过保留期的样本分片（只在启动 / 跨天时调用）。
+
+Args:
+    retain_days: 保留天数（含今天）。``7`` 表示留今天与之前 6 天。
+    directory: 覆盖历史目录（测试用）。
+    today: 参考日期（测试注入）。
+
+Returns:
+    list[str]: 被删除的文件名（按名字排序）。
+```
+
+### `prune_events`
+
+```python
+def prune_events(*, retain_days: int=EVENT_RETENTION_DAYS, path: pathlib.Path | None=None, now: float | None=None) -> int
+```
+
+```text
+把超过保留期的事件从 ``events.jsonl`` 里剔掉（整文件重写，原子替换）。
+
+Args:
+    retain_days: 保留天数。
+    path: 覆盖事件文件路径（测试用）。
+    now: 当前 epoch 秒（测试注入）。
+
+Returns:
+    int: 被剔除的事件条数（含解析失败的行）。
+```
+
+### `WarnGate`  (class)
+
+```python
+class WarnGate
+```
+
+```text
+把「同类告警」压到每分钟最多一条。
+
+网络一断，每一轮采样都会失败；若每轮写一行 WARN，``app-*.log`` 一天就能被
+撑爆，反而盖住了真正的问题。这里只放行第一条，被压掉的条数在下一次放行时
+合并成一句「另有 N 条同类告警」。
+
+Args:
+    every_s: 最小间隔秒数，默认 :data:`WARN_EVERY_S`。
+    clock: 时间源（测试注入）。
+    sink: 落日志的函数，默认写 ``app`` 日志；接收已带 ``WARN`` 前缀的文本。
+```
+
+### `WarnGate.warn`  (method)
+
+```python
+def warn(self, msg: str) -> bool
+```
+
+```text
+尝试写一条告警。
+
+Args:
+    msg: 告警正文。
+
+Returns:
+    bool: ``True`` 表示真的写下去了；``False`` 表示被节流吞掉。
+```
+
+### `instance_path`
+
+```python
+def instance_path() -> pathlib.Path
+```
+
+```text
+单实例锁文件路径。
+
+Returns:
+    Path: ``<logs>/agent.pid``。
+```
+
+### `acquire_instance`
+
+```python
+def acquire_instance(path: pathlib.Path | None=None) -> bool
+```
+
+```text
+抢占单实例锁。
+
+两个 agent 同时跑会把每条样本写两遍、事件也翻倍。锁文件里只有 PID：
+文件存在且那个 PID 还活着就拒绝启动；PID 已死（上次崩溃/拔盘）视为残留并覆盖。
+
+Args:
+    path: 覆盖锁文件路径（测试用）。
+
+Returns:
+    bool: ``True`` 表示抢到（可以继续启动）；``False`` 表示已有实例在跑。
+```
+
+### `release_instance`
+
+```python
+def release_instance(path: pathlib.Path | None=None) -> None
+```
+
+```text
+释放单实例锁（只删自己写的那个）。
+
+Args:
+    path: 覆盖锁文件路径（测试用）；省略时用 :func:`instance_path`。
+
+Returns:
+    None: 文件不存在 / 不是本进程的 / 删不掉都静默忽略。
+```
+
+### `Agent`  (class)
+
+```python
+class Agent
+```
+
+```text
+采样主循环。所有外部依赖都可注入，测试不需要真网络与真等待。
+
+Args:
+    config_loader: 返回归一化配置的函数，默认 :func:`core.config.load_agent`。
+    sampler: 采样函数，签名 ``(cfg) -> record``，默认 :func:`collect_sample`。
+    record_writer: 样本落盘函数，默认 :func:`append_record`。
+    event_writer: 事件落盘函数，默认 :func:`append_event`。
+    tracker: 事件检测器；``None`` 表示不检测（只记录，不判定）。
+    clock: 时间源（秒）。
+    sleeper: 等待函数，签名 ``(seconds) -> None``。
+    warner: 告警节流器，默认 :class:`WarnGate`。
+
+Attributes:
+    interval_s: 当前生效的采样间隔；``None`` 表示还没跑过。
+    last_record: 最近一条样本。
+    cycles: 已完成的采样轮数。
+```
+
+### `Agent.cycle`  (method)
+
+```python
+def cycle(self) -> dict
+```
+
+```text
+跑一轮：读配置 → 采样 → 落盘 → 事件检测。
+
+配置**每轮重读**，所以界面上把间隔从 10 改成 30 后不必重启进程，
+下一轮自然按新间隔走（并记一行「间隔变更」日志）。
+
+Returns:
+    dict: 本轮样本。
+
+Raises:
+    Exception: 采样 / 写盘异常原样抛出，由 :meth:`run` 记告警后继续。
+```
+
+### `Agent.run`  (method)
+
+```python
+def run(self, *, stop_event: threading.Event | None=None, max_cycles: int | None=None, guard_instance: bool=True) -> int
+```
+
+```text
+阻塞运行主循环。
+
+Args:
+    stop_event: 置位后退出；省略时只能靠 ``max_cycles`` 或 Ctrl+C 结束。
+    max_cycles: 最多跑几轮（测试 / ``--once`` 用）；``None`` 表示无限。
+    guard_instance: 是否抢单实例锁（测试用 ``False``）。
+
+Returns:
+    int: 退出码。0 = 正常退出（含「已有实例」）；不会因采样失败返回非 0。
+```
+
+### `build_agent`
+
+```python
+def build_agent() -> Agent
+```
+
+```text
+按当前配置装配一个「采样 + 事件检测」的 Agent（``--daemon`` 用）。
+
+阈值必须从 ``config/agent.json`` 读，不能用模块默认值 —— 否则用户把
+``rtt_ms`` 从 120 改成 300，事件判定还是按 120 报，界面上改的阈值等于没生效。
+
+Returns:
+    Agent: 已挂好 :class:`EventTracker` 的实例。
+```
+
+### `main`
+
+```python
+def main(argv: list[str] | None=None) -> int
+```
+
+```text
+命令行入口。
+
+Args:
+    argv: 参数列表；省略时取 ``sys.argv[1:]``。
+
+Returns:
+    int: 退出码。0 正常；2 参数错误；1 写配置失败。
+```
 
 ## `core/ai.py`
 
@@ -673,14 +1190,17 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `read_json` | function | 75 | ✅ |
-| `load_app` | function | 99 | ✅ |
-| `load_ai` | function | 127 | ✅ |
-| `load_paths` | function | 138 | ✅ |
-| `save_paths` | function | 150 | ✅ |
-| `load_thresholds` | function | 173 | ✅ |
-| `load_copy` | function | 183 | ✅ |
-| `config_sha256` | function | 195 | ✅ |
+| `read_json` | function | 102 | ✅ |
+| `load_app` | function | 126 | ✅ |
+| `load_ai` | function | 154 | ✅ |
+| `load_paths` | function | 165 | ✅ |
+| `save_paths` | function | 177 | ✅ |
+| `agent_config_path` | function | 200 | ✅ |
+| `load_agent` | function | 279 | ✅ |
+| `save_agent` | function | 318 | ✅ |
+| `load_thresholds` | function | 362 | ✅ |
+| `load_copy` | function | 372 | ✅ |
+| `config_sha256` | function | 384 | ✅ |
 
 ### `read_json`
 
@@ -766,6 +1286,62 @@ Args:
 
 Returns:
     dict: 写回后的完整路径配置。
+```
+
+### `agent_config_path`
+
+```python
+def agent_config_path() -> Path
+```
+
+```text
+常驻 agent 配置文件的真实路径（允许测试重定向）。
+
+Returns:
+    Path: 环境变量 ``NETDIAG_AGENT_CONFIG`` 非空时用它，否则 ``config/agent.json``。
+        与 ``logstore.log_root()`` 认 ``NETDIAG_LOG_DIR`` 是同一套约定：
+        测试注入临时文件，绝不写仓库 ``config/``。
+```
+
+### `load_agent`
+
+```python
+def load_agent() -> dict
+```
+
+```text
+加载 ``config/agent.json``（常驻采集 agent 的配置）。
+
+读路径**永不抛异常**：agent 是后台进程，一个坏配置不该让它起不来。
+非法间隔回落默认、目标超 3 个截断、阈值缺键用默认补齐。
+
+Returns:
+    dict: 键见 :data:`AGENT_DEFAULTS`；``thresholds`` 已与默认值深合并，
+        所以调用方可以只关心 ``cfg["thresholds"]["rtt_ms"]`` 一定存在。
+```
+
+### `save_agent`
+
+```python
+def save_agent(patch: dict) -> dict
+```
+
+```text
+把 agent 配置合并进 ``config/agent.json`` 并原子落盘。
+
+只接受 :data:`AGENT_DEFAULTS` 里的键（其余丢弃，避免前端/脚本写脏配置）。
+``targets`` 会被归一化（超 3 个截断），``interval_s`` 非法时**抛异常**而不是
+静默改成默认 —— 「我刚把间隔改成 7，它却还是 10」比报错更难查。
+
+Args:
+    patch: 只含需要改的键，如 ``{"interval_s": 30}``。
+
+Returns:
+    dict: 写回后的完整配置（与 :func:`load_agent` 同构）。
+
+Raises:
+    ValueError: ``interval_s`` 不在 :data:`AGENT_INTERVAL_CHOICES` 内。
+    OSError: 目标目录不可写。
 ```
 
 ### `load_thresholds`
@@ -6436,8 +7012,9 @@ Returns:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `parse_netsh_interfaces` | function | 81 | ✅ |
-| `collect` | function | 198 | ✅ |
-| `snapshot` | function | 240 | ✅ |
+| `link_info` | function | 185 | ✅ |
+| `collect` | function | 215 | ✅ |
+| `snapshot` | function | 257 | ✅ |
 
 ### `parse_netsh_interfaces`
 
@@ -6461,6 +7038,27 @@ Raises:
 Example:
     >>> parse_netsh_interfaces("    SSID                   : RR\n    Rssi : -54")
     {'ssid': 'RR', 'rssi_dbm': -54}
+```
+
+### `link_info`
+
+```python
+def link_info() -> dict
+```
+
+```text
+只取无线链路本身（``netsh`` 一次解析），**不 ping、不缓存**。
+
+与 :func:`collect` 的区别：``collect`` 会顺带 ping 网关（约 4 秒），常驻采集
+agent 每 10 秒跑一轮时不能接受这个开销 —— 它自己有网关测量通路，只需要
+SSID / BSSID / 信号这一组链路字段。
+
+Returns:
+    dict: 同 :func:`parse_netsh_interfaces` 的结果；无无线连接时 ``{}``。
+
+Example:
+    >>> isinstance(link_info(), dict)
+    True
 ```
 
 ### `collect`

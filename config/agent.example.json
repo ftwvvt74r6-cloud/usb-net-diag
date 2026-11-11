@@ -1,0 +1,14 @@
+{
+  "_comment": "复制成 config/agent.json 后按需修改；改完不必重启 agent，下一轮生效。",
+  "interval_s": 10,
+  "targets": [
+    {"key": "公司官网", "host": "www.example.com", "port": 443},
+    {"key": "公网 DNS", "host": "223.5.5.5"}
+  ],
+  "thresholds": {"rtt_ms": 120, "jitter_ms": 40, "loss_pct": 2},
+  "retain_days": 7,
+  "event_retain_days": 30,
+  "icmp_count": 2,
+  "icmp_timeout_ms": 800,
+  "tcp_timeout_s": 1.5
+}
