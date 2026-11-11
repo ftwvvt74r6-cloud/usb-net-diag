@@ -51,6 +51,9 @@ from pathlib import Path
 from unittest import mock
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def _detect_tshark() -> bool:
     """本机是否真的有 tshark（CI 没有 → 依赖真分析的用例必须 skip 而不是红）。"""
     import os
@@ -59,14 +62,12 @@ def _detect_tshark() -> bool:
         return Path(os.environ["TSHARK_PATH"]).is_file()
     if shutil.which("tshark"):
         return True
-    bundled = ROOT / "tools" / "WiresharkPortable" / "App" / "Wireshark" / "tshark.exe"
+    bundled = Path(__file__).resolve().parents[1] / "tools" / "WiresharkPortable" / "App" / "Wireshark" / "tshark.exe"
     return bundled.is_file()
 
 
 _HAVE_TSHARK = _detect_tshark()
 _SKIP_REAL = "需要本机 tshark 才能做真实抓包分析（CI 环境无 tshark，应 skip 而非红）"
-
-ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
 
 import analyzer      # noqa: E402
