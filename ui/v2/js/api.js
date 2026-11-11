@@ -69,6 +69,20 @@
     return !res || (!res.ok && (res.status === 404 || res.status === 405 || res.status === 501));
   }
 
+  /* 导出类接口回的是 csv/md 正文，不是 JSON：单独走一次纯文本请求，
+     仍然由本文件负责「只在这里发请求」的约定。 */
+  function text(path) {
+    return fetch(path, { cache: "no-store", credentials: "same-origin" })
+      .then(function (resp) {
+        return resp.text().then(function (body) {
+          return { ok: resp.ok, status: resp.status, text: body, error: resp.ok ? "" : ("http " + resp.status) };
+        });
+      })
+      .catch(function (err) {
+        return { ok: false, status: 0, text: "", error: (err && err.message) || "network" };
+      });
+  }
+
   ND.api = {
     get: function (path, opt) { return request(path, opt); },
     post: function (path, body, opt) {
@@ -104,6 +118,20 @@
     pickPath: function (kind) {
       return request("/api/pick-path", { method: "POST", body: { kind: kind || "file" } });
     },
+    /* S6（待后端实现）：常驻采集状态与监测目标 */
+    agent: function () { return request("/api/agent/status"); },
+    agentInstall: function () { return request("/api/agent/install", { method: "POST", body: {} }); },
+    agentUninstall: function () { return request("/api/agent/uninstall", { method: "POST", body: {} }); },
+    agentConfig: function (body) { return request("/api/agent/config", { method: "POST", body: body || {} }); },
+    monitor: function () { return request("/api/monitor"); },
+    saveMonitor: function (body) { return request("/api/monitor", { method: "POST", body: body || {} }); },
+
+    /* S6（待后端实现）：历史趋势 */
+    history: function (q) { return request("/api/history?" + q); },
+    historyEvents: function (q) { return request("/api/history/events?" + q); },
+    historyMark: function (note) { return request("/api/history/mark", { method: "POST", body: { note: note || "" } }); },
+    historyExport: function (fmt, q) { return text("/api/history/export?format=" + fmt + "&" + q); },
+
     /* R5（待后端实现）：日志列表与单个日志正文 */
     logs: function () { return request("/api/logs"); },
     logFile: function (name) {
