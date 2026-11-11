@@ -3111,7 +3111,7 @@ Returns:
 | `build_history` | function | 842 | ✅ |
 | `export_csv` | function | 923 | ✅ |
 | `export_markdown` | function | 1018 | ✅ |
-| `export_document` | function | 1092 | ✅ |
+| `export_document` | function | 1093 | ✅ |
 
 ### `iso`
 

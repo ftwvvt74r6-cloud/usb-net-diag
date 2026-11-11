@@ -1034,13 +1034,14 @@ def export_markdown(samples: Sequence[Mapping[str, Any]], start: float, end: flo
     if events is None:
         events = read_events(start, end)
     cover = sample_coverage(samples, start, end)
+    ratio_txt = "-" if cover["ratio"] is None else "{:.1f}%".format(cover["ratio"] * 100)
     lines = [
         "# 网络历史摘要",
         "",
         f"- 时段：{iso(start)} → {iso(end)}",
         f"- 样本数：{cover['samples']}（按 {cover['interval_s']}s 间隔估算应采 "
         f"{cover['expected']} 条）",
-        f"- 覆盖率：{'-' if cover['ratio'] is None else f'{cover["ratio"] * 100:.1f}%'}",
+        f"- 覆盖率：{ratio_txt}",
         f"- 数据缺口：{len(cover['gaps'])} 段",
     ]
     if cover["gaps"]:
