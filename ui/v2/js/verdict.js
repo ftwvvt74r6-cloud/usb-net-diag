@@ -197,8 +197,10 @@
     order.forEach(function (key) {
       var on = highlight && key === b.key;
       var ow = OW[key] || {};
-      /* 同一个人，不同故障能做的事不一样：ICMP 拦截要查路由，不是查丢包 */
-      var partner = (on && ow.byKind && ow.byKind[b.why.kind]) || ow.partner || "";
+      /* 同一个人，不同故障能做的事不一样：ICMP 拦截要查路由，不是查丢包。
+         没被指到的三格只报状态、不给建议 —— 本机明明没事还劝人「降低并发占用」
+         就是自相矛盾（用户会照着做，然后白折腾）。 */
+      var partner = on ? ((ow.byKind && ow.byKind[b.why.kind]) || ow.partner || "") : "";
       cells.push({
         key: key,
         label: ow.label || key,
@@ -207,7 +209,7 @@
         on: on
       });
     });
-    return { key: highlight ? b.key : "", cells: cells };
+    return { key: highlight ? b.key : "", why: b.why, cells: cells };
   }
 
   function basisText(why) {
@@ -372,12 +374,20 @@
       : lay ? (String(lay.id || "") + " " + String(lay.name || "") + (V.titleSuffix || "异常"))
       : V.titleOk;
 
-    var problem = problemOf(v, kind);
     var highlight = kind === "crit" || kind === "warn";
     var owner = ownerCells(meta, lay, scopeKey, highlight);
+    /* 一句话定性按「到底是谁的问题」选词（blame 的 kind），比复述后端 plain 更稳：
+       plain 是面向排障者的长文，且属于后端文案（core/copy），前端不做二次改写 */
+    var problem = problemOf(v, kind, owner && owner.why ? owner.why.kind : "");
 
-    var conf = block && isFinite(Number(block.confidence))
-      ? tpl(V.confidence, { level: block.confidence_level || "", value: Number(block.confidence).toFixed(2) })
+    /* 置信度：结论块（后端给 level+value）优先，其次用 verdict 自己的单值 */
+    var confBlock = block && isFinite(Number(block.confidence)) ? Number(block.confidence) : null;
+    var confValue = confBlock !== null ? confBlock
+      : (isFinite(Number(v.confidence)) ? Number(v.confidence) : null);
+    var confLevel = (block && block.confidence_level) || "";
+    var conf = confValue !== null
+      ? (confLevel ? tpl(V.confidence, { level: confLevel, value: confValue.toFixed(2) })
+        : confValue.toFixed(2))
       : (V.confidenceNone || "");
 
     return {
@@ -391,7 +401,7 @@
       meta: meta,
       block: block,
       confidence: conf,
-      boundary: boundaryOf(block, kind),
+      boundary: boundaryOf(block, kind, v),
       steps: stepsOf(meta, lay, kind),
       owner: owner,
       reportId: res.report_id || (job && job.report_id) || "",
@@ -399,12 +409,14 @@
     };
   }
 
-  function problemOf(v, kind) {
+  function problemOf(v, kind, whyKind) {
     var V2 = V;
     if (kind === "ok") return V2.okProblem || "";
     if (kind === "zero") return V2.zeroProblem || "";
     if (kind === "thin") return V2.thinProblem || "";
-    /* 后端 verdict.plain 就是写给用户看的那句话，取第一句最省事也最准 */
+    var byKind = (V2.problemByKind || {})[whyKind];
+    if (byKind) return byKind;
+    /* 没有对应的规范表述时才退回后端原句（例如未知故障族） */
     var plain = String(v.plain || "").replace(/^\s*表现是[：:]\s*/, "");
     if (plain) {
       var first = plain.split(/[。；]/)[0];
@@ -419,31 +431,25 @@
   }
 
   /* 一行边界：优先用后端给的 key_limit（它说的就是「这套结论能用到哪」），
-     没有就退到覆盖/未覆盖的条数，绝不留空 */
-  function boundaryOf(block, kind) {
+     其次退到覆盖/未覆盖的条数（结论块没有就读 verdict 自己的），最后给一句固定口径。
+     这一行必须永远有话说 —— 它紧跟在结论横幅下面，空着等于结论没有适用范围。 */
+  function boundaryOf(block, kind, v) {
     var key = block && block.key_limit ? String(block.key_limit) : "";
     if (key) return key;
-    var cov = (block && block.coverage) || [];
-    var not = (block && block.not_covered) || [];
+    var cov = (block && block.coverage) || (v && v.coverage) || [];
+    var not = (block && block.not_covered) || (v && v.not_covered) || [];
     if (cov.length || not.length) return tpl(V.boundaryCount, { a: cov.length, b: not.length });
-    return kind === "ok" ? (V.okProblem || "") : "";
+    return V.boundaryFallback || "";
   }
 
-  /* ------------------------------------------------------------ 卡片 */
-  function card(job, opts) {
-    opts = opts || {};
-    var model = opts.model || build(job);
-    if (!model) return null;
-    var res = (job && job.result) || {};
-    var R = C.result || {};
-
-    var sec = opts.bare
-      ? U.el("div", "vcard bare")
-      : U.el("section", "card vcard");
+  /* ------------------------------------------------------------ ① 定性结论 */
+  /* 卡片不再是「一个函数画完」：三段报告（report.js）要按 ①/②/③ 拼接，
+     所以这里只导出三块零件 —— head（横幅 + 边界）、steps（处置步骤）、owner（责任）。
+     边界必须紧跟横幅、不进任何折叠：结论和「这套结论能用到哪」是不可拆的。 */
+  function head(job, model) {
+    var box = document.createDocumentFragment();
     var uid = "v-" + Math.random().toString(36).slice(2, 7);
-    model.el = sec;
 
-    /* ① 问题横幅 ------------------------------------------------------ */
     var ban = U.el("div", "v-banner " + model.tone);
     ban.setAttribute("aria-labelledby", uid + "-t");
     var top = U.el("div", "v-b-top");
@@ -462,41 +468,43 @@
     var p = U.el("p", "v-problem");
     p.appendChild(rich(model.problem));
     ban.appendChild(p);
-    sec.appendChild(ban);
+    box.appendChild(ban);
 
-    /* ② 边界：紧贴横幅的一行，永远与结论同框 ------------------------- */
     if (model.boundary) {
+      var R = C.result || {};
       var bd = U.el("p", "v-boundary");
       bd.appendChild(U.el("b", "", (V.boundaryLead || "") + "："));
       bd.appendChild(U.el("span", "v-boundary-t", model.boundary));
       bd.appendChild(U.el("span", "v-conf", (R.confidence || "") + " " + model.confidence));
-      /* 一行内说完：放不下就省略号，全文在 title / 展开证据里 */
       bd.title = (V.boundaryLead || "") + "：" + model.boundary;
-      sec.appendChild(bd);
+      box.appendChild(bd);
     }
+    return box;
+  }
 
-    /* ③ 现在怎么做 --------------------------------------------------- */
-    if (model.steps.length) {
-      var steps = U.el("div", "v-steps");
-      var sh = U.el("h3", "v-h", V.stepsHeading || "");
-      steps.appendChild(sh);
-      var ol = U.el("ol", "v-step-list");
-      model.steps.forEach(function (s, i) {
-        var li = U.el("li", "v-step");
-        li.appendChild(U.el("span", "v-step-no", String(i + 1)));
-        var body = U.el("p", "v-step-t");
-        body.appendChild(rich(s.text));
-        li.appendChild(body);
-        li.appendChild(actBtn(s.act, job, model));
-        ol.appendChild(li);
-      });
-      steps.appendChild(ol);
-      sec.appendChild(steps);
-    }
+  /* 处置步骤：最多 3 条，每条一个真按钮 */
+  function steps(job, model) {
+    if (!model.steps.length) return null;
+    var sec = U.el("div", "v-steps");
+    sec.appendChild(U.el("h3", "v-h", V.stepsHeading || ""));
+    var ol = U.el("ol", "v-step-list");
+    model.steps.forEach(function (s, i) {
+      var li = U.el("li", "v-step");
+      li.appendChild(U.el("span", "v-step-no", String(i + 1)));
+      var body = U.el("p", "v-step-t");
+      body.appendChild(rich(s.text));
+      li.appendChild(body);
+      li.appendChild(actBtn(s.act, job, model));
+      ol.appendChild(li);
+    });
+    sec.appendChild(ol);
+    return sec;
+  }
 
-    /* ④ 找谁解决 ----------------------------------------------------- */
-    var ow = U.el("div", "v-owner");
-    ow.appendChild(U.el("h3", "v-h", V.ownerHeading || ""));
+  /* 责任归属：四格只亮一格 */
+  function owner(job, model) {
+    var sec = U.el("div", "v-owner");
+    sec.appendChild(U.el("h3", "v-h", V.ownerHeading || ""));
     var grid = U.el("div", "v-grid");
     model.owner.cells.forEach(function (c) {
       var cell = U.el("div", "v-cell" + (c.on ? " on" : ""));
@@ -507,7 +515,7 @@
       if (c.partner) cell.appendChild(U.el("p", "v-cell-p", c.partner));
       grid.appendChild(cell);
     });
-    ow.appendChild(grid);
+    sec.appendChild(grid);
 
     var foot = U.el("div", "v-copy");
     foot.appendChild(U.el("p", "v-copy-t", model.owner.key ? (V.copyFooter || "") : (V.ownerNone || "")));
@@ -517,13 +525,13 @@
         onClick: function () { copySummary(model); }
       }));
     }
-    ow.appendChild(foot);
-    sec.appendChild(ow);
+    sec.appendChild(foot);
+    return sec;
+  }
 
-    /* ⑤ 展开证据：依据/覆盖/未覆盖 + 证据 + 完整建议 + 探针 + 路径 ----- */
-    sec.appendChild(evidenceFold(job, model, uid));
-
-    /* ⑥ 页脚：含边界的复制与导出（始终可见，不进折叠） ---------------- */
+  /* 页脚：复制 / 导出（始终可见，不进折叠） */
+  function footer(job, model) {
+    var R = C.result || {};
     var ft = U.el("div", "v-ft");
     var ui = (job && job.ui_copy && job.ui_copy.conclusion) || {};
     ft.appendChild(U.btn(ui.btn_copy || R.copy || "", {
@@ -538,78 +546,24 @@
       kind: "ghost", size: "sm", icon: "download",
       onClick: function () { ND.render.saveText(ND.render.reportName(job, "json"), ND.render.textOf(job, "json")); }
     }));
-    sec.appendChild(ft);
-    if (model.reportId) sec.appendChild(U.el("p", "v-id mono", tpl(R.reportId, { id: model.reportId })));
-
-    model.summary = summaryText(model);
-    return sec;
+    if (model.reportId) ft.appendChild(U.el("span", "v-id mono", tpl(R.reportId, { id: model.reportId })));
+    return ft;
   }
 
-  function evidenceFold(job, model, uid) {
-    var det = document.createElement("details");
-    det.className = "evfold";
-    var sum = document.createElement("summary");
-    sum.textContent = V.evFold || "";
-    det.appendChild(sum);
-
-    var bd = U.el("div", "ev-bd");
-    var block = model.block || {};
-    var R = C.result || {};
-
-    /* 依据 / 覆盖 / 未覆盖 —— 三段同框，仍然不给单独导出 */
-    var grid = U.el("div", "ev-grid");
-    grid.appendChild(evBlock(V.evBasis || R.basis, block.basis));
-    grid.appendChild(evBlock(V.evCoverage || R.coverage, block.coverage));
-    grid.appendChild(evBlock(V.evNot || R.notCovered, block.not_covered));
-    bd.appendChild(grid);
-
-    var conf = U.el("p", "ev-conf");
-    conf.appendChild(U.el("b", "", (V.evConf || R.confidence || "") + "："));
-    conf.appendChild(document.createTextNode(model.confidence));
-    if (block.key_limit) {
-      conf.appendChild(document.createTextNode("　·　"));
-      conf.appendChild(U.el("b", "", (V.boundaryFull || "") + "："));
-      conf.appendChild(document.createTextNode(String(block.key_limit)));
-    }
-    bd.appendChild(conf);
-
-    /* 证据条目 */
-    if (ND.render.evidence) bd.appendChild(ND.render.evidence(job));
-
-    /* 完整排查思路（不是那三条动作，是原始建议全文） */
-    if (ND.render.advice) bd.appendChild(ND.render.advice(job));
-
-    /* 探针基线 */
-    var pb = model.meta.probe_baseline;
-    var pbBox = U.el("div", "ev-sec");
-    pbBox.appendChild(U.el("h4", "ev-h", V.evProbe || ""));
-    pbBox.appendChild(pb ? ND.render.probeBaseline(pb) : U.el("p", "muted", (C.panel || {}).exProbeNone || ""));
-    bd.appendChild(pbBox);
-
-    /* 路径剖面 */
-    var pp = model.meta.path_profile;
-    var ppBox = U.el("div", "ev-sec");
-    ppBox.appendChild(U.el("h4", "ev-h", V.evPath || ""));
-    ppBox.appendChild(pp && (pp.hops || []).length
-      ? ND.render.hopTable(pp)
-      : U.el("p", "muted", (C.panel || {}).noData || "—"));
-    bd.appendChild(ppBox);
-
-    det.appendChild(bd);
-    return det;
-  }
-
-  function evBlock(heading, items) {
-    var box = U.el("div", "ev-blk");
-    box.appendChild(U.el("h4", "ev-h", heading || ""));
-    if (items && items.length) box.appendChild(ND.render.list(items, "ev-list"));
-    else box.appendChild(U.el("p", "muted", (C.tech || {}).valueEmpty || "—"));
-    return box;
+  function openFold(root) {
+    if (!root) return;
+    var d = root.querySelector("details.rpt-detail");
+    if (!d) return;
+    d.open = true;
+    try { d.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) { d.scrollIntoView(); }
   }
 
   ND.verdict = {
     build: build,
-    card: card,
+    head: head,
+    steps: steps,
+    owner: owner,
+    footer: footer,
     summaryText: summaryText,
     copySummary: copySummary
   };
