@@ -225,13 +225,14 @@ HTTP 大流（2000 包）按会话数是「TLS 91%」，按报文数才是「HTT
 ```json
 {"ok": true, "count": 2, "from": "...", "to": "...",
  "events": [{"t": 1794363000.0, "ts": "2026-11-11T10:10:00+08:00",
-             "target": "target:公司官网", "type": "latency",
-             "value": 300.0, "threshold": 120.0, "duration_s": 30.0,
+             "target": "公司官网", "type": "latency",
+             "value": 214.0, "threshold": 120.0, "duration_s": 30.0,
              "bssid": "aa:bb:cc:00:00:01", "rssi_dbm": -55.0}]}
 ```
 
 | 字段 | 口径 |
 |---|---|
+| `target` | 事件归属：`gateway` / `dns` / 目标 `key`。**不带** `target:` 前缀 —— 这一格是给人看的，前缀只用在 `series` 的序列 key 上 |
 | `type` | `latency` / `jitter` / `loss`。采集侧写的是 `rtt`，接口层映射成 `latency`；**改名不改值**，未识别的类型原样透传 |
 | `t` / `ts` | 事件触发时刻的 epoch 秒 / 带时区文本 |
 | `value` / `threshold` | 实测值与当时的阈值，单位随 `type`（ms 或 %） |
