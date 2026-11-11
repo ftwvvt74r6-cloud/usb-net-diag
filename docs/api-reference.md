@@ -3103,8 +3103,8 @@ Returns:
 | `coverage` | function | 540 | ✅ |
 | `build_history` | function | 602 | ✅ |
 | `export_csv` | function | 661 | ✅ |
-| `export_markdown` | function | 737 | ✅ |
-| `export_document` | function | 811 | ✅ |
+| `export_markdown` | function | 756 | ✅ |
+| `export_document` | function | 830 | ✅ |
 
 ### `iso`
 
