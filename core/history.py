@@ -722,6 +722,25 @@ def _nearest(samples: Sequence[Mapping[str, Any]], stamp: float
     return best
 
 
+def _duration(seconds: int) -> str:
+    """把秒数写成人读时长（``45 秒`` / ``3 分 20 秒`` / ``2 小时 5 分``）。
+
+    Args:
+        seconds: 时长（秒）。
+
+    Returns:
+        str: 展示用文本。不足 1 分钟**不写成「0 分钟」** —— 一次 21 秒的断档
+        写成 0 分钟会被读成「没有缺口」。
+    """
+    total = max(0, int(seconds))
+    if total < 60:
+        return f"{total} 秒"
+    if total < 3600:
+        return f"{total // 60} 分 {total % 60} 秒" if total % 60 else f"{total // 60} 分"
+    hours, rest = divmod(total, 3600)
+    return f"{hours} 小时 {rest // 60} 分" if rest // 60 else f"{hours} 小时"
+
+
 def _event_rank(event: Mapping[str, Any]) -> float:
     """事件的「严重程度」：实测值超出阈值的倍数，越大越靠前。"""
     try:
@@ -765,7 +784,7 @@ def export_markdown(samples: Sequence[Mapping[str, Any]], start: float, end: flo
     if cover["gaps"]:
         longest = max(cover["gaps"], key=lambda gap: gap["seconds"])
         lines.append(f"- 最长缺口：{longest['from']} → {longest['to']}"
-                     f"（{longest['seconds'] // 60} 分钟）")
+                     f"（{_duration(longest['seconds'])}）")
     lines.append("")
 
     ranked = sorted(events, key=_event_rank, reverse=True)[:max(0, int(top))]
@@ -798,7 +817,7 @@ def export_markdown(samples: Sequence[Mapping[str, Any]], start: float, end: flo
         lines.append("|---|---|---|---|")
         for gap in cover["gaps"][:20]:
             lines.append(f"| {gap['from']} | {gap['to']} "
-                         f"| {gap['seconds'] // 60} 分 {gap['seconds'] % 60} 秒 "
+                         f"| {_duration(gap['seconds'])} "
                          f"| {gap['missing']} |")
         if len(cover["gaps"]) > 20:
             lines.append(f"| … | 共 {len(cover['gaps'])} 段 | | |")

@@ -426,6 +426,14 @@ class HistoryExportTest(_HistoryCase):
         self.assertIn("无（区间内没有连续超阈值的事件）", text)
         self.assertIn("不是「丢包 0」", text)
 
+    def test_markdown_shows_short_gap_in_seconds(self):
+        # 21 秒的断档写成「0 分钟」会被读成「没有缺口」
+        self.write([self.sample(0), self.sample(21)])
+        samples = history_mod.read_samples(self.base, self.base + 21)
+        text = history_mod.export_markdown(samples, self.base, self.base + 21, [])
+        self.assertIn("21 秒", text)
+        self.assertNotIn("0 分钟", text)
+
     def test_export_document_names_and_ctype(self):
         self.write([self.sample(0)])
         body, ctype, name = history_mod.export_document(
