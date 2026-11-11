@@ -212,8 +212,18 @@
     var b = ND.panel.blocks(res, { pro: pro, job: job });
     var m = b.model;
 
+    /* 网络参数：无线链路 + 主机网关（与诊断结果无关，任何时候都在）。
+       它属于数据段的一栏，不是独立卡片 —— 首页卡片数不因此增加。 */
+    var net = U.el("div", "dp-col dp-net");
+    var nh = U.el("div", "rpt-h4");
+    nh.appendChild(U.el("h4", "", RP.netTitle || ""));
+    nh.appendChild(U.el("span", "rpt-dim", RP.netSub || ""));
+    net.appendChild(nh);
+    net.appendChild(U.el("div", "np-embed"));
+
     if (!b.has) {
       box.appendChild(U.el("p", "muted", (C.panel || {}).empty || ""));
+      box.appendChild(net);
     } else {
       /* 概览一行：给下面所有数字一个上下文（多少报文、多长时间） */
       var metaRow = U.el("p", "dp-meta");
@@ -224,25 +234,24 @@
       ].join("　·　");
       box.appendChild(metaRow);
 
+      /* 数据段主体左右两栏：左栏专业面板，右栏网络参数 */
       var grid = U.el("div", "dp-grid");
-      if (b.quality) grid.appendChild(U.el("div", "dp-col", b.quality));
-      if (b.dns) grid.appendChild(U.el("div", "dp-col", b.dns));
+
+      var left = U.el("div", "dp-col");
+      if (b.quality) left.appendChild(b.quality);
+      if (b.dns) left.appendChild(b.dns);
+      if (b.l7) left.appendChild(b.l7);
+      if (left.firstChild) grid.appendChild(left);
+      grid.appendChild(net);
       box.appendChild(grid);
 
+      /* 通栏块：会话明细最宽，留到最后仍然通栏 */
       if (b.sessions) box.appendChild(b.sessions);
-      if (b.l7) box.appendChild(b.l7);
       if (b.extra) box.appendChild(b.extra);
       if (b.logs) box.appendChild(b.logs);
     }
 
-    /* 网络参数表：无线链路 + 主机网关（与诊断结果无关，任何时候都在） */
-    var nh = U.el("div", "rpt-h4");
-    nh.appendChild(U.el("h4", "", RP.netTitle || ""));
-    nh.appendChild(U.el("span", "rpt-dim", RP.netSub || ""));
-    box.appendChild(nh);
-    var npHost = U.el("div", "np-embed");
-    box.appendChild(npHost);
-    if (ND.wifi && ND.wifi.embed) ND.wifi.embed(npHost);
+    if (ND.wifi && ND.wifi.embed) ND.wifi.embed(net.querySelector(".np-embed"));
 
     return section(3, RP.sec3, RP.sec3sub, box);
   }

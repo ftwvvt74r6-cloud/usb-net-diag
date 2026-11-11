@@ -18,7 +18,9 @@
   var C = ND.copy || {};
   var P = C.panel || {};
 
-  var MAX_MARKS = 3;
+  /* 同屏最多 3 处颜色标记：这个上限由指标表模块统一定义，
+     面板的染色预算跟着它走，两个地方不会各写一个数。 */
+  var MAX_MARKS = (ND.metrics && ND.metrics.MAX_MARKS) || 3;
 
   function n(v) {
     if (v === null || v === undefined || v === "") return null;

@@ -1388,6 +1388,8 @@ tr.is-ok .mt-v b { color: var(--text); }
 }
 .dp-col { min-width: 0; }
 .np-embed { margin-top: var(--sp-2); max-width: 760px; }
+/* 数据段里它是一栏，宽度跟着栏走，不再被 760 卡住 */
+.dp-net .np-embed { max-width: none; }
 .np-bar { display: flex; justify-content: flex-end; margin-bottom: var(--sp-2); }
 
 /* ---------------------------------------------------------------- 明细折叠 */
