@@ -120,26 +120,24 @@
     });
   }
 
-  /* 应用层分布：只在 streams_top 覆盖了全部会话时才是精确值 */
-  function l7(meta) {
-    var total = n(meta.streams_total);
-    var top = meta.streams_top || [];
-    if (!total || !top.length) return null;
-    var counts = { TLS: 0, HTTP: 0, other: 0 };
-    top.forEach(function (s) {
-      var a = String((s && s.app) || "").toUpperCase();
-      if (a === "TLS") counts.TLS++;
-      else if (a === "HTTP") counts.HTTP++;
-      else counts.other++;
+  /* 应用层分布：口径与关键指标表同源（ND.metrics.l7），
+     报文数优先、缺失回退会话数，两处永远说同一句话。 */
+  var L7_FILTER = { tls: "tls.handshake.type == 1", http: "http.request", other: "" };
+
+  function l7(res) {
+    var src = ND.metrics.l7(res);
+    if (!src) return null;
+    src.buckets = src.buckets.map(function (b) {
+      return {
+        key: b.key, label: b.label, n: b.n, pct: b.pct,
+        filter: L7_FILTER[b.key] !== undefined ? L7_FILTER[b.key] : ""
+      };
     });
-    var sum = counts.TLS + counts.HTTP + counts.other;
-    if (!sum) return null;
-    var buckets = [
-      { key: "tls", label: P.l7Tls, n: counts.TLS, pct: counts.TLS * 100 / sum, filter: "tls.handshake.type == 1" },
-      { key: "http", label: P.l7Http, n: counts.HTTP, pct: counts.HTTP * 100 / sum, filter: "http.request" },
-      { key: "other", label: P.l7Other, n: counts.other, pct: counts.other * 100 / sum, filter: "" }
-    ];
-    return { buckets: buckets, complete: top.length >= total, sampled: top.length, total: total };
+    /* 会话数口径只有 Top 会话那一页样本，报满不满要说清楚 */
+    src.complete = src.basis === "packets"
+      ? true
+      : (src.sampled >= (src.total || 0));
+    return src;
   }
 
   function build(res, opts) {
@@ -160,7 +158,7 @@
       quality: quality(meta, metrics),
       sessions: sessions(meta, !!opts.pro),
       sessionTotal: (meta.streams_top || []).length,
-      l7: l7(meta),
+      l7: l7(res),
       dns: {
         q: n(meta.dns_total), r: n(meta.dns_resp),
         avg: n(meta.dns_avg_ms), fail: n(meta.dns_fail_rate)
@@ -292,8 +290,12 @@
     var sec = U.el("section", "pro-sec");
     var hd = U.el("h4", "pro-h");
     hd.appendChild(document.createTextNode(P.secL7 || ""));
-    if (m.l7 && !m.l7.complete) {
-      hd.appendChild(U.el("span", "pro-dim", " · " + U.tpl(P.l7Sample, { n: m.l7.sampled, total: m.l7.total })));
+    if (m.l7) {
+      hd.appendChild(U.el("span", "pro-dim",
+        " · " + (m.l7.basis === "packets" ? P.l7CapPackets : P.l7CapSessions)));
+      if (!m.l7.complete) {
+        hd.appendChild(U.el("span", "pro-dim", " · " + U.tpl(P.l7Sample, { n: m.l7.sampled, total: m.l7.total })));
+      }
     }
     sec.appendChild(hd);
 
@@ -302,12 +304,14 @@
       return sec;
     }
 
+    /* 报文数口径下 38 这个数字必须自带单位，否则会被读成会话数 */
+    var unit = m.l7.basis === "packets" ? (P.l7UnitPkt || "") : "";
     var bar = U.el("div", "l7-bar");
     m.l7.buckets.forEach(function (b) {
       if (!b.n) return;
       var seg = U.el("span", "l7-seg l7-" + b.key);
       seg.style.flexGrow = String(Math.max(b.pct, 2));
-      seg.title = (b.label || "") + " " + b.n + " · " + b.pct.toFixed(0) + "%";
+      seg.title = (b.label || "") + " " + b.n + unit + " · " + b.pct.toFixed(0) + "%";
       bar.appendChild(seg);
     });
     sec.appendChild(bar);
@@ -323,11 +327,12 @@
       }
       li.className = "l7-leg l7-" + b.key;
       li.appendChild(U.el("i", "l7-dot"));
-      li.appendChild(U.el("span", "", (b.label || "") + " " + b.n + " · " + b.pct.toFixed(0) + "%"));
+      li.appendChild(U.el("span", "", (b.label || "") + " " + b.n + unit + " · " + b.pct.toFixed(0) + "%"));
       legend.appendChild(li);
     });
     sec.appendChild(legend);
-    sec.appendChild(U.el("p", "pro-hint", P.l7Note || ""));
+    sec.appendChild(U.el("p", "pro-hint",
+      m.l7.basis === "packets" ? (P.l7NotePackets || "") : (P.l7NoteSessions || "")));
     return sec;
   }
 
