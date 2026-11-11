@@ -3105,13 +3105,13 @@ Returns:
 | `aggregate_points` | function | 551 | ✅ |
 | `sample_coverage` | function | 636 | ✅ |
 | `bucket_coverage` | function | 700 | ✅ |
-| `event_type_name` | function | 764 | ✅ |
-| `event_view` | function | 789 | ✅ |
-| `mark_view` | function | 814 | ✅ |
-| `build_history` | function | 832 | ✅ |
-| `export_csv` | function | 913 | ✅ |
-| `export_markdown` | function | 1008 | ✅ |
-| `export_document` | function | 1082 | ✅ |
+| `event_type_name` | function | 774 | ✅ |
+| `event_view` | function | 799 | ✅ |
+| `mark_view` | function | 824 | ✅ |
+| `build_history` | function | 842 | ✅ |
+| `export_csv` | function | 923 | ✅ |
+| `export_markdown` | function | 1018 | ✅ |
+| `export_document` | function | 1092 | ✅ |
 
 ### `iso`
 
@@ -3471,7 +3471,10 @@ Returns:
     * ``gaps``：**缺失的桶数**（界面契约）。区间内一条数据都没有时，
       它等于全部桶数 —— **不会填 0**，否则前端会显示「0 个缺口」；
     * ``gap_ranges``：每段 ``{"from","to","seconds","missing"}``，``missing``
-      是这段缺了几个桶。图上的断线要靠它说清「断的是 10:03 那一分钟」；
+      是这段缺了几个桶，``seconds`` 是**窗口内**实际缺的秒数 —— 首尾段可能
+      只覆盖半个桶（``from=10:00:30`` 时第一个桶从 10:00 算起），所以
+      ``seconds`` 可能小于 ``missing × 桶宽``。图上的断线靠它说清「断的是
+      10:03 那一分钟」；
     * ``ratio``：有数据的桶 / 应有桶数，保留 3 位。
 
     Note:

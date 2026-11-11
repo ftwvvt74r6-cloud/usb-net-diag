@@ -715,7 +715,10 @@ def bucket_coverage(points: Sequence[Mapping[str, Any]], start: float, end: floa
         * ``gaps``：**缺失的桶数**（界面契约）。区间内一条数据都没有时，
           它等于全部桶数 —— **不会填 0**，否则前端会显示「0 个缺口」；
         * ``gap_ranges``：每段 ``{"from","to","seconds","missing"}``，``missing``
-          是这段缺了几个桶。图上的断线要靠它说清「断的是 10:03 那一分钟」；
+          是这段缺了几个桶，``seconds`` 是**窗口内**实际缺的秒数 —— 首尾段可能
+          只覆盖半个桶（``from=10:00:30`` 时第一个桶从 10:00 算起），所以
+          ``seconds`` 可能小于 ``missing × 桶宽``。图上的断线靠它说清「断的是
+          10:03 那一分钟」；
         * ``ratio``：有数据的桶 / 应有桶数，保留 3 位。
 
         Note:
@@ -744,10 +747,17 @@ def bucket_coverage(points: Sequence[Mapping[str, Any]], start: float, end: floa
     if run is not None:
         runs.append(run)
 
-    ranges = [{"from": iso(item["start"]),
-               "to": iso(item["start"] + item["count"] * seconds),
-               "seconds": int(item["count"] * seconds),
-               "missing": int(item["count"])} for item in runs]
+    ranges = []
+    for item in runs:
+        # 首尾两段可能有一部分落在查询窗口外（from=10:00:30 时第一个桶从 10:00 开始）。
+        # 缺口不能从窗口之前说起，所以裁到窗口边界；裁完为空的（零长窗口）就按整桶算。
+        begin = max(item["start"], float(start))
+        finish = min(item["start"] + item["count"] * seconds, float(end))
+        if finish <= begin:
+            begin, finish = item["start"], item["start"] + item["count"] * seconds
+        ranges.append({"from": iso(begin), "to": iso(finish),
+                       "seconds": int(round(finish - begin)),
+                       "missing": int(item["count"])})
     missing = sum(item["missing"] for item in ranges)
     return {
         "from": iso(start),

@@ -432,6 +432,18 @@ class HistoryCoverageTest(_HistoryCase):
         self.assertNotEqual(cover["gaps"], 0)
         self.assertEqual(len(cover["gap_ranges"]), 1)
 
+    def test_gap_range_is_clipped_to_window(self):
+        # 窗口从 10:00:55 开始，样本只在 10:01 桶：10:00 整桶都「缺」，但缺口不能
+        # 从窗口之前（10:00:00）说起，否则报告里的时间早于用户查的时间。
+        self.write([self.sample(60)])
+        cover = history_mod.build_history(
+            self.base + 55, self.base + 115, "1m")["coverage"]
+        self.assertEqual(cover["gaps"], 1)
+        gap = cover["gap_ranges"][0]
+        self.assertEqual(gap["from"], history_mod.iso(self.base + 55))
+        self.assertEqual(gap["to"], history_mod.iso(self.base + 60))
+        self.assertEqual(gap["seconds"], 5)
+
     def test_bucket_gaps_full_coverage_is_zero(self):
         self.write([self.sample(offset) for offset in (0, 60, 120, 180, 240)])
         cover = history_mod.build_history(
