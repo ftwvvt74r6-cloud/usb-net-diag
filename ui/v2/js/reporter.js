@@ -240,6 +240,10 @@
 
     var metrics = (ND.metrics && ND.metrics.rows) ? ND.metrics.rows(res, { budget: false }) : [];
     var l7o = (ND.metrics && ND.metrics.l7) ? ND.metrics.l7(res) : null;
+    /* 页面上有 metricsNote 兜着口径，导出文件里没有：目标不回 ICMP 时，
+       导出的表后必须自己带上同一句话，否则转发出去就只剩一个 100%。 */
+    var lossNote = (ND.metrics && ND.metrics.lossFiltered && ND.metrics.lossFiltered(meta))
+      ? (RP.mLossIcmpNote || "") : "";
 
     return {
       head: head,
@@ -268,6 +272,7 @@
         };
       }),
       l7: l7o,
+      lossNote: lossNote,
       evidence: evidenceOf(res),
       sessions: sessionsOf(meta, 10),
       net: netOf(ND.wifi && ND.wifi.snapshot ? ND.wifi.snapshot() : null),
@@ -341,6 +346,11 @@
         return [r.k, v, r.judge || "—"];
       })
     ));
+    /* 表后一句口径：与指标行 flag 说的是同一件事，缺了它文件里只剩数字 */
+    if (model.lossNote) {
+      L.push("");
+      L.push(model.lossNote);
+    }
     L.push("");
 
     /* 4 证据明细 */
@@ -439,6 +449,7 @@
     model.metrics.forEach(function (r) {
       L.push("  " + r.k + "：" + r.v + (r.u || "") + (r.flag ? "（" + r.flag + "）" : "") + (r.judge ? "　" + r.judge : ""));
     });
+    if (model.lossNote) L.push("  " + model.lossNote);
     L.push("");
 
     L.push("三、" + (E.sec3 || ""));
@@ -505,6 +516,8 @@
       if (out[k] === undefined) out[k] = raw[k];
     });
     out.metrics_rows = model ? model.metrics : [];
+    /* 口径句也进 json：只拿 json 复算的人，同样要能看出那个 100% 是什么 */
+    out.metrics_note = model ? model.lossNote : "";
     out.l7_packets = res.l7_packets || null;
     out.l7_basis = model && model.l7 ? model.l7.basis : "";
     out.wlan = (ND.wifi && ND.wifi.snapshot ? ND.wifi.snapshot() : null) || null;
