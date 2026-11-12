@@ -49,6 +49,10 @@ namespace NetDiag
         // 启动器要在 Python 起来之前工作，此时读不到 app-config.json。
         private const int PortMin = 8787;
         private const int PortMax = 8796;
+
+        //: 服务写下的**真实**监听端口（JSON）。8787~8796 全被占时服务会绑端口 0 由系统
+        //: 分配，那种实例按固定区间永远扫不到 —— 先读这个文件才知道该去敲哪个端口。
+        private const string PortFileRel = @"logs\netdiag.port";
         private const int PollIntervalMs = 200;
         private const int ReadyTimeoutMs = 30000;
         private const int PingTimeoutMs = 700;
@@ -448,9 +452,9 @@ namespace NetDiag
                     {
                         state.Fatal = "启动超时：30 秒内本地服务没有就绪。\n\n"
                                       + "请查看日志：" + Path.Combine(_root, "logs") + "\\app-*.log\n\n"
-                                      + "常见原因：\n  - 端口 8787-8796 全被占用\n"
-                                      + "  - Npcap / 安全软件拦截了 Python\n"
-                                      + "  - Python 缺少运行所需的模块";
+                                      + "常见原因：\n  - Npcap / 安全软件拦截了 Python\n"
+                                      + "  - Python 缺少运行所需的模块\n"
+                                      + "  - 本机端口一个都绑不上（罕见，重启电脑后再试）";
                         state.FatalCode = "wait-timeout";
                     }
                     return;
@@ -895,7 +899,12 @@ namespace NetDiag
 
         // --------------------------------------------------------- 就绪探测
         /// <summary>
-        /// 扫描 8787..8796，返回本程序的界面地址；没有就返回 null。
+        /// 找本程序已在运行的实例：先读端口文件，再扫 8787..8796；都没有返回 null。
+        ///
+        /// 为什么先读文件：端口 8787~8796 全被别的程序占满时，服务会绑端口 0 由系统
+        /// 分配（core/server.py::create_server），那种实例在固定区间里**永远扫不到**。
+        /// 服务把真实端口写进 logs\netdiag.port，这里读一眼就知道该敲哪个端口 ——
+        /// 顺带把「端口 0 启动」的冷启动也变快（不用扫 10 个端口）。
         ///
         /// H2 实测发现的最大浪费：对**没人监听**的端口发 HttpWebRequest，.NET 会
         /// 等满 700ms 超时才失败；10 个端口 = 7 秒，占了冷启动一半时间。所以先用
@@ -905,6 +914,8 @@ namespace NetDiag
         /// </summary>
         private static string ProbeExisting()
         {
+            string fromFile = ProbePortFile();
+            if (!string.IsNullOrEmpty(fromFile)) return fromFile;
             bool[] listening = ListeningPorts();
             for (int port = PortMin; port <= PortMax; port++)
             {
@@ -913,6 +924,30 @@ namespace NetDiag
                 if (!string.IsNullOrEmpty(url)) return url;
             }
             return null;
+        }
+
+        /// <summary>
+        /// 读 logs\netdiag.port 里的真实端口，敲一次 /api/ping；对不上返回 null。
+        ///
+        /// 文件读不到、JSON 坏、端口越界、进程已死（端口没人应答）都返回 null ——
+        /// 调用方会退回按区间扫，所以这里的失败一律不是错误。
+        /// </summary>
+        private static string ProbePortFile()
+        {
+            try
+            {
+                string path = Path.Combine(_root, PortFileRel);
+                if (!File.Exists(path)) return null;
+                string body = File.ReadAllText(path, Encoding.UTF8);
+                string raw = JsonNumber(body, "port");
+                if (string.IsNullOrEmpty(raw)) return null;
+                int port;
+                if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture,
+                                  out port)) return null;
+                if (port <= 0 || port > 65535) return null;
+                return ProbePing(port);
+            }
+            catch (Exception) { return null; }
         }
 
         /// <summary>本机 8787~8796 的监听位图；枚举失败返回 null（调用方退回 HTTP 逐端口探查）。</summary>

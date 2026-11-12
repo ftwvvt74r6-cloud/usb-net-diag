@@ -376,7 +376,8 @@ class CopySourceStaticTest(unittest.TestCase):
                     "check_tshark", "check_npcap", "check_port", "check_admin",
                     "python_ok", "python_low", "tshark_ok", "tshark_missing",
                     "npcap_ok", "npcap_missing", "port_running", "port_free",
-                    "port_busy", "admin_ok", "admin_no", "form_reset"):
+                    "port_busy", "port_ephemeral", "admin_ok", "admin_no",
+                    "form_reset"):
             with self.subTest(key=key):
                 self.assertIn(key, STARTUP)
                 self.assertTrue(str(STARTUP[key]).strip(), f"{key} 不能为空")

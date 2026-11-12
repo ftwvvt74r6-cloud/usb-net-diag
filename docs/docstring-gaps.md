@@ -3,7 +3,7 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**99.5%**（380/382）
+- 合格率：**99.5%**（383/385）
 - 模块说明：37/37
 
 ## 按文件汇总
@@ -14,7 +14,7 @@
 | `core/agent.py` | 27 | 27 | 27 | 100% |
 | `core/ai.py` | 9 | 9 | 9 | 100% |
 | `core/analyzer.py` | 3 | 3 | 3 | 100% |
-| `core/app.py` | 9 | 9 | 9 | 100% |
+| `core/app.py` | 11 | 11 | 11 | 100% |
 | `core/bootstrap.py` | 4 | 4 | 4 | 100% |
 | `core/conclusion.py` | 4 | 4 | 4 | 100% |
 | `core/config.py` | 11 | 11 | 11 | 100% |
@@ -40,7 +40,7 @@
 | `core/rules/legacy_map.py` | 9 | 9 | 9 | 100% |
 | `core/sanitize.py` | 4 | 4 | 4 | 100% |
 | `core/selfcheck.py` | 14 | 14 | 14 | 100% |
-| `core/server.py` | 31 | 31 | 31 | 100% |
+| `core/server.py` | 32 | 32 | 32 | 100% |
 | `core/startmsg.py` | 2 | 2 | 0 | 0% |
 | `core/tshark.py` | 13 | 13 | 13 | 100% |
 | `core/verdict.py` | 3 | 3 | 3 | 100% |

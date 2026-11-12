@@ -8,7 +8,7 @@
 > ```
 
 - 扫描模块：**37** 个（有模块说明 37 个）
-- 公开符号：**382** 个（有 docstring 382 个，合格 380 个）
+- 公开符号：**385** 个（有 docstring 385 个，合格 383 个）
 - 合格率：**99.5%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -831,9 +831,11 @@ Returns:
 | `msgbox` | function | 111 | ✅ |
 | `is_admin` | function | 128 | ✅ |
 | `relaunch_as_admin` | function | 140 | ✅ |
-| `find_running` | function | 195 | ✅ |
-| `first_free_port` | function | 224 | ✅ |
-| `main` | function | 251 | ✅ |
+| `preferred_port` | function | 181 | ✅ |
+| `find_running` | function | 236 | ✅ |
+| `first_free_port` | function | 291 | ✅ |
+| `port_plan` | function | 318 | ✅ |
+| `main` | function | 341 | ✅ |
 
 ### `browser_disabled`
 
@@ -928,7 +930,7 @@ Returns:
 ### `relaunch_as_admin`
 
 ```python
-def relaunch_as_admin() -> bool
+def relaunch_as_admin(port: int | None=None) -> bool
 ```
 
 ```text
@@ -939,10 +941,35 @@ def relaunch_as_admin() -> bool
 ``ShellExecuteW`` 创建的子进程继承当前进程环境，这里在调用前显式置位，
 也覆盖「直接从命令行启动、没经过 launcher」的情况。
 
+Args:
+    port: 当前实例监听的端口；给了就通过 ``--port`` 传给新进程，让它优先绑回
+        同一个端口。**端口 0（系统分配）时必须传**，否则新进程会拿到另一个随机
+        端口，已经开着的标签页就指向了一个不存在的地址。
+
 Returns:
     bool: True 表示已成功拉起提权后的新进程（当前进程应立即退出，避免两个实例抢端口）；
         False 表示用户点了「否」或调用失败 —— 此时**不要**退出，
         以普通权限继续跑，实时抓包不可用但分析抓包文件照常。
+```
+
+### `preferred_port`
+
+```python
+def preferred_port(argv: list[str] | None=None) -> int | None
+```
+
+```text
+从命令行取 ``--port N``（提权重启用来「绑回同一个端口」）。
+
+Args:
+    argv: 参数列表；省略时用 ``sys.argv``。
+
+Returns:
+    int | None: 合法端口（1~65535）；没传或值非法时 ``None``（回落配置端口）。
+
+Note:
+    非法值**不报错**：这条参数只在提权链路自动追加，用户不会手敲；
+    真写坏了也只该退回默认端口，不该让服务起不来。
 ```
 
 ### `find_running`
@@ -954,9 +981,11 @@ def find_running() -> str
 ```text
 探测本机是否已有实例在跑（单实例保护）。
 
-逐个试 8787~8796 的 ``/api/ping``，并核对 ``app`` 字段是本程序，
-避免把别的服务误认成自己。先用 :func:`_port_open` 过滤没人监听的端口，
-不对关闭端口发 HTTP（H2：否则 10 个端口会白等 7 秒）。
+先读 ``logs/netdiag.port``（服务自己写的真实端口）—— 8787~8796 全被占时服务会
+绑端口 0，那种实例按固定区间永远扫不到；文件里的端口敲不通（进程已死留下的陈旧
+文件）再退回按区间扫。扫的时候逐个试 8787~8796 的 ``/api/ping``，并核对 ``app``
+字段是本程序，避免把别的服务误认成自己。先用 :func:`_port_open` 过滤没人监听的
+端口，不对关闭端口发 HTTP（H2：否则 10 个端口会白等 7 秒）。
 
 Returns:
     str: 已运行实例的界面地址（如 ``http://127.0.0.1:8787/``）；没有则空串。
@@ -980,7 +1009,31 @@ Args:
     count: 顺延个数，默认 10（8787~8796）；非正数时返回 ``None``。
 
 Returns:
-    int | None: 第一个可绑定的端口号；全部被占用时 ``None``。
+    int | None: 第一个可绑定的端口号；全部被占用时 ``None``。传 ``base=0`` 时
+        返回的是系统当场分配的那个端口（用于判断「端口 0 能不能绑」）。
+```
+
+### `port_plan`
+
+```python
+def port_plan(base: int=8787, count: int=10) -> int | None
+```
+
+```text
+决定**本次要监听哪个端口**：区间内第一个空闲 → 0（系统分配）→ 真没有。
+
+Args:
+    base: 起始端口，默认 8787。
+    count: 顺延个数，默认 10（8787~8796）。
+
+Returns:
+    int | None: 可用的端口号；``0`` 表示「区间都被占用，交给系统分配」；
+        ``None`` 表示连端口 0 都绑不上（本机回环栈不可用，界面确实起不来）。
+
+Note:
+    0 是一个**合法返回值**而不是「假值」：调用方必须按 ``is None`` 判断，
+    写成 ``if port:`` 会把「交给系统分配」误当成「没端口可用」。
+    这与 ``server.create_server`` 的顺延策略一一对应。
 ```
 
 ### `main`
@@ -6238,12 +6291,12 @@ Returns:
 | `check_tshark` | function | 287 | ✅ |
 | `check_npcap` | function | 332 | ✅ |
 | `check_port` | function | 346 | ✅ |
-| `check_admin` | function | 374 | ✅ |
-| `check_scapy` | function | 402 | ✅ |
-| `capabilities` | function | 433 | ✅ |
-| `collect` | function | 520 | ✅ |
-| `invalidate_cache` | function | 578 | ✅ |
-| `collect_cached` | function | 591 | ✅ |
+| `check_admin` | function | 379 | ✅ |
+| `check_scapy` | function | 407 | ✅ |
+| `capabilities` | function | 438 | ✅ |
+| `collect` | function | 525 | ✅ |
+| `invalidate_cache` | function | 583 | ✅ |
+| `collect_cached` | function | 596 | ✅ |
 
 ### `ui_copy`
 
@@ -6376,15 +6429,17 @@ def check_port() -> dict
 ```
 
 ```text
-检查 8787~8796 是否有可用端口，或已有本程序实例在跑。
+检查能否起本地服务：已有实例 → 区间有空端口 → 端口 0（系统分配）。
 
-两件事都复用 :mod:`app` 的既有实现：:func:`app.find_running` 探测本程序
-实例（读 ``/api/ping``），:func:`app.first_free_port` 只做 bind/close。
-已有实例时不需要空闲端口 —— 启动器会直接打开那个地址。
+三件事都复用 :mod:`app` 的既有实现：:func:`app.find_running` 探测本程序
+实例（读 ``/api/ping``），:func:`app.port_plan` 给「这次要监听哪个端口」
+（区间内第一个空闲；都被占则 ``0``，交给系统分配）。已有实例时不需要空闲
+端口 —— 启动器会直接打开那个地址。
 
 Returns:
-    dict: 已有实例 ``detail`` 带地址；有空闲端口 ``detail`` 带端口号；
-        两者都没有 ``ok=False``，``fix_command`` 是查看端口占用的命令。
+    dict: 已有实例 ``detail`` 带地址；区间有空端口带端口号；只能由系统分配时
+        也算 ``ok=True``（服务照样起得来，只是地址每次不同）；
+        连端口 0 都绑不上才 ``ok=False``，``fix_command`` 是查看端口占用的命令。
 ```
 
 ### `check_admin`
@@ -6529,35 +6584,36 @@ Example:
 |---|---|---|---|
 | `static_asset` | function | 114 | ✅ |
 | `ui_entry` | function | 185 | ✅ |
-| `touch` | function | 307 | ✅ |
-| `request_quit` | function | 312 | ✅ |
-| `cleanup_pid` | function | 360 | ✅ |
-| `BodyTooLarge` | class | 370 | ✅ |
-| `doctor_cached` | function | 449 | ✅ |
-| `log` | function | 566 | ✅ |
-| `evidence_payload` | function | 662 | ✅ |
-| `conclusion_report_id` | function | 786 | ✅ |
-| `build_status_conclusion` | function | 817 | ✅ |
-| `start_job` | function | 1251 | ✅ |
-| `report_index` | function | 1312 | ✅ |
-| `request_elevation` | function | 1346 | ✅ |
-| `preflight_payload` | function | 1384 | ✅ |
-| `validate_component_path` | function | 1438 | ✅ |
-| `log_files` | function | 1478 | ✅ |
-| `resolve_log_file` | function | 1536 | ✅ |
-| `engine_info` | function | 1569 | ✅ |
-| `passive_start` | function | 1612 | ✅ |
-| `passive_status` | function | 1647 | ✅ |
-| `link_actions` | function | 1721 | ✅ |
-| `Handler` | class | 1802 | ✅ |
-| `Handler.handle_one_request` | method | 1828 | ✅ |
-| `Handler.log_message` | method | 1880 | ✅ |
-| `Handler.do_GET` | method | 2056 | ✅ |
-| `Handler.do_POST` | method | 2078 | ✅ |
-| `DiagServer` | class | 2549 | ✅ |
-| `DiagServer.handle_error` | method | 2560 | ✅ |
-| `create_server` | function | 2588 | ✅ |
-| `main` | function | 2635 | ✅ |
+| `touch` | function | 310 | ✅ |
+| `request_quit` | function | 315 | ✅ |
+| `read_port_file` | function | 389 | ✅ |
+| `cleanup_pid` | function | 421 | ✅ |
+| `BodyTooLarge` | class | 438 | ✅ |
+| `doctor_cached` | function | 517 | ✅ |
+| `log` | function | 634 | ✅ |
+| `evidence_payload` | function | 730 | ✅ |
+| `conclusion_report_id` | function | 854 | ✅ |
+| `build_status_conclusion` | function | 885 | ✅ |
+| `start_job` | function | 1319 | ✅ |
+| `report_index` | function | 1380 | ✅ |
+| `request_elevation` | function | 1414 | ✅ |
+| `preflight_payload` | function | 1454 | ✅ |
+| `validate_component_path` | function | 1508 | ✅ |
+| `log_files` | function | 1548 | ✅ |
+| `resolve_log_file` | function | 1606 | ✅ |
+| `engine_info` | function | 1639 | ✅ |
+| `passive_start` | function | 1682 | ✅ |
+| `passive_status` | function | 1717 | ✅ |
+| `link_actions` | function | 1791 | ✅ |
+| `Handler` | class | 1872 | ✅ |
+| `Handler.handle_one_request` | method | 1898 | ✅ |
+| `Handler.log_message` | method | 1950 | ✅ |
+| `Handler.do_GET` | method | 2126 | ✅ |
+| `Handler.do_POST` | method | 2148 | ✅ |
+| `DiagServer` | class | 2619 | ✅ |
+| `DiagServer.handle_error` | method | 2630 | ✅ |
+| `create_server` | function | 2658 | ✅ |
+| `main` | function | 2720 | ✅ |
 
 ### `static_asset`
 
@@ -6647,6 +6703,24 @@ Returns:
         否则 200 响应还没写回浏览器端口就被关掉，前端只会看到「连接被重置」。
 ```
 
+### `read_port_file`
+
+```python
+def read_port_file() -> dict | None
+```
+
+```text
+读 ``logs/netdiag.port``，返回本次实例的真实端口信息。
+
+调用方是 :func:`app.find_running`（复用已有实例）与自检的端口项。这里只做
+「文件读得出来且端口合法」，**不校验进程是否还活着** —— 死进程留下的陈旧端口
+由调用方用 ``/api/ping`` 否掉，那一步本来就存在。
+
+Returns:
+    dict | None: ``{"port", "url", "pid", "ephemeral", "started_at"}``；
+        文件不存在 / 不是 JSON / 端口不在 1~65535 时返回 ``None``（不抛）。
+```
+
 ### `cleanup_pid`
 
 ```python
@@ -6654,7 +6728,7 @@ def cleanup_pid() -> None
 ```
 
 ```text
-只删自己的 PID 文件，避免误删新实例的。
+只删自己的 PID 文件与端口文件，避免误删新实例的。
 ```
 
 ### `BodyTooLarge`  (class)
@@ -7120,22 +7194,27 @@ def create_server(port: int=8787, idle_exit_min: int=0, quiet: bool=False, regis
 ```
 
 ```text
-建监听。端口被占用时顺延最多 10 个。
+建监听：配置端口 → 顺延 10 个 → 端口 0（系统分配）。
 
 Args:
     port: 起始端口（默认 8787）。
     idle_exit_min: 无人访问多少分钟后自动退出；0 表示常驻不退出。
     quiet: True 时不打印启动横幅（静默启动用）。
-    register_pid: 是否写 ``logs/netdiag.pid``。自测传 False，
-        避免测试实例覆盖正在运行的应用的 PID 文件。
+    register_pid: 是否写 ``logs/netdiag.pid`` 与 ``logs/netdiag.port``。自测传
+        False，避免测试实例覆盖正在运行的应用的 PID/端口文件。
 
 Returns:
-    tuple[DiagServer | None, str]: ``(实例, 访问地址)``；10 个端口都被占用时返回 ``(None, "")``。
+    tuple[DiagServer | None, str]: ``(实例, 访问地址)``。地址里带的是**真实**
+        绑定的端口；连端口 0 都绑不上（本机回环栈不可用）才返回 ``(None, "")``。
 
 Note:
     ``allow_reuse_address`` 必须是 **False**。Windows 上它等价于 ``SO_REUSEADDR``，
     会让两个进程同时绑同一端口，旧进程继续响应新请求 —— 这正是曾经
     「改了代码却没生效」的根因。
+
+    端口 0 是「不让端口把界面挡在门外」的最后一步：8787~8796 被别的程序占满时，
+    过去只能弹「界面打不开」，但那是**整机端口资源**的问题，不该等于本程序不可用。
+    系统分配的端口写进 ``logs/netdiag.port``，启动器与 ``app.find_running`` 都读它。
 ```
 
 ### `main`
