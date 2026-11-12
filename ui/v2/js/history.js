@@ -194,7 +194,11 @@
   /* ------------------------------------------------------------ 取数 */
   function windowOf() {
     var r = rangeOf(state.range);
-    var to = Math.floor(Date.now() / 1000);
+    /* 取上取整，不用 floor：标记/事件的 epoch 带毫秒，刚打完标记立刻重查时
+       floor 会把 to 截到「这一秒的 0.000」，比标记还早 —— 后端按 [from,to]
+       闭区间过滤，刚建的那条就被当成「超出区间」丢掉，界面上什么也不会变。
+       上取整让当前这一秒算在窗口内，最多多查 1 秒（这一秒本来就没数据）。 */
+    var to = Math.ceil(Date.now() / 1000);
     return { r: r, to: to, from: to - r.sec, q: "from=" + (to - r.sec) + "&to=" + to + "&bucket=" + r.bucket };
   }
 
@@ -302,6 +306,21 @@
 
     var t0 = series[0].t;
     var t1 = series[series.length - 1].t;
+    /* 横轴不能只取数据首尾：桶的 t 是**桶起点**，所以「此刻」打的标记与刚触发
+       的事件（时刻 >= 当前桶起点）永远落在 t1 右边，被当成超出范围丢掉 ——
+       越是刚发生的越看不见。把标记/事件也算进定义域。 */
+    (state.marks || []).forEach(function (m) {
+      var t = n(m && m.t);
+      if (t === null) return;
+      if (t < t0) t0 = t;
+      if (t > t1) t1 = t;
+    });
+    (state.events || []).forEach(function (ev) {
+      var t = n(ev && ev.t);
+      if (t === null) return;
+      if (t < t0) t0 = t;
+      if (t > t1) t1 = t;
+    });
     if (t1 <= t0) t1 = t0 + 60;
 
     var maxRtt = state.thr * 1.25;

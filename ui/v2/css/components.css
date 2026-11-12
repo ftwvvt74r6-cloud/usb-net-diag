@@ -483,12 +483,17 @@
 
 .hist-events { margin-top: var(--sp-3); }
 .hist-cov { margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); }
-.hist-table th:nth-child(1), .hist-table td:nth-child(1) { width: 106px; }
-.hist-table th:nth-child(3), .hist-table td:nth-child(3) { width: 78px; }
-.hist-table th:nth-child(4), .hist-table td:nth-child(4) { width: 92px; }
-.hist-table th:nth-child(5), .hist-table td:nth-child(5) { width: 72px; }
-.hist-table th:nth-child(6), .hist-table td:nth-child(6) { width: 96px; }
-.hist-table th:nth-child(7), .hist-table td:nth-child(7) { width: 172px; }
+/* 目标列必须放得下 www.baidu.com:443 这种「域名:端口」：1024 下 .evi-table 的
+   媒体查询会把第 3 列撑到 236px，把目标挤成 112px 折成两行。用复合选择器提权，
+   顺序按「时间 / 目标 / 类型 / 实测 / 阈值 / 时长 / AP」重新分配。 */
+.evi-table.hist-table th:nth-child(1), .evi-table.hist-table td:nth-child(1) { width: 108px; }
+.evi-table.hist-table th:nth-child(2), .evi-table.hist-table td:nth-child(2) { width: 172px; }
+.evi-table.hist-table th:nth-child(3), .evi-table.hist-table td:nth-child(3) { width: 88px; }
+.evi-table.hist-table th:nth-child(4), .evi-table.hist-table td:nth-child(4) { width: 92px; }
+.evi-table.hist-table th:nth-child(5), .evi-table.hist-table td:nth-child(5) { width: 76px; }
+.evi-table.hist-table th:nth-child(6), .evi-table.hist-table td:nth-child(6) { width: 92px; }
+.evi-table.hist-table th:nth-child(7), .evi-table.hist-table td:nth-child(7) { width: 168px; }
+.hist-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-table tbody tr { cursor: pointer; }
 .hist-table tbody tr:hover { background: var(--n-50); }
 .hist-note { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--text-2); }
