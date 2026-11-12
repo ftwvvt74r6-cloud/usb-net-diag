@@ -16,6 +16,7 @@ import socket
 import sys
 import time
 from pathlib import Path
+from typing import Callable, Mapping
 
 CORE = Path(__file__).resolve().parent
 ROOT = CORE.parent
@@ -491,6 +492,58 @@ def _explicit_empty_result(ts: Path, iface: dict, ordered: list[dict], duration:
     return {"ok": False, "degraded": True, "empty": True,
             "interface": tshark.short_name(iface["name"]), "bpf": bpf,
             "error": _explicit_empty_error(iface, duration, bpf, traffic)}
+
+
+def _target_tcp_evidence(probe: Mapping | None, baseline: Mapping | None,
+                         logger: Callable[[str], None]) -> dict[str, str]:
+    """给「ICMP 一个包都没回」的业务目标补一条 TCP 旁证。
+
+    **只在真的需要时才连一次**：目标的 ICMP 有任何一个回包，就不必再连 ——
+    拿得到响应就说明链路有去有回，reason 本来就是 ``ok``。
+
+    证据取值见 :data:`core.probe_reason.TCP_EVIDENCES`：``ok``（SYN-ACK）/
+    ``refused``（RST）都证明目标活着；``timeout`` / ``unreachable`` 才可能是
+    真的不通。判定失败只影响「能不能说清原因」，不影响本次结论，所以一律降级
+    成空字典而不是抛异常。
+
+    Args:
+        probe: ``prober.snapshot()`` 的产物（读 ``planned`` 里 role=target 的规格）。
+        baseline: ``probe["baseline"]``（读 roles 的 ICMP 收发计数）。
+        logger: 日志回调。
+
+    Returns:
+        dict[str, str]: 形如 ``{"target": "ok"}``；不需要 / 取不到证据时为空字典。
+    """
+    try:
+        roles = {str(item.get("role") or ""): item
+                 for item in (baseline or {}).get("roles") or []
+                 if isinstance(item, Mapping)}
+    except Exception:                              # noqa: BLE001  坏载荷只当没证据
+        return {}
+    target = roles.get("target")
+    if not isinstance(target, Mapping):
+        return {}
+    if str(target.get("kind") or "") != "icmp":
+        return {}
+    if int(target.get("recv") or 0) > 0:
+        return {}                                  # 有回包，不需要旁证
+    specs = [item for item in (probe or {}).get("planned") or []
+             if isinstance(item, Mapping) and str(item.get("role") or "") == "target"]
+    if not specs:
+        return {}
+    ip = str(specs[0].get("target") or "")
+    port = None
+    try:
+        port = int(specs[0].get("port"))
+    except (TypeError, ValueError):
+        port = None
+    if not ip:
+        return {}
+    try:
+        return {"target": pathprobe.target_tcp_evidence(ip, port)}
+    except Exception as exc:                       # noqa: BLE001  旁证失败不影响结论
+        logger(f"[提示] 目标 TCP 可达性判定失败（不影响结论）：{type(exc).__name__}: {exc}")
+        return {}
 
 
 def _shadow_prober_for(target: str, duration: int, logger) -> "pathprobe.ShadowProber | None":
@@ -1447,6 +1500,18 @@ def _run_scan(target: str = "", duration: int = 30, interface: str | None = None
             logger(f"[提示] 统计探针包数失败（不影响结论）：{type(exc).__name__}: {exc}")
         baseline = dict(baseline)
         baseline["excluded_packets"] = excluded
+        # ---- ICMP 全丢 ≠ 丢包：先补一条「同一目标的 TCP 旁证」 ----
+        # 影子探针只发 ICMP / TCP-SYN / UDP，目标是否回 ICMP 与「这条路上有没有
+        # 丢包」是两件事。只有拿到 TCP 握手（或 RST）才能说「目标活着、只是不理
+        # ICMP」；否则「8 发 0 收 = 丢包 100%」会把服务器侧策略判成承载网故障。
+        evidence = _target_tcp_evidence(probe, baseline, logger)
+        if evidence:
+            baseline = pathprobe.apply_tcp_evidence(baseline, evidence)
+            for item in baseline.get("roles") or []:
+                if item.get("role") == "target" and pathprobe.is_target_alive(
+                        str(item.get("reason") or "")):
+                    logger(f"目标 ICMP 无响应取到 TCP 旁证（{evidence.get('target')}）："
+                           f"判为 reason={item.get('reason')}，不计入丢包")
         result["meta"]["probe_baseline"] = baseline
         sent = int(baseline.get("sent") or 0)
         recv = int(baseline.get("recv") or 0)

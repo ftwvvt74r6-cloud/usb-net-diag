@@ -103,7 +103,13 @@ def _path_verdict_text(profile: dict) -> str:
                          else "verdict_no_data"),
     }
     key = keys.get(code)
-    if key == "verdict_icmp_filtered" and str(profile.get("method") or "icmp") == "tracert":
+    method = str(profile.get("method") or "icmp")
+    if key == "verdict_icmp_filtered" and profile.get("target_icmp_filtered"):
+        # 末段全丢但 TCP 可达：不是「整条路径都不回 ICMP」，不能写「已改用 TCP
+        # 探测」（本次没有重扫）。口径是「目标不理 ICMP，以 TCP 指标为准」。
+        key = ("verdict_target_icmp_filtered_tracert" if method == "tracert"
+               else "verdict_target_icmp_filtered")
+    elif key == "verdict_icmp_filtered" and method == "tracert":
         key = "verdict_icmp_filtered_tracert"
     return _pa(key) if key else ""
 
@@ -267,6 +273,36 @@ def _probe_role_text(role: str) -> str:
     return _p("role_" + str(role or "target"))
 
 
+def _probe_reason_alive(reason: str) -> bool:
+    """该原因是否意味着「目标其实活着，只是没回 ICMP」。
+
+    Args:
+        reason: 探针角色的 ``reason``（``ok`` / ``icmp_filtered`` / ``refused`` /
+            ``timeout``，见 :mod:`core.probe_reason`）。
+
+    Returns:
+        bool: ``icmp_filtered`` / ``refused`` 时为 True —— 报告要在丢包率旁边
+            注明口径，否则「100%」会被读成链路丢包。
+    """
+    try:
+        from core.probe_reason import is_target_alive
+    except ModuleNotFoundError:                    # 扁平导入（core/ 在 sys.path 上）
+        from probe_reason import is_target_alive   # type: ignore[no-redef]
+    return bool(is_target_alive(reason))
+
+
+def _probe_reason_text(reason: str) -> str:
+    """原因机器码 → 中文短语（``copy.probe.reason_*``）。
+
+    Args:
+        reason: 探针角色的 ``reason``。
+
+    Returns:
+        str: 可直接展示的中文；文案缺失时回退成机器码本身（便于发现漏配）。
+    """
+    return _p("reason_" + str(reason or "").strip().lower()) or str(reason or "")
+
+
 def _probe_rtt_text(item: dict) -> str:
     """探针 RTT 单元格：有样本写「最小/平均/最大」，没有样本写「未探到」。
 
@@ -306,14 +342,17 @@ def _probe_contrast_text(contrast: dict) -> str:
         "PROBE.CONTRAST.TARGET_SIDE": "contrast_target_side",
         "PROBE.CONTRAST.BOTH_SIDES": "contrast_both_sides",
         "PROBE.CONTRAST.INSUFFICIENT": "contrast_insufficient",
+        "PROBE.CONTRAST.ICMP_FILTERED": "contrast_icmp_filtered",
     }
     key = keys.get(code)
     if not key:
         return ""
     gateway = contrast.get("gateway_loss_pct")
     target = contrast.get("target_loss_pct")
+    reason = contrast.get("target_reason")
     return _p(key, gateway="-" if gateway is None else gateway,
               target="-" if target is None else target,
+              reason=_probe_reason_text(str(reason or "")),
               confidence=contrast.get("confidence", "-"))
 
 
@@ -337,16 +376,24 @@ def _render_probe_baseline(baseline: dict, vd: dict) -> list[str]:
         return []
     lines = [_p("section_title"), ""]
     rows = []
+    filtered: list[str] = []
     for item in roles:
         jitter = (f"{item.get('jitter_ms')}ms" if int(item.get("n") or 0) > 0
                   else _p("no_sample"))
         loss = item.get("loss_pct")
+        # 丢包率旁边必须写清口径：ICMP 全丢而 TCP 可达时，这个 100% 说的是
+        # 「目标不理 ICMP」，不是「这条路上丢了包」。只加后缀，不改数值。
+        reason = str(item.get("reason") or "")
+        loss_text = "-" if loss is None else f"{loss:g}%"
+        if reason and _probe_reason_alive(reason):
+            loss_text += _p("loss_reason_suffix", reason=_probe_reason_text(reason))
+            filtered.append(_probe_role_text(item.get("role", "")))
         rows.append([
             _probe_role_text(item.get("role", "")),
             item.get("target", "-"),
             item.get("sent", 0),
             item.get("recv", 0),
-            "-" if loss is None else f"{loss:g}%",
+            loss_text,
             _probe_rtt_text(item),
             jitter,
         ])
@@ -355,6 +402,9 @@ def _render_probe_baseline(baseline: dict, vd: dict) -> list[str]:
          _p("th_loss"), _p("th_rtt"), _p("th_jitter")],
         rows))
     lines.append("")
+    if filtered:
+        lines.append(_p("icmp_filtered_note", roles="、".join(filtered)))
+        lines.append("")
     sent = int(baseline.get("sent") or 0)
     recv = int(baseline.get("recv") or 0)
     try:

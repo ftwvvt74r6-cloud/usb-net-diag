@@ -76,6 +76,31 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+try:                                    # 扁平导入：core/ 在 sys.path 上（diagnose / server）
+    from probe_reason import (
+        REASON_ICMP_FILTERED,
+        REASON_OK,
+        REASON_TIMEOUT,
+        TCP_OK,
+        TCP_REFUSED,
+        TCP_TIMEOUT,
+        TCP_UNREACHABLE,
+        endpoint_reason,
+        is_target_alive,
+    )
+except ModuleNotFoundError:             # 包导入：仓库根在 sys.path 上（tests / core.*）
+    from core.probe_reason import (
+        REASON_ICMP_FILTERED,
+        REASON_OK,
+        REASON_TIMEOUT,
+        TCP_OK,
+        TCP_REFUSED,
+        TCP_TIMEOUT,
+        TCP_UNREACHABLE,
+        endpoint_reason,
+        is_target_alive,
+    )
+
 #: ICMP 探测用的固定 id，便于在抓包里认出来（"ND" = NetDiag）。
 PROBE_ID = 0x4E44
 #: TCP / UDP 探测固定使用的源端口段（避开普通业务端口）。
@@ -465,6 +490,10 @@ class HopStat:
     ``sent`` / ``lost`` 表达「有没有样本」（``sent=0`` = 这一跳根本没探），
     ``rtt_n`` 表达「有没有 RTT 样本」（回了包但拿不到时间戳时为 0）；
     RTT 三个值 + 抖动在 ``rtt_n=0`` 时是 ``None``，**不许用 0.0 冒充**。
+
+    ``reason`` 说明「这一跳为什么没有响应」（:mod:`core.probe_reason` 的取值域）：
+    ``ok`` 有响应；``timeout`` 发了没回；``icmp_filtered`` **目标跳**没回 ICMP、
+    但同一目标的 TCP 探测证明它活着 —— 这类跳的 100% 丢包**不是**链路丢包证据。
     """
 
     ttl: int
@@ -477,6 +506,16 @@ class HopStat:
     rtt_max_ms: float | None = None
     jitter_ms: float | None = None
     rtt_n: int = 0
+    reason: str = REASON_OK
+
+    @property
+    def filtered(self) -> bool:
+        """这一跳的「全丢」是否已被证明**不是**丢包（目标不理 ICMP）。
+
+        Returns:
+            bool: ``reason == "icmp_filtered"`` 时为 True。
+        """
+        return self.reason == REASON_ICMP_FILTERED
 
     @property
     def loss_pct(self) -> float:
@@ -494,8 +533,8 @@ class HopStat:
         Returns:
             dict: 键 ``ttl``/``ip``/``sent``/``lost``/``loss_pct``/
                 ``rtt_min_ms``/``rtt_avg_ms``/``rtt_max_ms``/``jitter_ms``/
-                ``rtt_n``/``status``（机器码）；没有 RTT 样本时三个 RTT 与抖动
-                都是 ``None``。
+                ``rtt_n``/``status``（机器码）/``reason``（为什么没响应）；
+                没有 RTT 样本时三个 RTT 与抖动都是 ``None``。
         """
         return {
             "ttl": int(self.ttl),
@@ -509,6 +548,7 @@ class HopStat:
             "jitter_ms": self.jitter_ms,
             "rtt_n": int(self.rtt_n),
             "status": self.status.value,
+            "reason": self.reason,
         }
 
 
@@ -531,6 +571,8 @@ class PathProbeResult:
     hops: tuple[HopStat, ...] = ()
     verdict_key: str = ""
     icmp_filtered: bool = False
+    target_icmp_filtered: bool = False
+    silent_ttls: tuple[int, ...] = ()
     target_port_reachable: bool | None = None
     ledger: Mapping | None = None
     target_ip: str = ""
@@ -568,6 +610,8 @@ class PathProbeResult:
             "degraded_ttl": self.degraded_ttl,
             "baseline_ms": self.baseline_ms,
             "icmp_filtered": self.icmp_filtered,
+            "target_icmp_filtered": bool(self.target_icmp_filtered),
+            "silent_ttls": [int(ttl) for ttl in self.silent_ttls],
             "target_port_reachable": self.target_port_reachable,
             "method": self.method,
             "reached_target": self.reached_target,
@@ -680,7 +724,8 @@ def clamp_path_options(max_hops: int = PATH_DEFAULT_MAX_HOPS,
 
 
 def _path_degradation(hops: Sequence[HopStat],
-                      target_ip: str = "") -> dict:
+                      target_ip: str = "",
+                      target_port_reachable: bool | None = None) -> dict:
     """按 R5「持久性」口径拆出劣化段与中间跳异常（内部纯函数）。
 
     判据分两步，避免把「中间跳不回 ICMP、后续跳/目标却正常」误判成承载网故障：
@@ -692,24 +737,33 @@ def _path_degradation(hops: Sequence[HopStat],
        那一段才算「劣化」。终点之前、被正常跳隔开的异常跳只记进
        ``middle_loss_ttls``（疑似 ICMP 限速/策略过滤），不算劣化。
 
-    目标可达且目标跳健康时，终点就是目标跳；中间跳的异常因此天然落进
-    ``middle_loss_ttls``，``degraded_ttls`` 为空 —— 这正是 R5 要求的判定约束。
+    **目标的沉默不算丢包**（``target_port_reachable is True``）：公网服务器与云
+    安全组常直接丢弃 echo request，此时「末段 100% 全丢」只说明**目标不理 ICMP**，
+    不说明这条路上有包被丢 —— 否则「8 发 0 收 = 丢包 100%」会被一路判成承载网
+    故障（真机已复现）。所以这类跳一律置为「沉默尾巴」：不进异常集合、不进劣化段，
+    终点回退到**最后一个有响应的跳**，并记进 ``silent_ttls`` / ``target_icmp_filtered``。
+    TCP 能到目标，就证明这段路有去有回，这是比 ICMP 更硬的证据。
 
     Args:
         hops: 逐跳统计（顺序无关，内部按 ``ttl`` 排序；``sent=0`` 的跳忽略）。
         target_ip: 目标 IP 字面量；为空时无法识别目标跳，终点取最后一个有响应的跳。
+        target_port_reachable: 目标端口 TCP 是否可达；``None`` 表示没测，
+            ``True`` 才会把「沉默尾巴」判成 ICMP 被过滤。
 
     Returns:
         dict: 键 ``has_samples``（是否有任何采样）/``target_reached``（是否探到目标）/
             ``endpoint_ttl``（判定终点 TTL，无样本时 ``None``）/``degraded_ttls``
             （持续到终点的劣化段 TTL，升序）/``middle_loss_ttls``（未持续的中间跳
-            异常 TTL，升序）/``anomaly_ttls``（全部单跳异常 TTL，供状态赋值复用）。
+            异常 TTL，升序）/``anomaly_ttls``（全部单跳异常 TTL，供状态赋值复用）/
+            ``silent_ttls``（被 TCP 证据证明「不是丢包」的全丢跳，升序）/
+            ``target_icmp_filtered``（``silent_ttls`` 非空）。
     """
     ordered = [hop for hop in sorted(hops, key=lambda item: item.ttl)
                if hop.sent > 0]
     empty = {"has_samples": False, "target_reached": False,
              "endpoint_ttl": None, "degraded_ttls": (),
-             "middle_loss_ttls": (), "anomaly_ttls": ()}
+             "middle_loss_ttls": (), "anomaly_ttls": (),
+             "silent_ttls": (), "target_icmp_filtered": False}
     if not ordered:
         return empty
 
@@ -738,10 +792,23 @@ def _path_degradation(hops: Sequence[HopStat],
     target_hop = None
     if target_ip:
         target_hop = next((hop for hop in ordered if hop.ip == target_ip), None)
+
+    # ---- 沉默尾巴：TCP 证明目标活着，末段的全丢不能当丢包证据 ----
+    silent: tuple[int, ...] = ()
+    if target_port_reachable is True:
+        last_ok_ttl = responding[-1].ttl
+        silent = tuple(hop.ttl for hop in ordered
+                       if hop.loss_pct >= 100.0 and hop.ttl > last_ok_ttl)
+        for ttl in silent:
+            anomaly[ttl] = False
+
     # 终点：探到目标 → 目标跳；否则默认最后一个有响应的跳。**例外**：路径末尾
     # 是 100% 不回包的「黑洞」（目标没探到），观测已经在那里结束，不能拿更早的
     # 正常跳把尾部丢包当「已恢复」—— 否则「目标不可达」会被粉饰成 PATH.OK。
-    if target_hop is not None:
+    if silent:
+        # 沉默尾巴已由 TCP 证明不是丢包：终点回退到最后有响应的跳。
+        endpoint = responding[-1]
+    elif target_hop is not None:
         endpoint = target_hop
     elif ordered[-1].loss_pct >= 100.0:
         endpoint = ordered[-1]
@@ -766,11 +833,14 @@ def _path_degradation(hops: Sequence[HopStat],
         "degraded_ttls": degraded,
         "middle_loss_ttls": middle,
         "anomaly_ttls": tuple(hop.ttl for hop in ordered if anomaly[hop.ttl]),
+        "silent_ttls": silent,
+        "target_icmp_filtered": bool(silent),
     }
 
 
 def build_hop_stats(rows: Iterable[Mapping],
-                    target_ip: str = "") -> tuple[HopStat, ...]:
+                    target_ip: str = "",
+                    target_port_reachable: bool | None = None) -> tuple[HopStat, ...]:
     """把原始采样记录聚合成逐跳统计（纯函数，MTR 与单测共用）。
 
     每条原始记录键：``ttl``（整数）、``responded``（布尔）、``rtt_ms``
@@ -781,6 +851,9 @@ def build_hop_stats(rows: Iterable[Mapping],
         target_ip: 目标 IP 字面量；给了才知道哪一跳是目标跳，从而按 R5 的
             「劣化必须持续到目标/最后响应跳」赋值状态。省略时按最后一个有响应
             的跳作为终点（单跳 / 直调场景）。
+        target_port_reachable: 目标端口 TCP 是否可达。``True`` 时**末尾的全丢跳**
+            会被判成「目标不理 ICMP」而不是「丢包」（``reason=icmp_filtered``、
+            ``status=filtered``）；``None`` / ``False`` 保持原判定。
 
     Returns:
         tuple[HopStat, ...]: 按 TTL 升序的逐跳统计。``sent`` 是该 TTL 的采样数，
@@ -788,9 +861,10 @@ def build_hop_stats(rows: Iterable[Mapping],
         ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
         ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
         ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
-        ``status`` 与劣化判定同源：没有任何样本 → ``LOSS``；**异常持续到终点**
-        → ``DEGRADED``（全丢仍保留 ``LOSS``）；异常被后续正常跳/目标打断
-        → ``RATE_LIMITED``；其余 ``OK``。
+        ``status`` 与劣化判定同源：被 TCP 证据证明不是丢包的全丢跳 → ``FILTERED``；
+        没有任何样本 → ``LOSS``；**异常持续到终点** → ``DEGRADED``（全丢仍保留
+        ``LOSS``）；异常被后续正常跳/目标打断 → ``RATE_LIMITED``；其余 ``OK``。
+        ``reason`` 说明「为什么没响应」，取值域见 :mod:`core.probe_reason`。
 
     Example:
         >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
@@ -827,13 +901,20 @@ def build_hop_stats(rows: Iterable[Mapping],
     hops = tuple(out)
     # R5：状态必须与「第几跳开始劣化」用同一套持久性判据 —— 中间跳限速
     # 不能被标成 DEGRADED（否则表格说「劣化」、结论却是 PATH.OK）。
-    profile = _path_degradation(hops, target_ip)
+    profile = _path_degradation(hops, target_ip, target_port_reachable)
     degraded = set(profile["degraded_ttls"])
     middle = set(profile["middle_loss_ttls"])
     anomaly = set(profile["anomaly_ttls"])
+    silent = set(profile["silent_ttls"])
     stats: list[HopStat] = []
     for hop in hops:
-        if hop.sent and hop.loss_pct >= 100.0:
+        # 「为什么没响应」与劣化判定同源：沉默尾巴 → icmp_filtered（不是丢包）。
+        reason = endpoint_reason(
+            icmp_sent=hop.sent, icmp_recv=hop.sent - hop.lost,
+            tcp=TCP_OK if hop.ttl in silent else "")
+        if hop.ttl in silent:
+            status = HopStatus.FILTERED       # 目标不理 ICMP，TCP 证明可达
+        elif hop.sent and hop.loss_pct >= 100.0:
             status = HopStatus.LOSS          # 全丢：事实是「没响应」，不是「劣化」
         elif hop.ttl in degraded:
             status = HopStatus.DEGRADED
@@ -843,7 +924,7 @@ def build_hop_stats(rows: Iterable[Mapping],
             status = HopStatus.DEGRADED
         else:
             status = HopStatus.OK
-        stats.append(replace(hop, status=status))
+        stats.append(replace(hop, status=status, reason=reason))
     return tuple(stats)
 
 
@@ -960,7 +1041,9 @@ def summarize_path(hops: Sequence[HopStat],
             ``degraded_ttl``（持续劣化段第一跳，无则 ``None``）/``baseline_ms``
             （基线平均 RTT，无样本 ``None``）/``icmp_filtered``/``unreachable``/
             ``reached_target``/``tun_suspected``/``middle_loss_suspected``（是否有
-            「未持续到终点」的中间跳异常）/``middle_loss_ttls``（这些跳的 TTL 列表）。
+            「未持续到终点」的中间跳异常）/``middle_loss_ttls``（这些跳的 TTL 列表）/
+            ``target_icmp_filtered``（末段全丢但 TCP 可达 → 目标不理 ICMP，不是丢包）/
+            ``silent_ttls``（被判成「沉默」的全丢跳 TTL）。
             没有样本时恒为 ``PATH.NO_DATA``，绝不返回 ``PATH.OK``。
 
     Example:
@@ -974,7 +1057,8 @@ def summarize_path(hops: Sequence[HopStat],
                 "baseline_ms": None, "icmp_filtered": False,
                 "unreachable": False, "reached_target": False,
                 "tun_suspected": False, "middle_loss_suspected": False,
-                "middle_loss_ttls": []}
+                "middle_loss_ttls": [], "target_icmp_filtered": False,
+                "silent_ttls": []}
 
     responded = [hop for hop in hops if hop.rtt_n > 0 or hop.loss_pct < 100.0]
     if not responded:
@@ -984,15 +1068,20 @@ def summarize_path(hops: Sequence[HopStat],
                     "baseline_ms": None, "icmp_filtered": True,
                     "unreachable": False, "reached_target": False,
                     "tun_suspected": looks_like_tun(hops, target_ip),
-                    "middle_loss_suspected": False, "middle_loss_ttls": []}
+                    "middle_loss_suspected": False, "middle_loss_ttls": [],
+                    "target_icmp_filtered": True, "silent_ttls": []}
         return {"verdict_key": PATH_NO_DATA, "degraded_ttl": None,
                 "baseline_ms": None, "icmp_filtered": False,
                 "unreachable": bool(target_port_reachable is False),
                 "reached_target": False,
                 "tun_suspected": looks_like_tun(hops, target_ip),
-                "middle_loss_suspected": False, "middle_loss_ttls": []}
+                "middle_loss_suspected": False, "middle_loss_ttls": [],
+                "target_icmp_filtered": False, "silent_ttls": []}
 
-    profile = _path_degradation(hops, target_ip)
+    # 只有 ICMP 逐跳才有「目标不理 ICMP」这回事：TCP 逐跳每跳都回 SYN-ACK，
+    # 末段全丢就只能是真丢包。
+    reachable = target_port_reachable if method == "icmp" else None
+    profile = _path_degradation(hops, target_ip, reachable)
     flagged = profile["degraded_ttls"]
     degraded_ttl = flagged[0] if flagged else None
     probed = [hop for hop in sorted(hops, key=lambda item: item.ttl)
@@ -1008,13 +1097,20 @@ def summarize_path(hops: Sequence[HopStat],
 
     rtts = [hop.rtt_avg_ms for hop in hops if hop.rtt_avg_ms is not None]
     middle = profile["middle_loss_ttls"]
+    target_filtered = bool(profile.get("target_icmp_filtered"))
+    # 末段全丢被 TCP 证据解释掉了，且没有别的劣化：结论是「ICMP 被过滤」而不是
+    # 「整条路径未观察到劣化」—— 后者会让读报告的人以为「我们测了 ICMP，是好的」。
+    if target_filtered and degraded_ttl is None:
+        verdict = PATH_ICMP_FILTERED
     return {"verdict_key": verdict, "degraded_ttl": degraded_ttl,
             "baseline_ms": round(min(rtts), 1) if rtts else None,
-            "icmp_filtered": False, "unreachable": False,
+            "icmp_filtered": target_filtered, "unreachable": False,
             "reached_target": bool(profile["target_reached"]),
             "tun_suspected": looks_like_tun(hops, target_ip),
             "middle_loss_suspected": bool(middle),
-            "middle_loss_ttls": list(middle)}
+            "middle_loss_ttls": list(middle),
+            "target_icmp_filtered": target_filtered,
+            "silent_ttls": list(profile.get("silent_ttls") or ())}
 
 
 # ---------------------------------------------------------------- 隔离表达式
@@ -1591,10 +1687,14 @@ def aggregate_records(records: Iterable[ProbeRecord]) -> list[dict]:
     Returns:
         list[dict]: 每个角色/目标一组，键 ``role``/``kind``/``target``/``sent``/
             ``recv``/``timeout``/``loss_pct``/``n``/``rtt_min_ms``/``rtt_avg_ms``/
-            ``rtt_max_ms``/``jitter_ms``/``errors``。``timeout = sent - recv`` 是
-            **模块自记**的超时数（与 ``loss_pct`` 同源）。**没有 RTT 样本时**
-            ``n=0`` 且 ``rtt_*`` 为 ``None``（不是 0.0）；``loss_pct`` 只在
-            ``sent=0`` 时为 ``None``。分组按网关 → DNS → 业务目标排序。
+            ``rtt_max_ms``/``jitter_ms``/``errors``/``reason``。``timeout =
+            sent - recv`` 是**模块自记**的超时数（与 ``loss_pct`` 同源）。
+            **没有 RTT 样本时** ``n=0`` 且 ``rtt_*`` 为 ``None``（不是 0.0）；
+            ``loss_pct`` 只在 ``sent=0`` 时为 ``None``。分组按网关 → DNS →
+            业务目标排序。``reason`` 是「为什么没响应」的初判（见
+            :mod:`core.probe_reason`）：只有 ICMP 收发信息时，全丢只能是
+            ``timeout``；同一目标的 TCP 证据由 :func:`apply_tcp_evidence` 补进来
+            后才可能变成 ``icmp_filtered`` / ``refused``。
     """
     groups: dict[tuple[str, str, str], dict] = {}
     for record in records:
@@ -1636,7 +1736,54 @@ def aggregate_records(records: Iterable[ProbeRecord]) -> list[dict]:
                                   / item["sent"] * 100.0, 1)
                             if item["sent"] else None)
         item["timeout"] = max(0, int(item["sent"]) - int(item["recv"]))
+        # ICMP / TCP / UDP 三类探针在这里统一：有响应就是 ok，全丢交给
+        # endpoint_reason 定（此时还没有 TCP 旁证，只能是 timeout）。
+        item["reason"] = endpoint_reason(
+            icmp_sent=int(item["sent"]), icmp_recv=int(item["recv"]))
         out.append(item)
+    return out
+
+
+#: 探针角色 → 该角色「有没有 TCP 旁证」的映射类型：``{"target": "ok"}``。
+TcpEvidence = Mapping[str, str]
+
+
+def apply_tcp_evidence(baseline: Mapping, evidence: TcpEvidence | None) -> dict:
+    """把「同一目标的 TCP 侧证据」并入探针基线，重算每个角色的 ``reason``。
+
+    ICMP 一个包都没回，**不代表目标不可达**：公网服务器与云安全组常常直接丢弃
+    echo request。判定「被过滤」需要一条独立的、能证明「包能到对端也能回来」的
+    证据 —— 同一目标的 TCP 握手。本函数就是把这条证据贴到基线上的唯一入口。
+
+    纯函数：不改入参，返回深一层的拷贝；``evidence`` 为空时只补齐 ``reason``
+    （旧载荷 / 测试构的数据可能没有该键）。
+
+    Args:
+        baseline: :meth:`ProbeLedger.baseline` 的产物（含 ``roles``）。
+        evidence: 角色 → TCP 证据（``ok`` / ``refused`` / ``timeout`` /
+            ``unreachable``，取值见 :data:`core.probe_reason.TCP_EVIDENCES`）。
+
+    Returns:
+        dict: 新的基线；每个 role 项的 ``reason`` 已按「ICMP 收发 + TCP 证据」
+            重算。原对象不被修改（调用方可能还持有快照）。
+    """
+    marks = dict(evidence or {})
+    out = dict(baseline)
+    roles: list[dict] = []
+    for item in baseline.get("roles") or []:
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "")
+        # TCP 旁证只对**ICMP**探针有意义：TCP SYN / UDP 探针自己就是另一条路，
+        # 拿 TCP 握手去解释「TCP 探针没回」会把两个事实混成一个。
+        tcp = str(marks.get(role) or "") if str(item.get("kind") or "") == "icmp" else ""
+        copy_item = dict(item)
+        copy_item["reason"] = endpoint_reason(
+            icmp_sent=int(item.get("sent") or 0),
+            icmp_recv=int(item.get("recv") or 0),
+            tcp=tcp)
+        roles.append(copy_item)
+    out["roles"] = roles
     return out
 
 
@@ -1755,6 +1902,53 @@ def _resolve_target_ip(target: str) -> tuple[str, str]:
     return str(address), ""
 
 
+def probe_tcp_evidence(ip: str, port: int,
+                       timeout_s: float = PATH_TCP_CHECK_TIMEOUT_S) -> str:
+    """用一次普通 TCP 连接取「TCP 侧证据」（不发送任何数据）。
+
+    **为什么要分三态**：「连不上」有两种，处置方式相反 ——
+
+    * ``ok``（SYN-ACK）：主机在、端口在听 → 目标活着；
+    * ``refused``（RST）：主机在、端口没开 → 目标也活着（这条路上有去有回），
+      只是服务没起；把它和超时混成「不可达」，就会把「服务没开」判成「链路丢了」；
+    * ``timeout`` / ``unreachable``：连 SYN-ACK 也没有、也没有 RST —— 可能真的不通。
+
+    Args:
+        ip: 目标 IPv4 字面量。
+        port: 目标端口。
+        timeout_s: 单次连接超时（秒），夹到 0.1~3.0。
+
+    Returns:
+        str: ``ok`` / ``refused`` / ``timeout`` / ``unreachable``，取值见
+            :data:`core.probe_reason.TCP_EVIDENCES`。**不抛异常**。
+    """
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return TCP_UNREACHABLE
+    if not (1 <= port <= 65535):
+        return TCP_UNREACHABLE
+    timeout = max(0.1, min(float(timeout_s or PATH_TCP_CHECK_TIMEOUT_S), 3.0))
+    try:
+        sock = socket.create_connection((str(ip), port), timeout=timeout)
+    except ConnectionRefusedError:
+        return TCP_REFUSED                         # RST：主机在、端口没开，链路可达
+    except (socket.timeout, TimeoutError):
+        return TCP_TIMEOUT
+    except OSError as exc:
+        name = type(exc).__name__.lower()
+        if "timeout" in name or "timed out" in str(exc).lower():
+            return TCP_TIMEOUT
+        return TCP_UNREACHABLE
+    except ValueError:
+        return TCP_UNREACHABLE
+    try:
+        sock.close()
+    except OSError:
+        pass
+    return TCP_OK
+
+
 def probe_tcp_reachable(ip: str, port: int, timeout_s: float = PATH_TCP_CHECK_TIMEOUT_S) -> bool:
     """用一次普通 TCP 连接判断「目标端口是否可达」（不发送任何数据）。
 
@@ -1770,24 +1964,7 @@ def probe_tcp_reachable(ip: str, port: int, timeout_s: float = PATH_TCP_CHECK_TI
     Returns:
         bool: 可达为 True；任何失败为 False（不抛异常）。
     """
-    try:
-        port = int(port)
-    except (TypeError, ValueError):
-        return False
-    if not (1 <= port <= 65535):
-        return False
-    timeout = max(0.1, min(float(timeout_s or PATH_TCP_CHECK_TIMEOUT_S), 3.0))
-    try:
-        sock = socket.create_connection((str(ip), port), timeout=timeout)
-    except ConnectionRefusedError:
-        return True                                # RST：主机在，端口没开，网络可达
-    except (OSError, ValueError):
-        return False
-    try:
-        sock.close()
-    except OSError:
-        pass
-    return True
+    return probe_tcp_evidence(ip, port, timeout_s) in (TCP_OK, TCP_REFUSED)
 
 
 def check_target_port(ip: str, port: int | None = None,
@@ -1819,6 +1996,44 @@ def check_target_port(ip: str, port: int | None = None,
         except Exception:                          # noqa: BLE001  判定失败只当不可达
             continue
     return False, ports[0] if ports else None
+
+
+def target_tcp_evidence(ip: str, port: int | None = None,
+                        timeout_s: float = PATH_TCP_CHECK_TIMEOUT_S,
+                        checker: Callable[..., str] | None = None) -> str:
+    """取「同一目标的 TCP 侧证据」，用于判定 ICMP 是否被过滤。
+
+    与 :func:`check_target_port` 的区别是**保留拒绝与超时的区别**：RST（``refused``）
+    同样证明目标活着，把它并进「不可达」会让「端口没开」被判成「链路不通」。
+
+    Args:
+        ip: 目标 IPv4 字面量；空串直接返回 ``unreachable``。
+        port: 显式端口；``None`` 时按 :data:`PATH_FALLBACK_PORTS` 依次尝试，
+            任一给出 ``ok`` / ``refused`` 就用它。
+        timeout_s: 单次连接超时（秒）。
+        checker: 可注入的单端口判定函数（单测用）；省略时用
+            :func:`probe_tcp_evidence`。
+
+    Returns:
+        str: ``ok`` / ``refused`` / ``timeout`` / ``unreachable``；全部尝试失败时
+            返回最后一次尝试的证据（端口都试过仍无回应就是 ``timeout``），
+            以便调用方区分「连不上但也许只是超时」与「地址非法」。
+    """
+    if not ip:
+        return TCP_UNREACHABLE
+    probe = checker or probe_tcp_evidence
+    ports = [int(port)] if port else list(PATH_FALLBACK_PORTS)
+    last = TCP_TIMEOUT
+    for candidate in ports:
+        try:
+            got = str(probe(ip, candidate, timeout_s) or "")
+        except Exception:                          # noqa: BLE001  判定失败只当没证据
+            continue
+        if got in (TCP_OK, TCP_REFUSED):
+            return got
+        if got in (TCP_TIMEOUT, TCP_UNREACHABLE):
+            last = got
+    return last
 
 
 #: 一批探测的发送器签名：``(ip, method, probes, timeout_s, port) -> rows``。
@@ -2364,7 +2579,7 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
                 timeout_s=timeout_s, probes_sent=probes_sent,
                 ledger=dict(ledger, probes_sent=probes_sent),
                 error=tracert_note or "tracert 解析失败/不可用：没有可识别的逐跳行")
-        hops = build_hop_stats(rows, target_ip=ip)
+        hops = build_hop_stats(rows, target_ip=ip, target_port_reachable=reachable)
         # tracert 的探测包是 ICMP：判「ICMP 被过滤」时仍按 ICMP 口径走
         # summarize_path；但结果的 method 保留 tracert，报告据此标注
         # 「基于系统 tracert，样本数 3（每跳 3 次探测）」。
@@ -2373,6 +2588,8 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
             target=original, target_ip=ip, hops=hops,
             verdict_key=str(summary["verdict_key"]),
             icmp_filtered=bool(summary["icmp_filtered"]),
+            target_icmp_filtered=bool(summary.get("target_icmp_filtered")),
+            silent_ttls=tuple(int(ttl) for ttl in (summary.get("silent_ttls") or ())),
             target_port_reachable=reachable,
             ledger=dict(ledger, probes_sent=probes_sent),
             method=PATH_ENGINE_TRACERT,
@@ -2394,7 +2611,7 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
     icmp_filtered = False
     note = ""
     if not scan_error and rows:
-        hops = build_hop_stats(rows, target_ip=ip)
+        hops = build_hop_stats(rows, target_ip=ip, target_port_reachable=reachable)
         if not any(hop.rtt_n > 0 or hop.loss_pct < 100.0 for hop in hops) and reachable:
             # ICMP 全丢但目标端口 TCP 可达 → 被策略过滤，改用 TCP SYN 逐跳重扫。
             icmp_filtered = True
@@ -2424,17 +2641,22 @@ def run(target: str, port: int | None = None, max_hops: int = PATH_DEFAULT_MAX_H
                                timeout_s=timeout_s, probes_sent=probes_sent,
                                error=scan_error)
 
-    hops = build_hop_stats(rows, target_ip=ip)
+    hops = build_hop_stats(rows, target_ip=ip, target_port_reachable=reachable)
     summary = summarize_path(hops, reachable, method=method, target_ip=ip)
     # ICMP 扫描全丢、TCP 回退成功时，结论必须是「ICMP 被过滤」而不是「整条路径
     # 未观察到劣化」：TCP 有响应是**降级探测**的结果，不能反过来证明 ICMP 正常。
     # 若 TCP 路径本身也劣化，degraded_ttl / baseline 仍保留，报告两条都写。
+    target_filtered = bool(summary.get("target_icmp_filtered"))
     verdict_key = (PATH_ICMP_FILTERED if icmp_filtered
                    else str(summary["verdict_key"]))
     result = PathProbeResult(
         target=original, target_ip=ip, hops=hops,
         verdict_key=verdict_key,
-        icmp_filtered=icmp_filtered,
+        # 「整条路径全丢」与「末段全丢但 TCP 可达」都要标出来：渲染层据此
+        # 写「目标不响应 ICMP，以 TCP 指标为准」，判定层据此不判承载网。
+        icmp_filtered=bool(icmp_filtered or target_filtered),
+        target_icmp_filtered=target_filtered,
+        silent_ttls=tuple(int(ttl) for ttl in (summary.get("silent_ttls") or ())),
         target_port_reachable=reachable,
         ledger=dict(ledger, probes_sent=probes_sent, method=method),
         method=method,

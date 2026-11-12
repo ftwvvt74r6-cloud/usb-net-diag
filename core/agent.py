@@ -55,6 +55,7 @@ if str(_ROOT_DIR) not in sys.path:
 
 from core import config as config_mod  # noqa: E402
 from core import logstore  # noqa: E402
+from core import probe_reason  # noqa: E402
 from core import wlan  # noqa: E402
 from core.platform import winapi  # noqa: E402
 
@@ -182,22 +183,32 @@ def _stats(samples: Iterable[float]) -> dict:
             "min": round(min(vals), 1), "jitter": round(var ** 0.5, 1)}
 
 
-def _endpoint(method: str, *, rtt=None, loss=None, jitter=None, **extra) -> dict:
-    """构造一个「端点测量块」，四个契约字段一定在。
+def _endpoint(method: str, *, rtt=None, loss=None, jitter=None, reason: str = "",
+              **extra) -> dict:
+    """构造一个「端点测量块」，五个契约字段一定在。
 
     Args:
         method: ``icmp`` / ``tcp`` / ``none``。
         rtt: 平均 RTT 毫秒；``None`` 表示没测到。
         loss: 丢包百分比；``None`` 表示「这一项不存在」（如目标为空）。
         jitter: RTT 标准差毫秒。
+        reason: 「为什么没响应」，取值见 :mod:`core.probe_reason`
+            （``ok`` / ``icmp_filtered`` / ``refused`` / ``timeout``）。默认按
+            ``loss`` 推：有回包（``loss < 100``）→ ``ok``，否则 ``timeout``。
         **extra: 附加字段（``ip`` / ``port`` / ``ok`` / ``error`` / ``degraded``…），
             值为 ``None`` 或空串时不写入，避免样本里出现一堆 null 噪声。
 
     Returns:
-        dict: ``{"rtt_ms", "loss_pct", "jitter_ms", "method", ...}``。
+        dict: ``{"rtt_ms", "loss_pct", "jitter_ms", "method", "reason", ...}``。
     """
+    if not reason:
+        # 没有更细的证据时按「有没有回包」给一个最保守的原因：部分丢包仍是 ok
+        # （丢多少是阈值层的事），全丢才是 timeout。
+        reason = (probe_reason.REASON_OK
+                  if loss is not None and float(loss) < 100.0
+                  else probe_reason.REASON_TIMEOUT)
     out: dict[str, Any] = {"rtt_ms": rtt, "loss_pct": loss,
-                           "jitter_ms": jitter, "method": method}
+                           "jitter_ms": jitter, "method": method, "reason": reason}
     for key, value in extra.items():
         if value is None or value == "":
             continue
@@ -348,6 +359,25 @@ def measure_icmp(host: str, count: int = 2, timeout_ms: int = 800) -> dict:
     )
 
 
+def _tcp_reason(error: str) -> str:
+    """把建连失败的错误文本收敛成 ``reason``（``refused`` / ``timeout``）。
+
+    只做字符串分类，不解析平台错误码：Windows 与 Linux 的错误文本都含
+    ``refused`` / ``timed out`` 这类关键词，够用来区分「主机在但端口没开」与
+    「根本没有响应」—— 这两件事在判定层的处理完全相反。
+
+    Args:
+        error: :func:`_connect_ms` 返回的错误文本（``"ConnectionRefusedError: ..."``）。
+
+    Returns:
+        str: :data:`core.probe_reason.TCP_REFUSED` 或 ``TCP_TIMEOUT``。
+    """
+    low = str(error or "").lower()
+    if "refused" in low or "10061" in low:
+        return probe_reason.TCP_REFUSED
+    return probe_reason.TCP_TIMEOUT
+
+
 def measure_tcp(host: str, port: int, count: int = 2,
                 timeout_s: float = 1.5) -> dict:
     """连续建 ``count`` 次 TCP 连接，用建连耗时当作 RTT。
@@ -360,7 +390,8 @@ def measure_tcp(host: str, port: int, count: int = 2,
 
     Returns:
         dict: :func:`_endpoint` 结构（``method="tcp"``），另含 ``ip`` / ``port`` /
-            ``ok`` / ``error``。全部失败时 ``rtt_ms`` 为 ``None``、``loss_pct = 100.0``。
+            ``ok`` / ``error``。全部失败时 ``rtt_ms`` 为 ``None``、``loss_pct = 100.0``，
+            ``reason`` 区分 ``refused``（RST，主机在）与 ``timeout``（无响应）。
     """
     ip = resolve_ip(host) or host
     samples: list[float] = []
@@ -380,6 +411,7 @@ def measure_tcp(host: str, port: int, count: int = 2,
         rtt=st["avg"],
         loss=round(fails / tried * 100.0, 1) if tried else 100.0,
         jitter=st["jitter"],
+        reason=probe_reason.REASON_OK if samples else _tcp_reason(last_error),
         ip=ip, port=int(port), ok=bool(samples),
         error="" if samples else (last_error or "连接超时"),
     )
@@ -408,6 +440,7 @@ def probe_endpoint(key: str, host: str, port: int | None = None, *,
     """
     if not host:
         return {"key": key, **_endpoint("none", rtt=None, loss=None, jitter=None,
+                                        reason=probe_reason.REASON_TIMEOUT,
                                         error="目标为空")}
     if port:
         return {"key": key, **measure_tcp(host, port, count=count,
@@ -419,6 +452,10 @@ def probe_endpoint(key: str, host: str, port: int | None = None, *,
             if alt.get("ok"):
                 alt["degraded"] = True
                 alt["method_note"] = "icmp_blocked"
+                # ICMP 全丢但 TCP 连上了：不是丢包，是目标不理 ICMP。
+                # 这样下游（历史趋势 / 事件 / 报告）不会把 100% 丢包当真相。
+                alt["reason"] = probe_reason.REASON_ICMP_FILTERED
+                alt["icmp_loss_pct"] = out.get("loss_pct")
                 return {"key": key, **alt}
         out["tried_tcp_ports"] = list(DEGRADE_TCP_PORTS)
     return {"key": key, **out}

@@ -384,6 +384,13 @@
         li.appendChild(U.el("span", "tech-dim", U.tpl(T.probeRoleDetail, {
           sent: num(r.sent), recv: num(r.recv), loss: num(r.loss_pct, 0)
         })));
+        /* 丢包 100% 但 TCP 可达：必须就地标注，否则这一行会被读成「链路全丢」 */
+        var reason = String(r.reason || "");
+        if (reason === "icmp_filtered" || reason === "refused") {
+          li.appendChild(U.el("span", "tech-dim", U.tpl(T.probeRoleFiltered, {
+            reason: reason === "refused" ? (T.reasonRefused || "") : (T.reasonIcmpFiltered || "")
+          })));
+        }
         if (r.errors && r.errors.length) {
           li.appendChild(U.el("span", "tech-err", U.tpl(T.probeError, { reason: r.errors.join("；") })));
         }
@@ -407,7 +414,10 @@
       row.appendChild(U.el("span", "mono", h.ip || "*"));
       row.appendChild(U.el("span", "mono", (h.sent || 0) + "/" + (h.lost || 0)));
       row.appendChild(U.el("span", "mono",
-        (h.loss_pct === null || h.loss_pct === undefined) ? "—" : h.loss_pct + "%"));
+        (h.loss_pct === null || h.loss_pct === undefined) ? "—"
+          : ((h.reason === "icmp_filtered" || h.status === "filtered")
+              ? (T.hopFiltered || "—")
+              : h.loss_pct + "%")));
       row.appendChild(U.el("span", "mono",
         isFinite(Number(h.rtt_avg_ms)) ? Number(h.rtt_avg_ms).toFixed(1) + " ms" : "—"));
       tbl.appendChild(row);

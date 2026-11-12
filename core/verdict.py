@@ -23,6 +23,11 @@ try:                                    # 扁平导入：core/ 在 sys.path 上�
 except ModuleNotFoundError:             # 包导入：仓库根在 sys.path 上（tests / core.rules）
     from core.copytext import get as _copy_get
 
+try:                                    # 扁平导入：core/ 在 sys.path 上
+    from probe_reason import is_target_alive as _target_alive
+except ModuleNotFoundError:             # 包导入：仓库根在 sys.path 上
+    from core.probe_reason import is_target_alive as _target_alive
+
 #: 仓库根：copy 文案表按「仓库根在 sys.path 上」的包导入方式读取（与 analyzer 同款）。
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -602,6 +607,9 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
 
     判定顺序（阈值 :data:`PROBE_CONTRAST_LOSS_HIGH_PCT`）：
 
+    * 目标侧 ``reason`` 是 ``icmp_filtered`` / ``refused``（ICMP 全丢但 TCP 证明
+      目标活着）且网关不高 → ``PROBE.CONTRAST.ICMP_FILTERED``：**不判丢包、
+      不判承载网**，报告写明「目标不响应 ICMP，以 TCP 指标为准」；
     * 网关高 → ``PROBE.CONTRAST.LOCAL_SIDE``（本地/接入侧）；
     * 对端高 → ``PROBE.CONTRAST.TARGET_SIDE``（对端/服务侧）；
     * 两侧都高 → ``PROBE.CONTRAST.BOTH_SIDES``；
@@ -615,10 +623,11 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
     Returns:
         dict | None: ``{"code": 机器码, "confidence": <1.0,
         "gateway_loss_pct": float|None, "target_loss_pct": float|None,
-        "gateway_n": int, "target_n": int, "delta_pct": float|None}``。
+        "gateway_n": int, "target_n": int, "target_reason": str,
+        "delta_pct": float|None}``。
         ``code`` ∈ ``PROBE.CONTRAST.LOCAL_SIDE`` / ``.TARGET_SIDE`` /
-        ``.BOTH_SIDES`` / ``.INSUFFICIENT``（中文文案由 ``core/report.py`` 从 copy
-        表取，verdict 层不写中文长文案）。
+        ``.BOTH_SIDES`` / ``.INSUFFICIENT`` / ``.ICMP_FILTERED``（中文文案由
+        ``core/report.py`` 从 copy 表取，verdict 层不写中文长文案）。
     """
     baseline = meta.get("probe_baseline")
     if not isinstance(baseline, dict):
@@ -644,6 +653,12 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
     target_sent = _int(target.get("sent"))
     gateway_loss = gateway.get("loss_pct")
     target_loss = target.get("loss_pct")
+    # 「目标不回 ICMP」不是一个丢包数字，而是一个**原因**：ICMP 全丢但同一目标的
+    # TCP 握手成功（或明确被 RST），说明目标活着、只是不理 echo request。
+    # 这时 target_loss 的 100% 不能拿去做对照 —— 否则「对端侧丢包 100%」这条
+    # 结论就是把服务器侧策略当成了链路劣化（真机已复现）。
+    target_reason = str(target.get("reason") or "")
+    target_alive = _target_alive(target_reason)
     delta = (round(float(gateway_loss or 0.0) - float(target_loss or 0.0), 1)
              if gateway_loss is not None and target_loss is not None else None)
 
@@ -652,8 +667,13 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
         return loss is not None and float(loss) >= PROBE_CONTRAST_LOSS_HIGH_PCT
 
     gateway_high = _high(gateway_loss)
-    target_high = _high(target_loss)
-    if gateway_high and target_high:
+    target_high = _high(target_loss) and not target_alive
+    if target_alive and not gateway_high:
+        # 目标侧没有可用的丢包证据，但 TCP 侧给了硬证据：结论是「ICMP 被过滤」，
+        # 不是「哪一侧丢包」。confidence 给 0.5 —— 这是「解释清楚了一件事」，
+        # 而不是「两边一致地证明了链路正常」（那是 0.9）。
+        code, confidence = "PROBE.CONTRAST.ICMP_FILTERED", 0.5
+    elif gateway_high and target_high:
         # 两侧都丢：不能硬指一侧；提示结合路径剖面判断是哪一段。
         code, confidence = "PROBE.CONTRAST.BOTH_SIDES", 0.5
     elif gateway_high:
@@ -673,6 +693,7 @@ def _probe_contrast(meta: dict, net_rows: list[dict]) -> dict | None:
         "target_loss_pct": target_loss,
         "gateway_n": gateway_n,
         "target_n": target_n,
+        "target_reason": target_reason,
         "delta_pct": delta,
     }
 

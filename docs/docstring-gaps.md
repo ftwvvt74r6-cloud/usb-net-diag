@@ -3,8 +3,8 @@
 > 由 `scripts/gen_api_doc.py` 生成。**这张表就是「补注释」的待办**：
 > 一行修完就少一行，`--check` 通过就说明达标了。
 
-- 合格率：**99.5%**（383/385）
-- 模块说明：37/37
+- 合格率：**99.5%**（398/400）
+- 模块说明：39/39
 
 ## 按文件汇总
 
@@ -12,6 +12,7 @@
 |---|---|---|---|---|
 | `core/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/agent.py` | 27 | 27 | 27 | 100% |
+| `core/agent_ctl.py` | 8 | 8 | 8 | 100% |
 | `core/ai.py` | 9 | 9 | 9 | 100% |
 | `core/analyzer.py` | 3 | 3 | 3 | 100% |
 | `core/app.py` | 11 | 11 | 11 | 100% |
@@ -30,11 +31,12 @@
 | `core/history.py` | 24 | 24 | 24 | 100% |
 | `core/logstore.py` | 22 | 22 | 22 | 100% |
 | `core/passive.py` | 3 | 3 | 3 | 100% |
-| `core/pathprobe.py` | 64 | 64 | 64 | 100% |
+| `core/pathprobe.py` | 68 | 68 | 68 | 100% |
 | `core/platform/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/platform/paths.py` | 16 | 16 | 16 | 100% |
 | `core/platform/winapi.py` | 8 | 8 | 8 | 100% |
 | `core/probe.py` | 1 | 1 | 1 | 100% |
+| `core/probe_reason.py` | 3 | 3 | 3 | 100% |
 | `core/report.py` | 4 | 4 | 4 | 100% |
 | `core/rules/__init__.py` | 0 | 0 | 0 | 100% |
 | `core/rules/legacy_map.py` | 9 | 9 | 9 | 100% |

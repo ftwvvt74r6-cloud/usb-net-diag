@@ -193,6 +193,8 @@
       agentOffTitle: "采集未开启",
       agentOffBody: "本地服务还没有提供常驻采集接口，趋势与历史事件暂时没有数据。开启后会按间隔自动记录本机到监测目标的时延。",
       agentOffWhy: "当前版本未提供该接口：升级到带常驻采集的版本后再试。",
+      agentManualTitle: "未安装计划任务",
+      agentManualBody: "采集进程当前是手动启动的，重新登录后不会自动开始；点下面的按钮安装成计划任务。",
       agentErr: "最近一次错误：{reason}",
       agentIntervalFail: "采样间隔未能下发：{reason}",
 
@@ -363,6 +365,11 @@
       probe: "探针明细",
       probeRole: "{role}（{kind} → {target}）",
       probeRoleDetail: "发出 {sent} · 收到 {recv} · 丢包 {loss}%",
+      probeRoleFiltered: "（{reason}：目标不回 ICMP，不是链路丢包）",
+      reasonIcmpFiltered: "ICMP 被过滤",
+      reasonRefused: "目标拒绝（RST）",
+      reasonTimeout: "无响应",
+      hopFiltered: "被过滤",
       probeError: "错误：{reason}",
       path: "逐跳路径",
       hopCols: ["TTL", "地址", "发/丢", "丢包", "RTT"],
@@ -440,7 +447,8 @@
         "5xx": "服务端返回 5xx：请求被服务端拒绝，与链路质量无关",
         arp: "本地链路不可达：网关地址解析无响应，出网流量无法转发",
         win: "本机接收窗口耗尽：应用侧读取缓慢，链路被动丢包",
-        hop: "链路中途劣化：逐跳路径上出现丢包，应用响应随之抖动"
+        hop: "链路中途劣化：逐跳路径上出现丢包，应用响应随之抖动",
+        icmpFiltered: "目标不响应 ICMP（常见于服务器侧策略），本次以 TCP 指标为准"
       },
       stepsHeading: "处置步骤",
       stepNo: "第 {n} 步",
@@ -489,7 +497,11 @@
           partner: "建议提交运营商核查承载网",
           byKind: { icmp: "建议提交运营商核查路由与拦截策略" }
         },
-        peer: { label: "对端服务", partner: "建议对端服务方核查服务与防火墙" }
+        peer: {
+          label: "对端服务",
+          partner: "建议对端服务方核查服务与防火墙",
+          byKind: { icmpFiltered: "对端策略屏蔽了 ICMP：请对端放通或直接忽略该项" }
+        }
       },
       /* 判断依据的模板（数字会被加粗） */
       basis: {
@@ -503,7 +515,8 @@
         peer5xx: "对端返回 {n} 次 5xx",
         peerRefused: "对端主动拒绝连接",
         dnsFail: "DNS 解析失败率 {rate}%（服务器 {srv}）",
-        carrierIcmp: "收到 {n} 条 ICMP 不可达，链路中途阻断"
+        carrierIcmp: "收到 {n} 条 ICMP 不可达，链路中途阻断",
+        icmpFiltered: "ICMP 全丢但 TCP 可达：目标不响应 ICMP，不是链路丢包"
       },
       boundaryCount: "{a} 条覆盖 · {b} 项未覆盖",
       /* 没被高亮的三格也要各给一句，否则只剩标签像半成品 */
@@ -530,6 +543,12 @@
           { text: "确认受影响目标范围", act: "retest" },
           { text: "逐跳定位 ICMP 不可达来源", act: "hops" },
           { text: "将 ICMP 记录提交运营商核查", act: "copy" }
+        ],
+        /* 目标不回 ICMP（TCP 正常）：不要劝人「查丢包」，那条路上没证据 */
+        icmpFiltered: [
+          { text: "按 TCP 口径复测时延与重传", act: "retest" },
+          { text: "查看逐跳，跳过不回 ICMP 的跳", act: "hops" },
+          { text: "把「目标不回 ICMP」写进交付说明", act: "copy" }
         ],
         dns: [
           { text: "切换公共 DNS 服务器复测", act: "retest" },
@@ -617,7 +636,7 @@
       evFrames: "证据帧",
       mLossProbe: "探针",
       mLossNone: "未启用探针",
-      metricsNote: "丢包率取自探针基线；未启用探针时以重传率作为链路劣化指标。",
+      metricsNote: "丢包率取自探针基线；未启用探针时以重传率作为链路劣化指标。目标不响应 ICMP 时（探测侧已用 TCP 证明可达），丢包率只说明「目标不理 ICMP」，以 TCP 的 RTT 与重传为准。",
       stOk: "正常",
       stWarn: "关注",
       stCrit: "异常",
