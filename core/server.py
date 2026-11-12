@@ -24,6 +24,12 @@ API:
   GET  /api/history/marks   人工标记列表（?from&to）
   POST /api/history/mark    追加一条人工标记 {note}
   GET  /api/history/export  导出历史（?format=csv|md&from&to）
+  GET  /api/agent/status    常驻采集状态（装没装/在不在跑/最近一次采样/采样间隔）
+  POST /api/agent/install   安装常驻采集（创建计划任务 NetDiag Agent）
+  POST /api/agent/uninstall 卸载常驻采集（删除计划任务，幂等）
+  POST /api/agent/config    写常驻采集配置 {interval_s|targets|thresholds}（与采集同源）
+  GET  /api/monitor         监测目标与告警阈值（= config/agent.json，首页阈值线同源）
+  POST /api/monitor         写监测目标 / 阈值 {targets?, thresholds?}
   GET  /api/last-run        上次运行摘要（内存优先；进程重启后用 runs/ 历史兜底）
   GET  /api/last-run/result 上次运行的完整结果（只在内存里；没有时返回 404 JSON）
   POST /api/last-run/clear  清空内存里的上次结果（runs/ 历史记录保留）
@@ -74,6 +80,7 @@ import wlan  # noqa: E402  无线链路与主机网络参数（GET /api/wifi）
 import ai  # noqa: E402
 # H1：浏览器打开权的唯一判定（browser_disabled）与唯一打开入口（open_browser）
 # 都在 app 里；server 不再直接碰 webbrowser，避免第二套逻辑。
+import agent_ctl  # noqa: E402  常驻采集状态与监测配置（GET/POST /api/agent/*、/api/monitor）
 import app  # noqa: E402
 import bootstrap  # noqa: E402
 import conclusion  # noqa: E402
@@ -2421,6 +2428,15 @@ class Handler(BaseHTTPRequestHandler):
             # 常驻 agent 的历史样本：只读 logs/history 下的分片，不写文件、不联网。
             # 五个子接口共用一套时间解析（见 _route_history），gaps 显式下发。
             return self._route_history(parsed)
+        if path == "/api/agent/status":
+            # 设置页「常驻采集」卡：装没装 / 在不在跑 / 最近采到什么时候。
+            # 三件事都查真实系统（schtasks + logs/history 最后一行 + agent.pid），
+            # 查不到就说查不到 —— 以前界面整块写「未开启」是在猜。
+            return self._json({"ok": True, **agent_ctl.status()})
+        if path == "/api/monitor":
+            # 监测目标与阈值：直接读 config/agent.json，与采集判事件**同一份**。
+            # 首页趋势图那条阈值虚线也读这里（history.js），不许有第二份默认值。
+            return self._json({"ok": True, **agent_ctl.monitor_config()})
         if path == "/api/passive":
             return self._json(passive_status())
         if path == "/api/ai":
@@ -2549,6 +2565,48 @@ class Handler(BaseHTTPRequestHandler):
             # 列表接口里的 ``t`` 才是 epoch 秒 —— 两处的用途不同，别混。
             return self._json({"ok": True, "t": mark["t"],
                                "epoch": mark["epoch"], "mark": mark})
+        if parsed.path == "/api/agent/install":
+            # 装常驻采集 = 建计划任务（与 install-agent.bat 同一套参数：一个任务、
+            # 登录后 1 分钟、/rl limited 不弹 UAC）。失败要回原文，不能只说「失败」。
+            self._read_json()
+            res = agent_ctl.install()
+            if not res["ok"]:
+                log(f"常驻采集安装失败：{res['error']}")
+                return self._json({"ok": False, "error": res["error"]}, 500)
+            log(f"常驻采集已安装：计划任务「{agent_ctl.TASK_NAME}」，"
+                f"登录后 1 分钟开始采样")
+            return self._json({"ok": True, "status": agent_ctl.status()})
+        if parsed.path == "/api/agent/uninstall":
+            # 卸载 = 删计划任务。任务本来就不存在也算成功（界面连点两次不该报错）。
+            self._read_json()
+            res = agent_ctl.uninstall()
+            if not res["ok"]:
+                log(f"常驻采集卸载失败：{res['error']}")
+                return self._json({"ok": False, "error": res["error"]}, 500)
+            log(f"常驻采集已卸载：计划任务「{agent_ctl.TASK_NAME}」已删除")
+            return self._json({"ok": True, "status": agent_ctl.status()})
+        if parsed.path == "/api/agent/config":
+            payload = self._read_json()
+            try:
+                cfg = agent_ctl.save_config(payload)
+            except ValueError as exc:
+                # 间隔不在 5/10/30/60 里：如实回 400，绝不静默改成默认值。
+                return self._json({"ok": False, "error": str(exc)}, 400)
+            except OSError as exc:
+                return self._json({"ok": False, "error": f"写入配置失败：{exc}"}, 500)
+            log(f"常驻采集配置已更新：采样间隔 {cfg['interval_s']} 秒")
+            return self._json(cfg)
+        if parsed.path == "/api/monitor":
+            payload = self._read_json()
+            try:
+                cfg = agent_ctl.save_monitor(payload)
+            except OSError as exc:
+                return self._json({"ok": False, "error": f"写入配置失败：{exc}"}, 500)
+            thr = cfg.get("thresholds") or {}
+            log(f"监测配置已更新：{len(cfg.get('targets') or [])} 个目标，"
+                f"阈值 RTT {thr.get('rtt_ms')}ms / 抖动 {thr.get('jitter_ms')}ms / "
+                f"丢包 {thr.get('loss_pct')}%")
+            return self._json({"ok": True, **cfg})
         if parsed.path == "/api/scan":
             payload = self._read_json()
             return self._json(start_job(payload))
