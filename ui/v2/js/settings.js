@@ -262,27 +262,24 @@
            重画之后按 installed 走，按钮自然是「卸载」。 */
         var bg = currentAgentCard();
         if (bg) paintAgent(bg);
+        /* 成功提示与卡片说明区是两个状态，不许共用同一个 key：
+           共用了以后，改「还没装 / 怎么装」的说明会把成功 toast 变成小作文。 */
         U.toast(S.agentInstalled || "", "ok");
       });
     });
   }
 
-  /* 装不上时的三种原因（docs/agent.md §2.1 的分类，不是自己编的）：
-     原文里带 WinError 5 / PermissionError → 进程被执行策略拦了，加管理员也没用；
-     只带「拒绝访问」 → 只是权限不够，提权重试即可；其余按「没建起来」处理。
-     两种原因给的话不一样：说错了比不说更糟（会让人去申请一个解不开的权限）。 */
+  /* 装不上时只分两类（docs/agent.md §2.1）：原文带 WinError 5 / PermissionError
+     → 进程被安全策略拦住，连 schtasks 都起不来，提权也没用；其余 → 权限不够。
+     两类给的下一步不一样：说错了比不说更糟（会让人去申请一个解不开的权限）。 */
   function failKind(err) {
     var S = C.settings || {};
     var text = String(err || "");
-    var has = function (list) {
-      for (var i = 0; i < (list || []).length; i++) {
-        if (text.indexOf(list[i]) >= 0) return true;
-      }
-      return false;
-    };
-    if (has(S.agentFailPolicyKeys)) return "policy";
-    if (has(S.agentFailPermKeys)) return "perm";
-    return "other";
+    var keys = S.agentFailPolicyKeys || [];
+    for (var i = 0; i < keys.length; i++) {
+      if (text.indexOf(keys[i]) >= 0) return "policy";
+    }
+    return "perm";
   }
 
   /* 失败不甩原文给使用者：模态框先讲人话与下一步，技术原文折叠在下面（排障才展开）。 */
@@ -293,9 +290,8 @@
       var lb = btn.querySelector(".btn-t");
       if (lb) lb.textContent = oldLabel;
     }
-    var kind = failKind(res && res.error);
-    var say = kind === "policy" ? (S.agentFailPolicy || "")
-      : (kind === "perm" ? (S.agentFailPerm || "") : (S.agentFailOther || ""));
+    var say = failKind(res && res.error) === "policy"
+      ? (S.agentFailPolicy || "") : (S.agentFailPerm || "");
 
     var body = document.createDocumentFragment();
     body.appendChild(U.el("p", "", say));

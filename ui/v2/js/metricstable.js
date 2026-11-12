@@ -161,12 +161,17 @@
      「目标不回 ICMP」，指标表却把同一件事标成红色「异常」，同屏自相矛盾；
      导出文件里更只剩一个 100%，被转发出去就是「你这网丢了 100% 的包」。
 
-     判定完全不在这里重写：ND.verdict.icmpFiltered() 是唯一来源（读后端
-     probe_baseline.roles[].reason 与 path_profile.target_icmp_filtered）。
-     结论卡、指标表、导出文件都问同一个函数，才不会各判一次又分叉；
-     这里只负责把「这个数该怎么解释」落到这一行上。 */
+     只认后端给的两条证据：分角色探针的 reason == "icmp_filtered"，或路径剖面
+     的 target_icmp_filtered。本轮不导出 / 不复用结论卡那层判定（下一轮的事）；
+     这里只负责把「这个数该怎么解释」落到 rows() 的 mLoss 行上 —— rows() 是
+     页面、导出 md、导出 json 的唯一来源，改一处三处一致。 */
   function lossFiltered(meta) {
-    return !!(ND.verdict && ND.verdict.icmpFiltered && ND.verdict.icmpFiltered(meta));
+    var m = meta || {};
+    var roles = (m.probe_baseline || {}).roles || [];
+    for (var i = 0; i < roles.length; i++) {
+      if (String((roles[i] || {}).reason || "") === "icmp_filtered") return true;
+    }
+    return !!(m.path_profile || {}).target_icmp_filtered;
   }
 
   /* ------------------------------------------------------------ 行模型 */
@@ -326,7 +331,6 @@
     stateText: stateText,
     grade: grade,
     fmtInt: fmtInt,
-    lossFiltered: lossFiltered,
     MAX_MARKS: MAX_MARKS
   };
 })(window.ND = window.ND || {});

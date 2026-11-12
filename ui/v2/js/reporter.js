@@ -241,9 +241,15 @@
     var metrics = (ND.metrics && ND.metrics.rows) ? ND.metrics.rows(res, { budget: false }) : [];
     var l7o = (ND.metrics && ND.metrics.l7) ? ND.metrics.l7(res) : null;
     /* 页面上有 metricsNote 兜着口径，导出文件里没有：目标不回 ICMP 时，
-       导出的表后必须自己带上同一句话，否则转发出去就只剩一个 100%。 */
-    var lossNote = (ND.metrics && ND.metrics.lossFiltered && ND.metrics.lossFiltered(meta))
-      ? (RP.mLossIcmpNote || "") : "";
+       导出的表后必须自己带上同一句话，否则转发出去就只剩一个 100%。
+       补不补这句直接看 rows() 给 mLoss 行打的 flag：rows() 是页面 / 导出 md /
+       导出 json 的唯一来源，导出不再另判一次，避免两处口径分叉。 */
+    var lossNote = "";
+    metrics.forEach(function (r) {
+      if (r.key === "mLoss" && r.flag && RP.mLossIcmp && r.flag === RP.mLossIcmp) {
+        lossNote = RP.mLossIcmpNote || "";
+      }
+    });
 
     return {
       head: head,
