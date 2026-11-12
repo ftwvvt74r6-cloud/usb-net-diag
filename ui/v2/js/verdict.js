@@ -102,10 +102,36 @@
     for (var i = 0; i < (hops || []).length; i++) {
       var h = hops[i];
       if (!h) continue;
+      /* 目标不回 ICMP 的跳不能算「中途丢包」：后端已用「同一目标 TCP 可达」证明
+         这一段有去有回，把它算进来就会把服务器侧策略判成承载网故障。 */
+      if (h.reason === "icmp_filtered" || h.status === "filtered") continue;
       var loss = n(h.loss_pct);
       if (loss !== null && loss >= 5) return { ttl: n(h.ttl) || (i + 1), loss: loss };
     }
     return null;
+  }
+
+  /* 「目标不响应 ICMP」的三处证据（后端 probe_baseline / path_profile，或前端口径）：
+     任一成立就要走 icmpFiltered 分支 —— 不判丢包、不判承载网。
+     TCP 侧同时也异常时（重传高 / 连不上 / 零窗口）才允许继续按链路问题判。 */
+  var TCP_BAD_RETRANS = 5;
+  function icmpFiltered(meta) {
+    if (!meta) return false;
+    var pb = meta.probe_baseline || {};
+    var roles = pb.roles || [];
+    for (var i = 0; i < roles.length; i++) {
+      var r = roles[i];
+      if (!r) continue;
+      if (String(r.reason || "") === "icmp_filtered" || String(r.reason || "") === "refused") return true;
+    }
+    return !!(meta.path_profile || {}).target_icmp_filtered;
+  }
+
+  function tcpBad(meta) {
+    if (!meta) return false;
+    return (n(meta.retrans_rate) || 0) >= TCP_BAD_RETRANS
+      || (n(meta.conn_fail) || 0) > 0
+      || (n(meta.zero_win) || 0) >= 3;
   }
 
   /* ------------------------------------------------------------ 影响范围 */
@@ -170,6 +196,11 @@
       if (hop.ttl <= 1) return { key: "lan", why: { kind: "hop", hop: 1 } };
       return { key: "carrier", why: { kind: "hop", hop: hop.ttl, loss: hop.loss } };
     }
+    /* 目标不回 ICMP（TCP 已证明可达）：不是丢包，也不该把责任推给承载网。
+       TCP 侧同时也异常时不算 —— 那是另一条独立证据，照常往下判链路。 */
+    if (icmpFiltered(meta) && !tcpBad(meta)) {
+      return { key: "peer", why: { kind: "icmpFiltered" } };
+    }
     /* 逐跳数据缺席时的 L3：ICMP 不可达比「重传率」更能说明被谁拦了 */
     var icmpN = (n(meta.icmp_unreach) || 0) + (n(meta.icmp_timeout) || 0);
     if (id === "L3" && icmpN > 0) {
@@ -224,6 +255,7 @@
       case "dns": return tpl(B.dnsFail, { rate: numTxt(why.rate, 0), srv: why.srv || "—" });
       case "both": return tpl(B.carrierBoth, { loss: numTxt(why.loss, 1) });
       case "icmp": return tpl(B.carrierIcmp, { n: numTxt(why.n, 0) });
+      case "icmpFiltered": return B.icmpFiltered;
       default: return B.hostOk;
     }
   }
@@ -243,7 +275,11 @@
     if (kind === "ok") groups = [S.ok];
     else if (kind === "zero") groups = [S.zero];
     else if (kind === "thin") groups = [S.thin];
-    else {
+    else if (icmpFiltered(meta) && !tcpBad(meta)) {
+      /* 目标不理 ICMP 时，「复测丢包 / 提交运营商核查承载网」这套动作全是错的：
+         实测 TCP 是通的。只留「用 TCP 口径复测 + 说明对端策略」三条。 */
+      groups = [S.icmpFiltered];
+    } else {
       if ((n(meta.conn_fail) || 0) > 0 || (n(meta.conn_refused) || 0) > 0) groups.push(S.connFail);
       if ((n(meta.dns_fail_rate) || 0) >= 20 && id === "L7") groups.push(S.dns);
       if ((n(meta.http_err5) || 0) > 0 && id === "L7") groups.push(S.http);

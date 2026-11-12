@@ -795,10 +795,18 @@ def _l7_packets(st: dict) -> dict:
             ``app`` 与 ``packets``）。
 
     Returns:
-        dict: ``{"basis": "packets", "total_packets": int, "buckets": [...],
-            "complete": True}``；``buckets`` 每项 ``{"key", "packets", "pct"}``，
-            key 取 ``tls`` / ``http`` / ``other``，三者之和恒等于 ``total_packets``。
-            没有可统计报文时 ``total_packets`` 为 0、各桶 ``pct`` 为 0.0。
+        dict: 两套**同源**写法并存（老消费方不受影响，新前端只认扁平键）：
+
+        * 扁平（``ui/v2/js/metricstable.js`` 直接读这几个键）：
+          ``{"basis": "packets", "ok": bool, "tls": int, "http": int,
+          "other": int, "total": int}``；``ok`` 表示「这份分布有可统计报文」
+          （``total > 0``），没有报文时前端应回退「按会话数」而**不是**报 0%。
+        * 嵌套（R8-1 起的原始口径，报告/测试/老结果用）：
+          ``{"total_packets": int, "buckets": [...], "complete": True}``，
+          ``buckets`` 每项 ``{"key", "packets", "pct"}``，三者之和恒等于
+          ``total_packets``。
+
+        两种写法都由**同一次遍历**填出，不可能互相矛盾。
     """
     counts = {"tls": 0, "http": 0, "other": 0}
     app_to_key = dict(_L7_BUCKETS)
@@ -815,7 +823,15 @@ def _l7_packets(st: dict) -> dict:
                for _, key in _L7_BUCKETS]
     buckets.append({"key": "other", "packets": counts["other"],
                     "pct": round(_pct(counts["other"], total), 1)})
-    return {"basis": "packets", "total_packets": total,
+    return {"basis": "packets",
+            # ---- 扁平键：前端按报文数画分布只读这几个（缺一个就静默回退会话数）
+            "ok": total > 0,
+            "tls": counts["tls"],
+            "http": counts["http"],
+            "other": counts["other"],
+            "total": total,
+            # ---- 嵌套键：R8-1 的原始口径，一个字都不改
+            "total_packets": total,
             "buckets": buckets, "complete": True}
 
 

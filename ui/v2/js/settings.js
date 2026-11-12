@@ -163,9 +163,17 @@
     target.body.appendChild(head);
 
     if (state.agentAbsent || !installed) {
+      /* 三种情况必须分开写，否则同一个卡片会自相矛盾：
+         · 接口都没有（agentAbsent）—— 别猜「未安装」，只写「未开启」；
+         · 进程在跑但没装计划任务（手动 `--daemon`）—— 写「未安装计划任务」，
+           不能一边显示「运行中」一边写「采集未开启」；
+         · 没装也没跑 —— 引导安装。 */
+      var manual = running && !state.agentAbsent;
       var off = U.el("div", "set-off");
-      off.appendChild(U.el("b", "", S.agentOffTitle || ""));
-      off.appendChild(U.el("p", "", state.agentAbsent ? (S.agentOffBody || "") : (S.agentInstallHint || "")));
+      off.appendChild(U.el("b", "", manual ? (S.agentManualTitle || S.agentOffTitle || "")
+        : (S.agentOffTitle || "")));
+      off.appendChild(U.el("p", "", state.agentAbsent ? (S.agentOffBody || "")
+        : (manual ? (S.agentManualBody || S.agentInstallHint || "") : (S.agentInstallHint || ""))));
       if (state.agentAbsent) off.appendChild(U.el("p", "set-why", S.agentOffWhy || ""));
       target.body.appendChild(off);
     }
@@ -174,8 +182,8 @@
       target.body.appendChild(U.el("p", "set-why", U.tpl(S.agentErr || "{reason}", { reason: a.last_error })));
     }
 
-    /* 采样间隔：装了才有意义 */
-    if (installed && !state.agentAbsent) {
+    /* 采样间隔：装上计划任务或已经有进程在跑时才有意义（改完下一轮生效） */
+    if (!state.agentAbsent && (installed || running)) {
       var row = U.el("div", "set-row");
       var f = U.el("div", "field");
       f.appendChild(U.el("label", "", S.agentInterval || ""));

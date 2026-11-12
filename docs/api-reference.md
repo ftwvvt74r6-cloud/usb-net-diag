@@ -7,8 +7,8 @@
 > tools\python\python.exe scripts\gen_api_doc.py
 > ```
 
-- 扫描模块：**37** 个（有模块说明 37 个）
-- 公开符号：**385** 个（有 docstring 385 个，合格 383 个）
+- 扫描模块：**39** 个（有模块说明 39 个）
+- 公开符号：**400** 个（有 docstring 400 个，合格 398 个）
 - 合格率：**99.5%**（目标 ≥ 95%，见 `docs/api-style.md`）
 
 阅读顺序建议：先看 `docs/overview.md`（一页看懂项目）→ 本文件的「按模块」→ 具体源码。
@@ -27,33 +27,33 @@ _（无公开符号）_
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `history_dir` | function | 210 | ✅ |
-| `day_file` | function | 219 | ✅ |
-| `events_path` | function | 231 | ✅ |
-| `marks_path` | function | 240 | ✅ |
-| `resolve_ip` | function | 251 | ✅ |
-| `measure_icmp` | function | 321 | ✅ |
-| `measure_tcp` | function | 351 | ✅ |
-| `probe_endpoint` | function | 388 | ✅ |
-| `wlan_block` | function | 427 | ✅ |
-| `collect_sample` | function | 466 | ✅ |
-| `EventTracker` | class | 520 | ✅ |
-| `EventTracker.reset` | method | 548 | ✅ |
-| `EventTracker.observe` | method | 565 | ✅ |
-| `append_record` | function | 632 | ✅ |
-| `append_event` | function | 664 | ✅ |
-| `prune_history` | function | 683 | ✅ |
-| `prune_events` | function | 720 | ✅ |
-| `WarnGate` | class | 773 | ✅ |
-| `WarnGate.warn` | method | 795 | ✅ |
-| `instance_path` | function | 819 | ✅ |
-| `acquire_instance` | function | 861 | ✅ |
-| `release_instance` | function | 893 | ✅ |
-| `Agent` | class | 931 | ✅ |
-| `Agent.cycle` | method | 970 | ✅ |
-| `Agent.run` | method | 1006 | ✅ |
-| `build_agent` | function | 1061 | ✅ |
-| `main` | function | 1140 | ✅ |
+| `history_dir` | function | 221 | ✅ |
+| `day_file` | function | 230 | ✅ |
+| `events_path` | function | 242 | ✅ |
+| `marks_path` | function | 251 | ✅ |
+| `resolve_ip` | function | 262 | ✅ |
+| `measure_icmp` | function | 332 | ✅ |
+| `measure_tcp` | function | 381 | ✅ |
+| `probe_endpoint` | function | 420 | ✅ |
+| `wlan_block` | function | 464 | ✅ |
+| `collect_sample` | function | 503 | ✅ |
+| `EventTracker` | class | 557 | ✅ |
+| `EventTracker.reset` | method | 585 | ✅ |
+| `EventTracker.observe` | method | 602 | ✅ |
+| `append_record` | function | 669 | ✅ |
+| `append_event` | function | 701 | ✅ |
+| `prune_history` | function | 720 | ✅ |
+| `prune_events` | function | 757 | ✅ |
+| `WarnGate` | class | 810 | ✅ |
+| `WarnGate.warn` | method | 832 | ✅ |
+| `instance_path` | function | 856 | ✅ |
+| `acquire_instance` | function | 898 | ✅ |
+| `release_instance` | function | 930 | ✅ |
+| `Agent` | class | 968 | ✅ |
+| `Agent.cycle` | method | 1007 | ✅ |
+| `Agent.run` | method | 1043 | ✅ |
+| `build_agent` | function | 1098 | ✅ |
+| `main` | function | 1177 | ✅ |
 
 ### `history_dir`
 
@@ -172,7 +172,8 @@ Args:
 
 Returns:
     dict: :func:`_endpoint` 结构（``method="tcp"``），另含 ``ip`` / ``port`` /
-        ``ok`` / ``error``。全部失败时 ``rtt_ms`` 为 ``None``、``loss_pct = 100.0``。
+        ``ok`` / ``error``。全部失败时 ``rtt_ms`` 为 ``None``、``loss_pct = 100.0``，
+        ``reason`` 区分 ``refused``（RST，主机在）与 ``timeout``（无响应）。
 ```
 
 ### `probe_endpoint`
@@ -538,6 +539,186 @@ Returns:
     int: 退出码。0 正常；2 参数错误；1 写配置失败。
 ```
 
+## `core/agent_ctl.py`
+
+**职责**：常驻采集的「装没装 / 在不在跑 / 最近采到什么时候」与监测配置的**唯一出口**。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `query_task` | function | 122 | ✅ |
+| `install` | function | 163 | ✅ |
+| `uninstall` | function | 179 | ✅ |
+| `last_sample` | function | 243 | ✅ |
+| `status` | function | 356 | ✅ |
+| `monitor_config` | function | 407 | ✅ |
+| `save_monitor` | function | 421 | ✅ |
+| `save_config` | function | 443 | ✅ |
+
+### `query_task`
+
+```python
+def query_task(runner: Callable[[list[str]], tuple[int, str]] | None=None) -> dict
+```
+
+```text
+查询计划任务是否安装、是否在跑。
+
+Args:
+    runner: 命令执行器（测试注入）；省略时真的调 ``schtasks``。
+
+Returns:
+    dict: ``{"installed": bool, "running": bool, "state": str,
+    "last_error": str}``；``state`` ∈ ``running`` / ``stopped`` / ``error``。
+    查询失败（命令不存在等）按「未安装」处理，原因写进 ``last_error``。
+```
+
+### `install`
+
+```python
+def install(runner: Callable[[list[str]], tuple[int, str]] | None=None) -> dict
+```
+
+```text
+安装常驻采集（创建计划任务）。
+
+Args:
+    runner: 命令执行器（测试注入）。
+
+Returns:
+    dict: ``{"ok": bool, "error": str}``；``ok=False`` 时 ``error`` 是
+        ``schtasks`` 的原文片段（给人看的失败原因，不吞掉）。
+```
+
+### `uninstall`
+
+```python
+def uninstall(runner: Callable[[list[str]], tuple[int, str]] | None=None) -> dict
+```
+
+```text
+卸载常驻采集（删除计划任务）。已运行中的 agent 会在注销后停止。
+
+Args:
+    runner: 命令执行器（测试注入）。
+
+Returns:
+    dict: ``{"ok": bool, "error": str}``；任务本来就不存在也算成功
+        （幂等：界面连点两次不该报错）。
+```
+
+### `last_sample`
+
+```python
+def last_sample(directory: pathlib.Path | None=None, today: dt.date | None=None) -> dict
+```
+
+```text
+取「最近一次采样」的时间、文件与大小，以及今天一共采了多少条。
+
+读取**最后一行**而不是文件 mtime：文件可能刚被打开还没写完，mtime 给不出
+「最后一次真的采到数据」是什么时候（那是 P0-2 要回答的问题本身）。
+
+Args:
+    directory: 覆盖历史目录（测试用）；省略时用 :func:`_history_dir`。
+    today: 覆盖「今天」的判定（测试用，跨日边界不必等真到零点）。
+
+Returns:
+    dict: ``{"last_sample_at": str, "last_sample_epoch": float|None,
+    "history_file": str, "history_file_bytes": int, "samples_today": int}``。
+    没有任何样本时时间与 epoch 为空串 / ``None``，文件为 ``""``、大小为 0
+    —— **不写「0 秒前」**，没有样本就是没有样本。
+
+    ``samples_today`` 是**今天所有分片**的有效行数（滚动后不止一个文件），
+    与首页趋势图同一区间的样本数是同一个口径。
+```
+
+### `status`
+
+```python
+def status(runner: Callable[[list[str]], tuple[int, str]] | None=None, directory: pathlib.Path | None=None, now: float | None=None, today: dt.date | None=None) -> dict
+```
+
+```text
+设置页要的完整状态（界面字段与采集配置**同源**）。
+
+``running`` 的口径是「**计划任务在跑** 或 **单实例锁里的 PID 还活着**」：
+只看任务状态会在「刚手动启动、还没被任务拉起」时误报未运行；只看 PID 会在
+「任务已装好、agent 刚崩、PID 残留」时误报运行 —— 两个都看才不会被单点骗。
+
+Args:
+    runner: 命令执行器（测试注入）。
+    directory: 覆盖历史目录（测试用）。
+    now: 当前 epoch 秒（测试注入，供 ``stale_s`` 计算）。
+    today: 覆盖「今天」的判定（测试注入，跨日边界不必等真到零点）。
+
+Returns:
+    dict: ``{"installed", "running", "state", "last_error", "interval_s",
+    "targets", "thresholds", "last_sample_at", "last_sample_epoch",
+    "history_file", "history_file_bytes", "samples_today", "stale_s"}``。
+    ``stale_s`` 是「距上次采样多少秒」；没有样本时为 ``None``（界面显示「未采到」）。
+```
+
+### `monitor_config`
+
+```python
+def monitor_config() -> dict
+```
+
+```text
+监测目标与告警阈值（``/api/monitor`` GET）。
+
+Returns:
+    dict: ``{"targets": [{"key", "host", "port"?}], "thresholds":
+    {"rtt_ms", "jitter_ms", "loss_pct"}}``。与采集侧同源，**不留第二份默认值**：
+    界面上的阈值线就是 agent 判事件用的那条线。
+```
+
+### `save_monitor`
+
+```python
+def save_monitor(patch: Mapping[str, Any] | None) -> dict
+```
+
+```text
+写入监测目标 / 阈值（``/api/monitor`` POST）。
+
+只接受 ``targets`` 与 ``thresholds`` 两个键（其余忽略，避免前端写脏配置）。
+
+Args:
+    patch: ``{"targets": [...]}`` 与/或 ``{"thresholds": {...}}``。
+
+Returns:
+    dict: 与 :func:`monitor_config` 同构的**写回后**配置。
+
+Raises:
+    OSError: 配置文件不可写。
+```
+
+### `save_config`
+
+```python
+def save_config(patch: Mapping[str, Any] | None) -> dict
+```
+
+```text
+写入常驻采集自身的配置（``POST /api/agent/config``）。
+
+设置页只发 ``{"interval_s": 30}``，但同一个入口也允许带 ``targets`` /
+``thresholds`` —— 与 ``/api/monitor`` 是**同一份** ``config/agent.json``，
+不存在「界面一个值、采集另一个值」。
+
+Args:
+    patch: ``{"interval_s"?, "targets"?, "thresholds"?}``；其余键忽略。
+
+Returns:
+    dict: ``{"ok": True, "interval_s", "targets", "thresholds"}``（写回后的值）。
+
+Raises:
+    ValueError: 间隔不在 5/10/30/60 里（**不静默改成默认值**：
+        「我改成 7 却还是 10」比报错更难查）。
+    OSError: 配置文件不可写。
+```
+
 ## `core/ai.py`
 
 **职责**：AI 模型服务：配置持久化 + OpenAI 兼容协议调用。
@@ -725,8 +906,8 @@ Raises:
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
 | `collect` | function | 412 | ✅ |
-| `build_findings` | function | 985 | ✅ |
-| `analyze` | function | 1474 | ✅ |
+| `build_findings` | function | 1001 | ✅ |
+| `analyze` | function | 1490 | ✅ |
 
 ### `collect`
 
@@ -2477,14 +2658,14 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `load_config` | function | 52 | ✅ |
-| `log` | function | 115 | ✅ |
-| `capture_filter_for` | function | 221 | ✅ |
-| `bpf_for` | function | 307 | ✅ |
-| `capture_live` | function | 605 | ✅ |
-| `degraded_empty_capture_result` | function | 880 | ✅ |
-| `run_scan` | function | 1057 | ✅ |
-| `main` | function | 1582 | ✅ |
+| `load_config` | function | 53 | ✅ |
+| `log` | function | 116 | ✅ |
+| `capture_filter_for` | function | 222 | ✅ |
+| `bpf_for` | function | 308 | ✅ |
+| `capture_live` | function | 658 | ✅ |
+| `degraded_empty_capture_result` | function | 933 | ✅ |
+| `run_scan` | function | 1110 | ✅ |
+| `main` | function | 1647 | ✅ |
 
 ### `load_config`
 
@@ -4122,70 +4303,74 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `scapy_available` | function | 158 | ✅ |
-| `tracert_available` | function | 185 | ✅ |
-| `ProbeKind` | class | 201 | ✅ |
-| `HopStatus` | class | 209 | ✅ |
-| `ProbeSpec` | class | 232 | ✅ |
-| `ProbeSpec.to_dict` | method | 258 | ✅ |
-| `ProbeRecord` | class | 283 | ✅ |
-| `ProbeRecord.to_dict` | method | 307 | ✅ |
-| `ProbeLedger` | class | 328 | ✅ |
-| `ProbeLedger.ports` | method | 344 | ✅ |
-| `ProbeLedger.targets` | method | 352 | ✅ |
-| `ProbeLedger.kinds` | method | 360 | ✅ |
-| `ProbeLedger.has_icmp` | method | 368 | ✅ |
-| `ProbeLedger.exclusion_bpf` | method | 376 | ✅ |
-| `ProbeLedger.exclusion_display_filter` | method | 395 | ✅ |
-| `ProbeLedger.window` | method | 403 | ✅ |
-| `ProbeLedger.baseline` | method | 411 | ✅ |
-| `ProbeLedger.to_dict` | method | 439 | ✅ |
-| `HopStat` | class | 462 | ✅ |
-| `HopStat.loss_pct` | method | 482 | ✅ |
-| `HopStat.to_dict` | method | 491 | ✅ |
-| `PathProbeResult` | class | 516 | ✅ |
-| `PathProbeResult.to_dict` | method | 552 | ✅ |
-| `classify` | function | 592 | ✅ |
-| `clamp_path_options` | function | 641 | ✅ |
-| `build_hop_stats` | function | 772 | ✅ |
-| `degraded_hops` | function | 850 | ✅ |
-| `first_degraded_hop` | function | 869 | ✅ |
-| `looks_like_tun` | function | 891 | ✅ |
-| `summarize_path` | function | 938 | ✅ |
-| `exclusion_bpf` | function | 1037 | ✅ |
-| `exclusion_display_filter` | function | 1061 | ✅ |
-| `probe_marker_display_filter` | function | 1082 | ✅ |
-| `path_exclusion_display_filter` | function | 1113 | ✅ |
-| `discover_targets` | function | 1192 | ✅ |
-| `plan` | function | 1257 | ✅ |
-| `shadow_specs` | function | 1283 | ✅ |
-| `rounds_for` | function | 1304 | ✅ |
-| `probe_len` | function | 1321 | ✅ |
-| `probe_src_port` | function | 1333 | ✅ |
-| `send_probe` | function | 1350 | ✅ |
-| `ShadowProber` | class | 1427 | ✅ |
-| `ShadowProber.start` | method | 1454 | ✅ |
-| `ShadowProber.stop` | method | 1464 | ✅ |
-| `ShadowProber.join` | method | 1468 | ✅ |
-| `ShadowProber.run_round` | method | 1483 | ✅ |
-| `ShadowProber.exclusion_bpf` | method | 1527 | ✅ |
-| `ShadowProber.exclusion_display_filter` | method | 1536 | ✅ |
-| `ShadowProber.marker_display_filter` | method | 1545 | ✅ |
-| `ShadowProber.sent_count` | method | 1555 | ✅ |
-| `ShadowProber.snapshot` | method | 1564 | ✅ |
-| `aggregate_records` | function | 1585 | ✅ |
-| `count_marked_packets` | function | 1655 | ✅ |
-| `count_time_exceeded_packets` | function | 1690 | ✅ |
-| `probe_tcp_reachable` | function | 1758 | ✅ |
-| `check_target_port` | function | 1793 | ✅ |
-| `path_engine_log_line` | function | 2219 | ✅ |
-| `run` | function | 2249 | ✅ |
-| `PathProfiler` | class | 2457 | ✅ |
-| `PathProfiler.start` | method | 2494 | ✅ |
-| `PathProfiler.stop` | method | 2505 | ✅ |
-| `PathProfiler.join` | method | 2509 | ✅ |
-| `PathProfiler.should_stop` | method | 2524 | ✅ |
-| `PathProfiler.snapshot` | method | 2549 | ✅ |
+| `scapy_available` | function | 183 | ✅ |
+| `tracert_available` | function | 210 | ✅ |
+| `ProbeKind` | class | 226 | ✅ |
+| `HopStatus` | class | 234 | ✅ |
+| `ProbeSpec` | class | 257 | ✅ |
+| `ProbeSpec.to_dict` | method | 283 | ✅ |
+| `ProbeRecord` | class | 308 | ✅ |
+| `ProbeRecord.to_dict` | method | 332 | ✅ |
+| `ProbeLedger` | class | 353 | ✅ |
+| `ProbeLedger.ports` | method | 369 | ✅ |
+| `ProbeLedger.targets` | method | 377 | ✅ |
+| `ProbeLedger.kinds` | method | 385 | ✅ |
+| `ProbeLedger.has_icmp` | method | 393 | ✅ |
+| `ProbeLedger.exclusion_bpf` | method | 401 | ✅ |
+| `ProbeLedger.exclusion_display_filter` | method | 420 | ✅ |
+| `ProbeLedger.window` | method | 428 | ✅ |
+| `ProbeLedger.baseline` | method | 436 | ✅ |
+| `ProbeLedger.to_dict` | method | 464 | ✅ |
+| `HopStat` | class | 487 | ✅ |
+| `HopStat.filtered` | method | 512 | ✅ |
+| `HopStat.loss_pct` | method | 521 | ✅ |
+| `HopStat.to_dict` | method | 530 | ✅ |
+| `PathProbeResult` | class | 556 | ✅ |
+| `PathProbeResult.to_dict` | method | 594 | ✅ |
+| `classify` | function | 636 | ✅ |
+| `clamp_path_options` | function | 685 | ✅ |
+| `build_hop_stats` | function | 841 | ✅ |
+| `degraded_hops` | function | 931 | ✅ |
+| `first_degraded_hop` | function | 950 | ✅ |
+| `looks_like_tun` | function | 972 | ✅ |
+| `summarize_path` | function | 1019 | ✅ |
+| `exclusion_bpf` | function | 1133 | ✅ |
+| `exclusion_display_filter` | function | 1157 | ✅ |
+| `probe_marker_display_filter` | function | 1178 | ✅ |
+| `path_exclusion_display_filter` | function | 1209 | ✅ |
+| `discover_targets` | function | 1288 | ✅ |
+| `plan` | function | 1353 | ✅ |
+| `shadow_specs` | function | 1379 | ✅ |
+| `rounds_for` | function | 1400 | ✅ |
+| `probe_len` | function | 1417 | ✅ |
+| `probe_src_port` | function | 1429 | ✅ |
+| `send_probe` | function | 1446 | ✅ |
+| `ShadowProber` | class | 1523 | ✅ |
+| `ShadowProber.start` | method | 1550 | ✅ |
+| `ShadowProber.stop` | method | 1560 | ✅ |
+| `ShadowProber.join` | method | 1564 | ✅ |
+| `ShadowProber.run_round` | method | 1579 | ✅ |
+| `ShadowProber.exclusion_bpf` | method | 1623 | ✅ |
+| `ShadowProber.exclusion_display_filter` | method | 1632 | ✅ |
+| `ShadowProber.marker_display_filter` | method | 1641 | ✅ |
+| `ShadowProber.sent_count` | method | 1651 | ✅ |
+| `ShadowProber.snapshot` | method | 1660 | ✅ |
+| `aggregate_records` | function | 1681 | ✅ |
+| `apply_tcp_evidence` | function | 1751 | ✅ |
+| `count_marked_packets` | function | 1802 | ✅ |
+| `count_time_exceeded_packets` | function | 1837 | ✅ |
+| `probe_tcp_evidence` | function | 1905 | ✅ |
+| `probe_tcp_reachable` | function | 1952 | ✅ |
+| `check_target_port` | function | 1970 | ✅ |
+| `target_tcp_evidence` | function | 2001 | ✅ |
+| `path_engine_log_line` | function | 2434 | ✅ |
+| `run` | function | 2464 | ✅ |
+| `PathProfiler` | class | 2679 | ✅ |
+| `PathProfiler.start` | method | 2716 | ✅ |
+| `PathProfiler.stop` | method | 2727 | ✅ |
+| `PathProfiler.join` | method | 2731 | ✅ |
+| `PathProfiler.should_stop` | method | 2746 | ✅ |
+| `PathProfiler.snapshot` | method | 2771 | ✅ |
 
 ### `scapy_available`
 
@@ -4491,6 +4676,24 @@ class HopStat
 ``sent`` / ``lost`` 表达「有没有样本」（``sent=0`` = 这一跳根本没探），
 ``rtt_n`` 表达「有没有 RTT 样本」（回了包但拿不到时间戳时为 0）；
 RTT 三个值 + 抖动在 ``rtt_n=0`` 时是 ``None``，**不许用 0.0 冒充**。
+
+``reason`` 说明「这一跳为什么没有响应」（:mod:`core.probe_reason` 的取值域）：
+``ok`` 有响应；``timeout`` 发了没回；``icmp_filtered`` **目标跳**没回 ICMP、
+但同一目标的 TCP 探测证明它活着 —— 这类跳的 100% 丢包**不是**链路丢包证据。
+```
+
+### `HopStat.filtered`  (method)
+
+```python
+@property
+def filtered(self) -> bool
+```
+
+```text
+这一跳的「全丢」是否已被证明**不是**丢包（目标不理 ICMP）。
+
+Returns:
+    bool: ``reason == "icmp_filtered"`` 时为 True。
 ```
 
 ### `HopStat.loss_pct`  (method)
@@ -4520,8 +4723,8 @@ def to_dict(self) -> dict
 Returns:
     dict: 键 ``ttl``/``ip``/``sent``/``lost``/``loss_pct``/
         ``rtt_min_ms``/``rtt_avg_ms``/``rtt_max_ms``/``jitter_ms``/
-        ``rtt_n``/``status``（机器码）；没有 RTT 样本时三个 RTT 与抖动
-        都是 ``None``。
+        ``rtt_n``/``status``（机器码）/``reason``（为什么没响应）；
+        没有 RTT 样本时三个 RTT 与抖动都是 ``None``。
 ```
 
 ### `PathProbeResult`  (class)
@@ -4621,7 +4824,7 @@ Example:
 ### `build_hop_stats`
 
 ```python
-def build_hop_stats(rows: Iterable[Mapping], target_ip: str='') -> tuple[HopStat, ...]
+def build_hop_stats(rows: Iterable[Mapping], target_ip: str='', target_port_reachable: bool | None=None) -> tuple[HopStat, ...]
 ```
 
 ```text
@@ -4635,6 +4838,9 @@ Args:
     target_ip: 目标 IP 字面量；给了才知道哪一跳是目标跳，从而按 R5 的
         「劣化必须持续到目标/最后响应跳」赋值状态。省略时按最后一个有响应
         的跳作为终点（单跳 / 直调场景）。
+    target_port_reachable: 目标端口 TCP 是否可达。``True`` 时**末尾的全丢跳**
+        会被判成「目标不理 ICMP」而不是「丢包」（``reason=icmp_filtered``、
+        ``status=filtered``）；``None`` / ``False`` 保持原判定。
 
 Returns:
     tuple[HopStat, ...]: 按 TTL 升序的逐跳统计。``sent`` 是该 TTL 的采样数，
@@ -4642,9 +4848,10 @@ Returns:
     ``rtt_n`` 是真正拿到 RTT 的样本数，``rtt_min_ms``/``rtt_avg_ms``/
     ``rtt_max_ms``/``jitter_ms`` 在 ``rtt_n=0`` 时是 ``None``；
     ``jitter_ms`` 用总体标准差（与 :func:`aggregate_records` 口径一致）。
-    ``status`` 与劣化判定同源：没有任何样本 → ``LOSS``；**异常持续到终点**
-    → ``DEGRADED``（全丢仍保留 ``LOSS``）；异常被后续正常跳/目标打断
-    → ``RATE_LIMITED``；其余 ``OK``。
+    ``status`` 与劣化判定同源：被 TCP 证据证明不是丢包的全丢跳 → ``FILTERED``；
+    没有任何样本 → ``LOSS``；**异常持续到终点** → ``DEGRADED``（全丢仍保留
+    ``LOSS``）；异常被后续正常跳/目标打断 → ``RATE_LIMITED``；其余 ``OK``。
+    ``reason`` 说明「为什么没响应」，取值域见 :mod:`core.probe_reason`。
 
 Example:
     >>> [h.ttl for h in build_hop_stats([{"ttl": 2}, {"ttl": 1}])]
@@ -4762,7 +4969,9 @@ Returns:
         ``degraded_ttl``（持续劣化段第一跳，无则 ``None``）/``baseline_ms``
         （基线平均 RTT，无样本 ``None``）/``icmp_filtered``/``unreachable``/
         ``reached_target``/``tun_suspected``/``middle_loss_suspected``（是否有
-        「未持续到终点」的中间跳异常）/``middle_loss_ttls``（这些跳的 TTL 列表）。
+        「未持续到终点」的中间跳异常）/``middle_loss_ttls``（这些跳的 TTL 列表）/
+        ``target_icmp_filtered``（末段全丢但 TCP 可达 → 目标不理 ICMP，不是丢包）/
+        ``silent_ttls``（被判成「沉默」的全丢跳 TTL）。
         没有样本时恒为 ``PATH.NO_DATA``，绝不返回 ``PATH.OK``。
 
 Example:
@@ -5142,10 +5351,40 @@ Args:
 Returns:
     list[dict]: 每个角色/目标一组，键 ``role``/``kind``/``target``/``sent``/
         ``recv``/``timeout``/``loss_pct``/``n``/``rtt_min_ms``/``rtt_avg_ms``/
-        ``rtt_max_ms``/``jitter_ms``/``errors``。``timeout = sent - recv`` 是
-        **模块自记**的超时数（与 ``loss_pct`` 同源）。**没有 RTT 样本时**
-        ``n=0`` 且 ``rtt_*`` 为 ``None``（不是 0.0）；``loss_pct`` 只在
-        ``sent=0`` 时为 ``None``。分组按网关 → DNS → 业务目标排序。
+        ``rtt_max_ms``/``jitter_ms``/``errors``/``reason``。``timeout =
+        sent - recv`` 是**模块自记**的超时数（与 ``loss_pct`` 同源）。
+        **没有 RTT 样本时** ``n=0`` 且 ``rtt_*`` 为 ``None``（不是 0.0）；
+        ``loss_pct`` 只在 ``sent=0`` 时为 ``None``。分组按网关 → DNS →
+        业务目标排序。``reason`` 是「为什么没响应」的初判（见
+        :mod:`core.probe_reason`）：只有 ICMP 收发信息时，全丢只能是
+        ``timeout``；同一目标的 TCP 证据由 :func:`apply_tcp_evidence` 补进来
+        后才可能变成 ``icmp_filtered`` / ``refused``。
+```
+
+### `apply_tcp_evidence`
+
+```python
+def apply_tcp_evidence(baseline: Mapping, evidence: TcpEvidence | None) -> dict
+```
+
+```text
+把「同一目标的 TCP 侧证据」并入探针基线，重算每个角色的 ``reason``。
+
+ICMP 一个包都没回，**不代表目标不可达**：公网服务器与云安全组常常直接丢弃
+echo request。判定「被过滤」需要一条独立的、能证明「包能到对端也能回来」的
+证据 —— 同一目标的 TCP 握手。本函数就是把这条证据贴到基线上的唯一入口。
+
+纯函数：不改入参，返回深一层的拷贝；``evidence`` 为空时只补齐 ``reason``
+（旧载荷 / 测试构的数据可能没有该键）。
+
+Args:
+    baseline: :meth:`ProbeLedger.baseline` 的产物（含 ``roles``）。
+    evidence: 角色 → TCP 证据（``ok`` / ``refused`` / ``timeout`` /
+        ``unreachable``，取值见 :data:`core.probe_reason.TCP_EVIDENCES`）。
+
+Returns:
+    dict: 新的基线；每个 role 项的 ``reason`` 已按「ICMP 收发 + TCP 证据」
+        重算。原对象不被修改（调用方可能还持有快照）。
 ```
 
 ### `count_marked_packets`
@@ -5198,6 +5437,32 @@ Returns:
         （统计失败不改变诊断结论）。
 ```
 
+### `probe_tcp_evidence`
+
+```python
+def probe_tcp_evidence(ip: str, port: int, timeout_s: float=PATH_TCP_CHECK_TIMEOUT_S) -> str
+```
+
+```text
+用一次普通 TCP 连接取「TCP 侧证据」（不发送任何数据）。
+
+**为什么要分三态**：「连不上」有两种，处置方式相反 ——
+
+* ``ok``（SYN-ACK）：主机在、端口在听 → 目标活着；
+* ``refused``（RST）：主机在、端口没开 → 目标也活着（这条路上有去有回），
+  只是服务没起；把它和超时混成「不可达」，就会把「服务没开」判成「链路丢了」；
+* ``timeout`` / ``unreachable``：连 SYN-ACK 也没有、也没有 RST —— 可能真的不通。
+
+Args:
+    ip: 目标 IPv4 字面量。
+    port: 目标端口。
+    timeout_s: 单次连接超时（秒），夹到 0.1~3.0。
+
+Returns:
+    str: ``ok`` / ``refused`` / ``timeout`` / ``unreachable``，取值见
+        :data:`core.probe_reason.TCP_EVIDENCES`。**不抛异常**。
+```
+
 ### `probe_tcp_reachable`
 
 ```python
@@ -5240,6 +5505,32 @@ Returns:
     tuple[bool | None, int | None]: ``(reachable, port)``。``reachable`` 为
         ``None`` 表示根本没测（ip 为空）；``port`` 是实际测的那个端口
         （显式给的，或第一个可达的；都不可达时是第一个试的端口）。
+```
+
+### `target_tcp_evidence`
+
+```python
+def target_tcp_evidence(ip: str, port: int | None=None, timeout_s: float=PATH_TCP_CHECK_TIMEOUT_S, checker: Callable[..., str] | None=None) -> str
+```
+
+```text
+取「同一目标的 TCP 侧证据」，用于判定 ICMP 是否被过滤。
+
+与 :func:`check_target_port` 的区别是**保留拒绝与超时的区别**：RST（``refused``）
+同样证明目标活着，把它并进「不可达」会让「端口没开」被判成「链路不通」。
+
+Args:
+    ip: 目标 IPv4 字面量；空串直接返回 ``unreachable``。
+    port: 显式端口；``None`` 时按 :data:`PATH_FALLBACK_PORTS` 依次尝试，
+        任一给出 ``ok`` / ``refused`` 就用它。
+    timeout_s: 单次连接超时（秒）。
+    checker: 可注入的单端口判定函数（单测用）；省略时用
+        :func:`probe_tcp_evidence`。
+
+Returns:
+    str: ``ok`` / ``refused`` / ``timeout`` / ``unreachable``；全部尝试失败时
+        返回最后一次尝试的证据（端口都试过仍无回应就是 ``timeout``），
+        以便调用方区分「连不上但也许只是超时」与「地址非法」。
 ```
 
 ### `path_engine_log_line`
@@ -5893,16 +6184,111 @@ Returns:
         失败 ``{"ok": False, "error": "..."}``（目标非法、DNS 失败、连接不通）。
 ```
 
+## `core/probe_reason.py`
+
+**职责**：探测结果「为什么没响应」的唯一判定器（纯逻辑，不发包、不读配置）。
+
+| 符号 | 类型 | 行 | docstring |
+|---|---|---|---|
+| `normalize` | function | 66 | ✅ |
+| `is_target_alive` | function | 89 | ✅ |
+| `endpoint_reason` | function | 107 | ✅ |
+
+### `normalize`
+
+```python
+def normalize(reason: str) -> str
+```
+
+```text
+把任意输入收敛成 :data:`PROBE_REASONS` 里的一个值。
+
+旧报告 / 第三方写入的数据可能没有 ``reason``，也可能写了别的字符串。
+判定层不能因为一个陌生字符串就崩掉或静默当成 ``ok``，统一收敛到
+``timeout``（最保守：既不宣称正常，也不宣称被过滤）。
+
+Args:
+    reason: 任意原因串（可能为空、``None``、大小写混乱）。
+
+Returns:
+    str: :data:`PROBE_REASONS` 中的一个；无法识别时为 :data:`REASON_TIMEOUT`。
+
+Example:
+    >>> normalize("OK")
+    'ok'
+    >>> normalize("whatever")
+    'timeout'
+```
+
+### `is_target_alive`
+
+```python
+def is_target_alive(reason: str) -> bool
+```
+
+```text
+该原因是否意味着「目标其实活着，只是 ICMP 没回」。
+
+Args:
+    reason: ``reason`` 字段（任意值，内部先 :func:`normalize`）。
+
+Returns:
+    bool: ``icmp_filtered`` / ``refused`` 为 True；``ok`` / ``timeout`` 为 False。
+
+Example:
+    >>> is_target_alive("icmp_filtered")
+    True
+    >>> is_target_alive("timeout")
+    False
+```
+
+### `endpoint_reason`
+
+```python
+def endpoint_reason(*, icmp_sent: int=0, icmp_recv: int=0, tcp: str='') -> str
+```
+
+```text
+按「ICMP 收发 + TCP 证据」定一个原因。
+
+判定顺序（先看 ICMP 有没有回，再看 TCP 能不能证明目标活着）：
+
+1. ``icmp_sent <= 0``：本次没发 ICMP（只探 TCP 的端点）→ 直接按 ``tcp`` 定；
+2. ``icmp_recv > 0``：有回应 → ``ok``（**部分丢包仍是 ok**，丢多少交给阈值层）；
+3. ICMP 一个都没回：TCP 连上 → ``icmp_filtered``；TCP 被 RST → ``refused``；
+   其余（超时 / 不可达 / 没测）→ ``timeout``。
+
+Args:
+    icmp_sent: 发出的 ICMP 探测包数（``0`` 表示没发）。
+    icmp_recv: 收到回应的 ICMP 包数。
+    tcp: TCP 侧证据，取 :data:`TCP_EVIDENCES`；``""`` 表示没测。
+
+Returns:
+    str: :data:`PROBE_REASONS` 之一。
+
+Example:
+    >>> endpoint_reason(icmp_sent=8, icmp_recv=0, tcp="ok")
+    'icmp_filtered'
+    >>> endpoint_reason(icmp_sent=8, icmp_recv=0, tcp="refused")
+    'refused'
+    >>> endpoint_reason(icmp_sent=8, icmp_recv=0, tcp="timeout")
+    'timeout'
+    >>> endpoint_reason(icmp_sent=4, icmp_recv=3, tcp="")
+    'ok'
+    >>> endpoint_reason(icmp_sent=0, icmp_recv=0, tcp="ok")
+    'ok'
+```
+
 ## `core/report.py`
 
 **职责**：报告渲染：分层故障定位（主）+ 完整技术明细（辅）。
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `render_markdown` | function | 378 | ✅ |
-| `save` | function | 657 | ✅ |
-| `render_degraded` | function | 761 | ✅ |
-| `save_degraded` | function | 839 | ✅ |
+| `render_markdown` | function | 428 | ✅ |
+| `save` | function | 707 | ✅ |
+| `render_degraded` | function | 811 | ✅ |
+| `save_degraded` | function | 889 | ✅ |
 
 ### `render_markdown`
 
@@ -6582,38 +6968,38 @@ Example:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `static_asset` | function | 114 | ✅ |
-| `ui_entry` | function | 185 | ✅ |
-| `touch` | function | 310 | ✅ |
-| `request_quit` | function | 315 | ✅ |
-| `read_port_file` | function | 389 | ✅ |
-| `cleanup_pid` | function | 421 | ✅ |
-| `BodyTooLarge` | class | 438 | ✅ |
-| `doctor_cached` | function | 517 | ✅ |
-| `log` | function | 634 | ✅ |
-| `evidence_payload` | function | 730 | ✅ |
-| `conclusion_report_id` | function | 854 | ✅ |
-| `build_status_conclusion` | function | 885 | ✅ |
-| `start_job` | function | 1319 | ✅ |
-| `report_index` | function | 1380 | ✅ |
-| `request_elevation` | function | 1414 | ✅ |
-| `preflight_payload` | function | 1454 | ✅ |
-| `validate_component_path` | function | 1508 | ✅ |
-| `log_files` | function | 1548 | ✅ |
-| `resolve_log_file` | function | 1606 | ✅ |
-| `engine_info` | function | 1639 | ✅ |
-| `passive_start` | function | 1682 | ✅ |
-| `passive_status` | function | 1717 | ✅ |
-| `link_actions` | function | 1791 | ✅ |
-| `Handler` | class | 1872 | ✅ |
-| `Handler.handle_one_request` | method | 1898 | ✅ |
-| `Handler.log_message` | method | 1950 | ✅ |
-| `Handler.do_GET` | method | 2126 | ✅ |
-| `Handler.do_POST` | method | 2148 | ✅ |
-| `DiagServer` | class | 2619 | ✅ |
-| `DiagServer.handle_error` | method | 2630 | ✅ |
-| `create_server` | function | 2658 | ✅ |
-| `main` | function | 2720 | ✅ |
+| `static_asset` | function | 121 | ✅ |
+| `ui_entry` | function | 192 | ✅ |
+| `touch` | function | 317 | ✅ |
+| `request_quit` | function | 322 | ✅ |
+| `read_port_file` | function | 396 | ✅ |
+| `cleanup_pid` | function | 428 | ✅ |
+| `BodyTooLarge` | class | 445 | ✅ |
+| `doctor_cached` | function | 524 | ✅ |
+| `log` | function | 641 | ✅ |
+| `evidence_payload` | function | 737 | ✅ |
+| `conclusion_report_id` | function | 861 | ✅ |
+| `build_status_conclusion` | function | 892 | ✅ |
+| `start_job` | function | 1326 | ✅ |
+| `report_index` | function | 1387 | ✅ |
+| `request_elevation` | function | 1421 | ✅ |
+| `preflight_payload` | function | 1461 | ✅ |
+| `validate_component_path` | function | 1515 | ✅ |
+| `log_files` | function | 1555 | ✅ |
+| `resolve_log_file` | function | 1613 | ✅ |
+| `engine_info` | function | 1646 | ✅ |
+| `passive_start` | function | 1689 | ✅ |
+| `passive_status` | function | 1724 | ✅ |
+| `link_actions` | function | 1798 | ✅ |
+| `Handler` | class | 1879 | ✅ |
+| `Handler.handle_one_request` | method | 1905 | ✅ |
+| `Handler.log_message` | method | 1957 | ✅ |
+| `Handler.do_GET` | method | 2133 | ✅ |
+| `Handler.do_POST` | method | 2155 | ✅ |
+| `DiagServer` | class | 2677 | ✅ |
+| `DiagServer.handle_error` | method | 2688 | ✅ |
+| `create_server` | function | 2716 | ✅ |
+| `main` | function | 2778 | ✅ |
 
 ### `static_asset`
 
@@ -7523,9 +7909,9 @@ Returns:
 
 | 符号 | 类型 | 行 | docstring |
 |---|---|---|---|
-| `compute_layers` | function | 209 | ✅ |
-| `display_capture_fields` | function | 454 | ✅ |
-| `build` | function | 680 | ✅ |
+| `compute_layers` | function | 214 | ✅ |
+| `display_capture_fields` | function | 459 | ✅ |
+| `build` | function | 701 | ✅ |
 
 ### `compute_layers`
 
