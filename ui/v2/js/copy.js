@@ -185,9 +185,12 @@
       agentLastNone: "尚无采样记录",
       agentInstall: "安装常驻采集",
       agentInstalling: "正在安装…",
+      /* 安装成功 toast：只说「装好了 + 会自动开始」，别把说明区那句「怎么装」搬过来 */
+      agentInstalled: "已装好，登录后自动开始采集",
       agentUninstall: "卸载",
       agentUninstalling: "正在卸载…",
-      agentInstallHint: "安装包在工具目录内：双击 install-agent.bat 完成安装（需要管理员权限）。",
+      /* 卡片说明区（还没装 / 怎么装）：只给未安装状态用，不参与成功提示 */
+      agentInstallHint: "还没装常驻采集：点下面的「安装常驻采集」把登录时自动运行的任务建起来（需要管理员权限）。装好之前历史趋势不会增长。",
       agentUninstallTitle: "卸载常驻采集？",
       agentUninstallBody: "卸载后不再后台采样，历史趋势会停止增长；已经记录的数据保留在 reports/history 下。",
       agentOffTitle: "采集未开启",
@@ -196,6 +199,16 @@
       agentManualTitle: "未安装计划任务",
       agentManualBody: "采集进程当前是手动启动的，重新登录后不会自动开始；点下面的按钮安装成计划任务。",
       agentErr: "最近一次错误：{reason}",
+      /* ---- 安装失败：讲人话，原文折叠 ---- */
+      /* 只分两类（docs/agent.md §2.1）：命中 WinError 5 / PermissionError
+         → 被安全策略拦住，连 schtasks 都起不来，提权也没用；其余 → 权限不够。
+         原文不直接给人看，只折叠在模态框里留作排障。 */
+      agentFailPolicyKeys: ["WinError 5", "PermissionError", "0x80070005"],
+      agentFailTitle: "常驻采集没装上",
+      agentFailPolicy: "被安全策略拦了：系统禁止运行 schtasks.exe（常见于公司 EDR / AppLocker / 组策略）。这不是权限不够，用管理员身份重试也解不开，请按下面说明里的替代做法启动。",
+      agentFailPerm: "权限不够：创建「登录时运行」的计划任务需要管理员权限。用管理员身份重新打开工具再点安装即可；任务本身仍按普通权限运行，装完不必一直提权。",
+      agentFailHint: "详见使用说明或 docs/agent.md §2.1：那里有「一秒区分两种原因」的办法，以及手动建任务 / 启动文件夹 / 手动启动三种替代做法。",
+      agentFailTech: "技术原文（排障用）",
       agentIntervalFail: "采样间隔未能下发：{reason}",
       agentIntervalSaved: "采样间隔已改，下一轮按新间隔采样",
 
@@ -637,6 +650,10 @@
       evFrames: "证据帧",
       mLossProbe: "探针",
       mLossNone: "未启用探针",
+      /** 目标不回 ICMP 时丢包率这一行的口径：数值照给，但不判「异常」 */
+      mLossIcmp: "目标不回 ICMP，此数不代表链路丢包",
+      /** 导出文件里没有页面那句 metricsNote，表后单独补一句 */
+      mLossIcmpNote: "本次探针的丢包率全部来自「目标不响应 ICMP」（探测侧已用 TCP 证明该目标可达），该数值不代表链路丢包；链路质量以同一份结果里 TCP 的 RTT 与重传率为准。",
       metricsNote: "丢包率取自探针基线；未启用探针时以重传率作为链路劣化指标。目标不响应 ICMP 时（探测侧已用 TCP 证明可达），丢包率只说明「目标不理 ICMP」，以 TCP 的 RTT 与重传为准。",
       stOk: "正常",
       stWarn: "关注",
