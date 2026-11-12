@@ -21,6 +21,10 @@
 结论：**agent 本身永远不需要提权**。安装脚本用 `/rl limited`，就是为了让这一点在
 计划任务里也是硬约束 —— 一个后台常驻、每次开机都跑的东西，绝不该长期持有管理员权限。
 
+注意 `/rl limited` 约束的是**任务跑起来之后**的权限。**创建**这个任务（`schtasks /create
+/sc onlogon`）在多数 Windows 上仍需要管理员：脚本自己不弹 UAC，没权限就直接失败。
+这两件事经常被混成一句「要不要管理员」，装不上时先按 §2.1 分清是哪一种。
+
 ---
 
 ## 2. 安装 / 卸载
@@ -49,6 +53,97 @@ schtasks /delete /tn "NetDiag Agent" /f
 * **卸载后**：已经跑着的进程不会自己退出（它是常驻的），注销或重启即止；
   想马上停用 `taskkill /f /im NetDiag-agent.exe`。
 * 卸载**不删** `logs\history\`：历史是证据，删数据得是显式动作。
+
+### 2.1 装不上：`schtasks` 被安全策略拦住
+
+先把两种「装不上」分开 —— 根因不同，处理方式完全相反：
+
+| 看到的输出 | 根因 | 处理 |
+|---|---|---|
+| `错误: 拒绝访问。` / `Access is denied.`，但 `where schtasks` 找得到文件、`schtasks /query /?` 能正常打印帮助 | **权限不够**：创建 `onlogon` 任务通常要管理员 | 用管理员打开 cmd，再运行 `install-agent.bat`。任务本身仍是 `/rl limited`，装完不必一直提权 |
+| `PermissionError: [WinError 5] 拒绝访问。`，连 `schtasks /query` 都失败（`where schtasks` 却有文件） | **程序被执行策略拦住**：AppLocker / WDAC / 组策略 / EDR 把 `schtasks.exe` 拉黑 | **加管理员也没用** —— 拦的是进程，不是权限。走下面四条替代 |
+
+一秒区分：直接跑一次 `schtasks /query /tn "NetDiag Agent"`。
+
+* 查询本身报「拒绝访问」→ 程序被拦（哪怕任务真的存在也查不出来）；
+* 查询能给出「任务不存在」→ 只是权限不够，按第一行处理。
+
+**提示语**（设置页和命令行都该这么说，不要只回一句 `[WinError 5]`）：
+
+> 安装失败：系统策略禁止运行 schtasks.exe（常见于公司 EDR / AppLocker / 组策略）。
+> 这不是权限问题，用管理员运行也解不开。
+> 采集本身照常可用：可以手动启动，或者按下面任一方式让它开机自启。
+
+三句话缺一不可：**不是你的权限不够** → **采集没坏** → **下一步在哪**。
+只回「安装失败」，等于把人扔在死路上。
+
+#### 替代 1：手动建任务（图形界面，不经过 `schtasks.exe`）
+
+`Win+R` → `taskschd.msc` → 右栏「创建任务」，逐字段照填：
+
+| 页签 | 字段 | 值 |
+|---|---|---|
+| 常规 | 名称 | `NetDiag Agent` —— **必须逐字一致**，状态接口按这个名字查 |
+| 常规 | 描述 | `NetDiag 常驻采样` |
+| 常规 | 安全选项 | 选「只在用户登录时运行」；**不要**勾「使用最高权限运行」（等价于 `/rl limited`） |
+| 触发器 | 开始任务 | 「登录时」，具体用户选当前账户 |
+| 触发器 | 延迟任务 | `1 分钟`（等价于 `/delay 0001:00`） |
+| 操作 | 程序或脚本 | `<安装目录>\NetDiag-agent.exe`；没有这个 exe 就填 `<安装目录>\tools\python\pythonw.exe` |
+| 操作 | 添加参数(可选) | 前者填 `--daemon`；后者填 `"<安装目录>\core\agent.py" --daemon` |
+| 条件 | 电源 | 取消勾选「只有在计算机使用交流电源时才启动」，笔记本用电池时也要采 |
+
+名称差一个字，`GET /api/agent/status` 的 `installed` 就永远是 `false` —— 界面上会
+一直写「未安装计划任务」，而任务其实在跑。这是最常见的「手动装完没生效」。
+
+#### 替代 2：启动文件夹（零权限，代价是丢掉「延迟 1 分钟」）
+
+`Win+R` → `shell:startup` → 右键「新建快捷方式」→ 目标填：
+
+```bat
+"...\NetDiag-agent.exe" --daemon
+:: 没有 exe 时
+"...\tools\python\pythonw.exe" "...\core\agent.py" --daemon
+```
+
+* 好处：不调 `schtasks`、不需要任何额外权限，掉电重启照样起；
+* 代价 1：**没有 1 分钟延迟**。开机那两分钟磁盘和网络都在抢带宽，记下来的头几条
+  样本会是「开机很慢」的假故障，还可能按「连续 2 次超阈值」落成事件；
+* 代价 2：设置页的 `installed` 仍然是 `false`、`running` 是 `true`。**这是如实显示**
+  （确实没有计划任务），不是 bug —— 卡片上写的是「未安装计划任务 / 手动启动的」。
+
+#### 替代 3：只在需要时手动起
+
+```bat
+python core\agent.py --daemon     :: 无控制台常驻；想停就 taskkill 或注销
+python core\agent.py --once       :: 只采一轮，验证能不能采到
+```
+
+适合「复现一次抖动、采半小时就够」的场景。代价：**重新登录后不会自己回来**。
+
+#### 替代 4：换一台策略允许的机器装一次
+
+多机部署时最省事的对比手段：同一套安装包，在允许 `schtasks` 的机器上装一次，
+就能证明「是这台机器的策略，不是安装包坏了」。
+
+#### 策略允许的机器上，正常应该看到什么
+
+| 时刻 | 期望 |
+|---|---|
+| 点「安装」立刻 | `GET /api/agent/status` → `installed=true`、`state="stopped"`（还没到触发点）、`last_error=""` |
+| 任务计划程序里 | 任务名 `NetDiag Agent`；触发器「登录时」+ 延迟 `1 分钟`；「使用最高权限运行」未勾选；「上次运行结果」`0x0` |
+| 登录后 1 分钟内 | `state="running"`；`logs/history/YYYY-MM-DD.jsonl` 出现当天第一条样本；设置页「最近一次采样」从「尚无采样记录」变成具体时间 |
+| 卸载后 | `installed=false`、`state="stopped"`；**已在跑的进程不会自己退出**（注销或 `taskkill /f /im NetDiag-agent.exe`）；`logs/history/` 不删 |
+
+#### 自检三条命令
+
+```bat
+where schtasks                                    :: 文件在不在（在 = 不是「命令找不到」）
+schtasks /query /tn "NetDiag Agent" /fo LIST /v   :: 能不能查（查不了 = 进程被拦）
+schtasks /run   /tn "NetDiag Agent"               :: 装好后立刻试一次，不用重新登录
+```
+
+接口失败时 `error` 字段是 `schtasks` 的**原始输出**（截断 400 字符），不吞不改写。
+排障先看那行原文 —— 「拒绝访问」和「系统找不到指定的文件」是两个完全不同的问题。
 
 ---
 
@@ -192,6 +287,8 @@ python core\agent.py --interval 30     :: 写配置，立即返回
 
 | 现象 | 看什么 |
 |---|---|
+| 点「安装」报「拒绝访问」/ `[WinError 5]` | 先分清是**权限不够**还是**`schtasks.exe` 被策略拦**：`schtasks /query /tn "NetDiag Agent"` 能不能跑。详见 §2.1 |
+| 装完了设置页还写「未安装计划任务」 | 任务名不是逐字 `NetDiag Agent`，或装的是「启动文件夹快捷方式」（那本来就没有计划任务，见 §2.1 替代 2） |
 | 历史是空的 | `python core\agent.py --status` 看 `history_dir` 与 `samples_total`；再 `--once` 看单轮能不能采到 |
 | 网关一直是 `null` | 没有默认路由（只有直连网段 / 断网）。`gateway` 为 `null` 是正确结果，不是 bug |
 | 目标 `method` 变成 `tcp` 且 `degraded` | ICMP 被中间设备丢了。这是设计行为，不是故障 |
