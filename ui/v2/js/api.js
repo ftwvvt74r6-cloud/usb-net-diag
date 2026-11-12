@@ -69,17 +69,47 @@
     return !res || (!res.ok && (res.status === 404 || res.status === 405 || res.status === 501));
   }
 
+  /* 导出接口会自己定落盘名（netdiag-history-20261112-0358.csv）。
+     后端写在 Content-Disposition 里，前端不该另起一套命名 —— 对不上文件名，
+     用户在下载目录里就没法把文件和时间对上。解析不到才让调用方兜底。 */
+  function fileName(resp) {
+    var cd = (resp.headers && resp.headers.get("Content-Disposition")) || "";
+    if (!cd) return "";
+    var pick = "";
+    /* RFC 5987 形式优先：filename*=UTF-8''%E4%B8%AD.csv */
+    var star = /filename\*\s*=\s*([^;]+)/i.exec(cd);
+    if (star) {
+      var v = star[1].trim().replace(/^["']|["']$/g, "");
+      var tail = /^[^']*'[^']*'(.*)$/.exec(v);
+      if (tail) {
+        try { pick = decodeURIComponent(tail[1]); } catch (e) { pick = tail[1]; }
+      } else {
+        pick = v;
+      }
+    } else {
+      var plain = /filename\s*=\s*([^;]+)/i.exec(cd);
+      if (plain) pick = plain[1].trim().replace(/^["']|["']$/g, "");
+    }
+    return pick.split(/[\\/]/).pop() || "";
+  }
+
   /* 导出类接口回的是 csv/md 正文，不是 JSON：单独走一次纯文本请求，
      仍然由本文件负责「只在这里发请求」的约定。 */
   function text(path) {
     return fetch(path, { cache: "no-store", credentials: "same-origin" })
       .then(function (resp) {
         return resp.text().then(function (body) {
-          return { ok: resp.ok, status: resp.status, text: body, error: resp.ok ? "" : ("http " + resp.status) };
+          return {
+            ok: resp.ok,
+            status: resp.status,
+            text: body,
+            name: resp.ok ? fileName(resp) : "",
+            error: resp.ok ? "" : ("http " + resp.status)
+          };
         });
       })
       .catch(function (err) {
-        return { ok: false, status: 0, text: "", error: (err && err.message) || "network" };
+        return { ok: false, status: 0, text: "", name: "", error: (err && err.message) || "network" };
       });
   }
 

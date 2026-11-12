@@ -351,6 +351,39 @@
       svgRoot.appendChild(label);
     });
 
+    /* 事件热区先垫在下面（见下），所以要先算出「哪一刻有事件」。
+       同一时刻常常有好几条（时延与丢包是一起报的），按横坐标并成一组：
+       一组一条热区，点开列出这一时刻的全部事件 —— 叠着画两张热区，
+       只有最上面那张点得到，下面那条等于没画。 */
+    var groups = {};
+    var order = [];
+    (state.events || []).forEach(function (ev) {
+      var t = n(ev && ev.t);
+      if (t === null || t < t0 || t > t1) return;
+      var k = String(Math.round(x(t)));
+      if (!groups[k]) { groups[k] = { x: x(t), t: t, list: [] }; order.push(k); }
+      groups[k].list.push(ev);
+    });
+    order.forEach(function (k) {
+      var g = groups[k];
+      var hit = svg("rect", "hp-hit", {
+        x: g.x - 5, y: T, width: 10, height: PH, tabindex: "0", role: "button"
+      });
+      var said = stamp(g.t) + " " + g.list.map(function (ev) {
+        return typeText(ev.type) + " " + fmtNum(ev.value);
+      }).join(" / ");
+      hit.setAttribute("aria-label", said);
+      /* 橙虚线的含义不写在图里，鼠标停到热区上给一句，别让人猜颜色 */
+      var tip = svg("title", "", {});
+      tip.textContent = said;
+      hit.appendChild(tip);
+      hit.addEventListener("click", function () { showEvents(g.list); });
+      hit.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showEvents(g.list); }
+      });
+      svgRoot.appendChild(hit);
+    });
+
     /* 丢包色块：贴底一条带，高度按该点丢包率 */
     var bw = Math.max(2, (W - L - R) / Math.max(series.length, 1));
     var bandH = 16;
@@ -395,33 +428,11 @@
       svgRoot.appendChild(f);
     });
 
-    /* 事件竖线 + 可点区域。
-       同一时刻常常有好几条（时延与丢包是一起报的），按横坐标并成一组：
-       一组一条热区，点开列出这一时刻的全部事件 —— 叠着画两张热区，
-       只有最上面那张点得到，下面那条等于没画。 */
-    var groups = {};
-    var order = [];
+    /* 事件竖线：橙色虚线，压在折线与色块之上（热区在下面，见上） */
     (state.events || []).forEach(function (ev) {
       var t = n(ev && ev.t);
       if (t === null || t < t0 || t > t1) return;
-      svgRoot.appendChild(svg("line", "hp-ev " + evKind(ev), { x1: x(t), y1: T, x2: x(t), y2: T + PH }));
-      var k = String(Math.round(x(t)));
-      if (!groups[k]) { groups[k] = { x: x(t), t: t, list: [] }; order.push(k); }
-      groups[k].list.push(ev);
-    });
-    order.forEach(function (k) {
-      var g = groups[k];
-      var hit = svg("rect", "hp-hit", {
-        x: g.x - 5, y: T, width: 10, height: PH, tabindex: "0", role: "button"
-      });
-      hit.setAttribute("aria-label", stamp(g.t) + " " + g.list.map(function (ev) {
-        return typeText(ev.type) + " " + fmtNum(ev.value);
-      }).join(" / "));
-      hit.addEventListener("click", function () { showEvents(g.list); });
-      hit.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showEvents(g.list); }
-      });
-      svgRoot.appendChild(hit);
+      svgRoot.appendChild(svg("line", "hp-ev", { x1: x(t), y1: T, x2: x(t), y2: T + PH }));
     });
 
     /* 横轴刻度 */
@@ -442,13 +453,6 @@
     svgRoot.appendChild(unit);
 
     box.appendChild(svgRoot);
-  }
-
-  function evKind(ev) {
-    var t = String((ev && ev.type) || "");
-    if (t === "loss") return "is-loss";
-    if (t === "jitter") return "is-jitter";
-    return "is-rtt";
   }
 
   function typeText(t) {
@@ -594,9 +598,10 @@
         U.toast(U.tpl(H.exportFail || "{reason}", { reason: (res && res.error) || "" }), "crit");
         return;
       }
+      /* 优先用后端给的文件名（带它自己的时间戳），拿不到才本地拼一个 */
       var ext = fmt === "md" ? "md" : "csv";
-      var name = "netdiag-history-" + state.range + "-" + w.to + "." + ext;
-      ND.render.saveText(name, res.text);
+      var fallback = "netdiag-history-" + state.range + "-" + w.to + "." + ext;
+      ND.render.saveText(res.name || fallback, res.text);
     });
   }
 
