@@ -203,7 +203,10 @@
           if (res && res.ok) {
             state.agent = clone(a);
             state.agent.interval_s = v;
-            U.toast(S.targetsSaved || "", "ok");
+            /* 卡片顶部那行「采样间隔：N 秒」也要跟着变，否则同一张卡上两个数打架 */
+            var bg = currentAgentCard();
+            if (bg) paintAgent(bg);
+            U.toast(S.agentIntervalSaved || S.targetsSaved || "", "ok");
           } else {
             U.toast(U.tpl(S.agentIntervalFail || "{reason}", { reason: U.why(res) }), "crit");
           }
@@ -214,10 +217,13 @@
       target.body.appendChild(row);
     }
 
-    /* 最近一次采样 */
+    /* 最近一次采样：后端给的是带时区的 ISO，直接贴出来像日志；
+       走全站同一个时间渲染（今天/昨天 时:分），新鲜度靠「多少秒前」也能看出来 */
     var last = U.el("p", "set-last");
     last.appendChild(U.el("b", "", (S.agentLast || "") + "："));
-    last.appendChild(document.createTextNode(a.last_sample_at || S.agentLastNone || ""));
+    last.appendChild(document.createTextNode(a.last_sample_at
+      ? U.when(a.last_sample_epoch, a.last_sample_at)
+      : (S.agentLastNone || "")));
     target.body.appendChild(last);
 
     /* 装了就给「卸载」，没装才给「安装」：两个按钮同时挂着，用户不知道该按哪个 */
@@ -298,6 +304,20 @@
     return /^[A-Za-z0-9._:\-\[\]]+$/.test(t);
   }
 
+  /* 目标 key 是给人看的名字：事件表「目标」列、历史样本、导出文件里用的都是它。
+     后端收不到 key 会自己按序号编 target-1 / target-2 —— 界面上看不出测的是哪台，
+     删掉一条目标后序号还会整体前移，历史事件和新事件对不上同一个目标。
+     规则：key 还没来得及起名时跟着 host:port 走；已经改成自定义名字就不再动它。 */
+  function autoKey(t) {
+    var host = String((t && t.host) || "").trim();
+    if (!host) return "";
+    return t.port ? host + ":" + t.port : host;
+  }
+
+  function rekey(t, was) {
+    if (!t.key || t.key === was) t.key = autoKey(t);
+  }
+
   function paintTargets(target) {
     var S = C.settings || {};
     U.clear(target.body);
@@ -324,7 +344,9 @@
           return;
         }
         host.classList.remove("is-bad");
+        var was = autoKey(t);
         t.host = host.value.trim();
+        rekey(t, was);
         persistTargets();
       });
 
@@ -343,7 +365,9 @@
           return;
         }
         port.classList.remove("is-bad");
+        var was = autoKey(t);
         t.port = v ? Number(v) : null;
+        rekey(t, was);
         persistTargets();
       });
 
@@ -368,7 +392,7 @@
     add.disabled = state.targets.length >= 3;
     add.addEventListener("click", function () {
       if (state.targets.length >= 3) return;
-      state.targets.push({ host: "", port: null });
+      state.targets.push({ key: "", host: "", port: null });
       paintTargets(target);
       var first = target.body.querySelector(".set-item:last-child input");
       if (first) first.focus();
@@ -383,10 +407,26 @@
 
   function persistTargets() {
     saveLocal();
-    var body = { targets: state.targets.filter(function (t) { return String(t.host || "").trim(); }) };
+    /* 带上 key 一起写：不带的话后端按序号补 target-N，历史事件的目标名就换了 */
+    var body = {
+      targets: state.targets
+        .filter(function (t) { return String(t.host || "").trim(); })
+        .map(function (t) {
+          var one = { host: String(t.host).trim(), key: String(t.key || "").trim() || autoKey(t) };
+          if (t.port) one.port = t.port;
+          return one;
+        })
+    };
     ND.api.saveMonitor(body).then(function (res) {
       if (res && res.ok) {
         state.monitorAbsent = false;
+        /* 只把后端补的 key 抄回原对象，不整体替换：列表里的输入框还拿着旧对象的
+           引用，换掉数组会让下一次编辑改到一份已经没人用的数据（端口就这么丢的）。 */
+        if (res.data && Array.isArray(res.data.targets)) {
+          res.data.targets.slice(0, 3).forEach(function (srv, i) {
+            if (state.targets[i] && !state.targets[i].key) state.targets[i].key = String(srv.key || "");
+          });
+        }
         U.toast((C.settings || {}).targetsSaved || "", "ok");
         return;
       }
