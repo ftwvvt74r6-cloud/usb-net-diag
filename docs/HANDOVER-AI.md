@@ -584,7 +584,8 @@ CI **没有 tshark、没有管理员/Npcap、没有仓库 `tools/`**：
 | `docs/docstring-gaps.md` | 自动生成的注释缺口清单（当前 0 缺口） | ✅ 自动生成 |
 | `docs/api-style.md` | 注释标准（模块头四问 / Args-Returns-Raises / 术语） | ⚠️ §0 基线是 v0.1.0（11 模块/55 符号），当前 33 模块/314 符号 |
 | `docs/data-contract.md` | 结果数据契约：顶层五块 / `meta` 采集字段（`capture_mode` / `interface` / `bpf`）/ `dns_truncated` / API 加法字段 `l7_packets` / 展示与契约的分界 | ✅ 当前（R6-5 + R8-1 + R8-2） |
-| `docs/agent.md` | 常驻采集 agent：权限矩阵（普通权限可采样 / tshark 只受 Npcap 限制 / MTR 需按需提权）、schtasks 安装卸载、配置项、JSONL 样本与事件字段、保留与滚动、排障 | ✅ 当前（T1） |
+| `docs/agent.md` | 常驻采集 agent：权限矩阵（普通权限可采样 / tshark 只受 Npcap 限制 / MTR 需按需提权）、schtasks 安装卸载、**§2.1 `schtasks` 被安全策略拦住时的提示语与四条替代（手动建任务 / 启动文件夹 / 临时手动跑 / 换机器）、策略允许机器上的预期行为**、配置项、JSONL 样本与事件字段、保留与滚动、排障 | ✅ 当前（T1 + P0-2 文档） |
+| `docs/ui-handoff.md` | UI 侧需求单：与 A 的 S8 是否重复的核对结论、8 条「文件 + key + 期望 + 验收」的接线需求、本轮已并入 main 的 4 个前端改动的归口说明、提单模板 | ✅ 当前（P0 批次） |
 | `docs/build.md` | 三种发布包的构建、lite 包内结构、启动器编译、发布前人工验收 | ✅ 当前（v0.3.2 lite 实测 187 文件 / 1,199,811 B / 解压后 3,301,772 B；v0.3.1 历史值另列） |
 | `docs/release-v0.3.2.md` | v0.3.2 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 当前（已发布） |
 | `docs/release-v0.3.1.md` | v0.3.1 发布资产、包内容、构建自检、红线与干净 checkout 证据 | ✅ 历史（v0.3.1） |
