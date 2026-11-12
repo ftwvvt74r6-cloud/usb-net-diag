@@ -409,12 +409,12 @@
       svgRoot.appendChild(svg("polyline", "hp-line", { points: pts.join(" ") }));
     });
 
-    /* 阈值虚线 */
+    /* 阈值虚线。文字留到最后再画：它压在右边，而事件竖线（橙虚线）常在「此刻」
+       正好也靠在右边 —— 先画字就会被线划过去，读不出是多少。 */
     var ty = y(state.thr);
     svgRoot.appendChild(svg("line", "hp-thr", { x1: L, y1: ty, x2: W - R, y2: ty }));
     var tl = svg("text", "hp-thr-t", { x: W - R, y: ty - 5, "text-anchor": "end" });
     tl.textContent = (H.chartThr || "") + " " + state.thr + " ms";
-    svgRoot.appendChild(tl);
 
     /* 标记（用户手动打的点） */
     (state.marks || []).forEach(function (m) {
@@ -451,6 +451,9 @@
     var unit = svg("text", "hp-unit", { x: L, y: T - 2 });
     unit.textContent = "ms";
     svgRoot.appendChild(unit);
+
+    /* 阈值文字最后画（见上）：白描边托底，压在折线/竖线上也读得清 */
+    svgRoot.appendChild(tl);
 
     box.appendChild(svgRoot);
   }

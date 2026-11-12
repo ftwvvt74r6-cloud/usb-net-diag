@@ -437,7 +437,8 @@
 .hp-grid { stroke: var(--line); stroke-width: 1; }
 .hp-ytick, .hp-xtick, .hp-unit { fill: var(--text-2); font-size: 11px; }
 .hp-thr { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 4 4; }
-.hp-thr-t { fill: var(--warn); font-size: 11px; }
+/* 阈值文字要压在折线/事件竖线上（画在最上层），白描边当底衬 */
+.hp-thr-t { fill: var(--warn); font-size: 11px; paint-order: stroke; stroke: var(--n-0); stroke-width: 3px; stroke-linejoin: round; }
 .hp-line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
 .hp-loss { fill: var(--warn); opacity: 0.45; }
 .hp-loss.hi { fill: var(--crit); opacity: 0.6; }

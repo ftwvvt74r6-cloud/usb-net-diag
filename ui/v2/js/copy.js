@@ -197,6 +197,7 @@
       agentManualBody: "采集进程当前是手动启动的，重新登录后不会自动开始；点下面的按钮安装成计划任务。",
       agentErr: "最近一次错误：{reason}",
       agentIntervalFail: "采样间隔未能下发：{reason}",
+      agentIntervalSaved: "采样间隔已改，下一轮按新间隔采样",
 
       /* ---- 监测目标 ---- */
       targetsTitle: "监测目标",
