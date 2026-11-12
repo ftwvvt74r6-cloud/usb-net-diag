@@ -249,17 +249,72 @@
     var old = label ? label.textContent : "";
     if (label) label.textContent = S.agentInstalling || old;
     ND.api.agentInstall().then(function (res) {
-      if (res && res.ok) {
-        U.toast(S.agentInstallHint || "", "ok");
-        return ND.api.agent().then(function (r) {
-          if (r && r.ok && r.data) state.agent = r.data;
-          state.agentAbsent = false;
-        });
-      }
-      U.toast(U.why(res), "crit");
-      if (label) label.textContent = old;
-      btn.disabled = false;
+      if (!res || !res.ok) { installFailed(res, btn, old); return; }
+      /* 接口成功回的就是装完那一刻的状态，先收下再说；
+         随后重取一次是为了别的字段（interval_s / last_sample_at）也跟上。 */
+      if (res.data && res.data.status) state.agent = res.data.status;
+      state.agentAbsent = false;
+      return ND.api.agent().then(function (r) {
+        if (r && r.ok && r.data) state.agent = r.data;
+        state.agentAbsent = false;
+      }).then(function () {
+        /* 不重画的话按钮还停在「安装」上，看着像没装上 —— 于是人会再点一次。
+           重画之后按 installed 走，按钮自然是「卸载」。 */
+        var bg = currentAgentCard();
+        if (bg) paintAgent(bg);
+        U.toast(S.agentInstalled || "", "ok");
+      });
     });
+  }
+
+  /* 装不上时的三种原因（docs/agent.md §2.1 的分类，不是自己编的）：
+     原文里带 WinError 5 / PermissionError → 进程被执行策略拦了，加管理员也没用；
+     只带「拒绝访问」 → 只是权限不够，提权重试即可；其余按「没建起来」处理。
+     两种原因给的话不一样：说错了比不说更糟（会让人去申请一个解不开的权限）。 */
+  function failKind(err) {
+    var S = C.settings || {};
+    var text = String(err || "");
+    var has = function (list) {
+      for (var i = 0; i < (list || []).length; i++) {
+        if (text.indexOf(list[i]) >= 0) return true;
+      }
+      return false;
+    };
+    if (has(S.agentFailPolicyKeys)) return "policy";
+    if (has(S.agentFailPermKeys)) return "perm";
+    return "other";
+  }
+
+  /* 失败不甩原文给使用者：模态框先讲人话与下一步，技术原文折叠在下面（排障才展开）。 */
+  function installFailed(res, btn, oldLabel) {
+    var S = C.settings || {};
+    if (btn) {
+      btn.disabled = false;
+      var lb = btn.querySelector(".btn-t");
+      if (lb) lb.textContent = oldLabel;
+    }
+    var kind = failKind(res && res.error);
+    var say = kind === "policy" ? (S.agentFailPolicy || "")
+      : (kind === "perm" ? (S.agentFailPerm || "") : (S.agentFailOther || ""));
+
+    var body = document.createDocumentFragment();
+    body.appendChild(U.el("p", "", say));
+    body.appendChild(U.el("p", "set-why", S.agentFailHint || ""));
+
+    var raw = String((res && res.error) || "").trim();
+    if (raw) {
+      var det = document.createElement("details");
+      det.className = "tech";
+      det.appendChild(U.el("summary", "", S.agentFailTech || ""));
+      var bd = U.el("div", "tech-bd");
+      bd.appendChild(U.el("pre", "mono tech-pre", raw));
+      det.appendChild(bd);
+      body.appendChild(det);
+    }
+
+    var close = U.btn(C.act.close, { kind: "ghost" });
+    var box = U.modal({ title: S.agentFailTitle || "", body: body, actions: [close] });
+    close.addEventListener("click", function () { box.close(); });
   }
 
   function confirmUninstall(trigger) {

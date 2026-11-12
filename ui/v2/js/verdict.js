@@ -594,6 +594,9 @@
     steps: steps,
     owner: owner,
     footer: footer,
-    copySummary: copySummary
+    copySummary: copySummary,
+    /* 结论卡与指标表读同一份判定：指标表要给「丢包率」这一行改口径，
+       但它不许自己再判一遍「ICMP 是不是被过滤」——两处各判一次就会分叉。 */
+    icmpFiltered: icmpFiltered
   };
 })(window.ND = window.ND || {});

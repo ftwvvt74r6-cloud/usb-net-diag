@@ -11,7 +11,10 @@
      十几个数字全染色等于没染色；
    · 缺值写 null，由渲染层统一显示「—」；不许拿 0 冒充「没测到」；
    · 丢包率只认探针基线（1 - 收到/发出）。没发探针就写「未启用探针」，
-     不拿重传率冒充丢包率 —— 两者口径不同，混用会让结论失真。
+     不拿重传率冒充丢包率 —— 两者口径不同，混用会让结论失真；
+   · 同一个数字在不同原因下含义不同：目标不回 ICMP（后端 roles[].reason 已判）
+     时，探针的 100% 只说明「目标不理 ICMP」，那行不许染色，也不许写「异常」，
+     否则与结论卡自相矛盾。改口径不改数字 —— 工程师复核时看到的必须还是原值。
    ========================================================================== */
 (function (ND) {
   "use strict";
@@ -152,6 +155,20 @@
     return String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   }
 
+  /* ------------------------------------------------------------ 丢包率的口径 */
+  /* 数字与判定要分开：8 发 0 收确实是 100%，但「100%」在不同原因下含义相反 ——
+     链路真丢了，还是目标不理 ICMP（服务器侧策略）？后者在结论卡里已经写明
+     「目标不回 ICMP」，指标表却把同一件事标成红色「异常」，同屏自相矛盾；
+     导出文件里更只剩一个 100%，被转发出去就是「你这网丢了 100% 的包」。
+
+     判定完全不在这里重写：ND.verdict.icmpFiltered() 是唯一来源（读后端
+     probe_baseline.roles[].reason 与 path_profile.target_icmp_filtered）。
+     结论卡、指标表、导出文件都问同一个函数，才不会各判一次又分叉；
+     这里只负责把「这个数该怎么解释」落到这一行上。 */
+  function lossFiltered(meta) {
+    return !!(ND.verdict && ND.verdict.icmpFiltered && ND.verdict.icmpFiltered(meta));
+  }
+
   /* ------------------------------------------------------------ 行模型 */
   function row(key, value, unit, state, flag) {
     return {
@@ -188,6 +205,11 @@
         key: "mLoss", label: RP.mLoss || "",
         value: RP.mLossNone || "—", unit: "", state: "", flag: ""
       });
+    } else if (lossFiltered(meta)) {
+      /* 数值照实给（不改数字），但不给 state：不标红/琥珀，判定列也不写「异常」——
+         同一屏上「结论：目标不回 ICMP」与「丢包率 100% 异常」是两句互相打脸的话。
+         为什么会有这么个数，由 flag 说清楚（页面、导出 md、导出 json 同一份）。 */
+      out.push(row("mLoss", loss.toFixed(1), " %", "", RP.mLossIcmp || ""));
     } else {
       out.push(row("mLoss", loss.toFixed(1), " %", grade(loss, 1, 3), RP.mLossProbe || ""));
     }
@@ -304,6 +326,7 @@
     stateText: stateText,
     grade: grade,
     fmtInt: fmtInt,
+    lossFiltered: lossFiltered,
     MAX_MARKS: MAX_MARKS
   };
 })(window.ND = window.ND || {});
