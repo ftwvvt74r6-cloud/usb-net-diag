@@ -229,6 +229,20 @@
     renderRails();
     paintChips(null);
     if (ND.icons) ND.icons.mount(document);
+
+    /* 顶栏「退出后台」：与状态 chip 同处 .tb-right，靠 gap 隔开不挤在一起。
+       复用设置页那套二次确认（ND.settings.confirmQuit），文案全部取 copy.settings，
+       不另写一份退出流程。 */
+    var quitBtn = document.getElementById("tb-quit");
+    if (quitBtn) {
+      var SQ = C.settings || {};
+      quitBtn.title = SQ.quit || "";
+      quitBtn.setAttribute("aria-label", SQ.quit || "");
+      quitBtn.innerHTML = (ND.icons && ND.icons.markup("power")) || "";
+      quitBtn.addEventListener("click", function () {
+        if (ND.settings && ND.settings.confirmQuit) ND.settings.confirmQuit(quitBtn);
+      });
+    }
     route(true);
     window.addEventListener("hashchange", function () { route(false); });
 

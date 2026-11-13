@@ -636,6 +636,8 @@
       mRst: "RST",
       mZeroWin: "零窗口",
       mDns: "DNS 查询 / 响应",
+      /** DNS 有查询、零响应时判定列的专用文字：不写「异常」，也不写「正常」 */
+      mDnsNoResp: "无响应",
       mDnsMs: "DNS 平均耗时",
       mDnsFail: "DNS 失败率",
       mL7: "L7 协议分布",

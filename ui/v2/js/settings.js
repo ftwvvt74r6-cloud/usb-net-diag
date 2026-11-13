@@ -140,50 +140,98 @@
     return R.skeleton(n, 62);
   }
 
+  /* ------------------------------------------------------------ 状态快照 */
+  /* 一次渲染只取一份：chip / 说明 / 采样间隔 / 最近采样 / 按钮全从 snap 派生。
+     以前各处直接读 state.agent 与 state.agentAbsent，接口回来得晚一点就会出现
+     「chip 说运行中、按钮还是安装」这种半新半旧的一张卡。 */
+  function agentSnapshot() {
+    var a = clone(state.agent || {});
+    return {
+      absent: !!state.agentAbsent,
+      installed: !!a.installed,
+      running: !!a.running,
+      bad: String(a.state || "") === "error",
+      interval_s: a.interval_s,
+      last_error: a.last_error || "",
+      last_sample_at: a.last_sample_at || "",
+      last_sample_epoch: a.last_sample_epoch,
+      raw: a
+    };
+  }
+
+  /* 渲染断言：没装时只给「安装」、不给「卸载」、不给采样间隔下拉，chip 写「未安装」。
+     返回检查结果而不是 console.assert —— 验收要求控制台 0 JS 异常，
+     断言失败不能自己变成一条 console.error。验收脚本直接读这个返回值。 */
+  function agentAssert(root) {
+    var S = C.settings || {};
+    var sec = root || document.querySelector(".card.set-agent");
+    if (!sec) return { ok: false, applicable: false, why: "no-card", checks: {} };
+    var snap = agentSnapshot();
+    var labels = [];
+    var btns = sec.querySelectorAll(".setting-acts .btn .btn-t");
+    for (var i = 0; i < btns.length; i++) labels.push(String(btns[i].textContent || "").trim());
+    var has = function (t) { return !!t && labels.indexOf(t) >= 0; };
+    var checks = {
+      installBtn: has(S.agentInstall),
+      noUninstallBtn: !has(S.agentUninstall),
+      noIntervalSelect: sec.querySelectorAll("select.set-sel").length === 0,
+      chipOff: String((sec.querySelector(".setting-line .chip") || {}).textContent || "").trim() === S.agentStateOff
+    };
+    var ok = true;
+    Object.keys(checks).forEach(function (k) { if (!checks[k]) ok = false; });
+    return {
+      ok: ok, applicable: !snap.installed && !snap.absent,
+      snap: { installed: snap.installed, running: snap.running, absent: snap.absent },
+      labels: labels, checks: checks
+    };
+  }
+
   /* ------------------------------------------------------------ 常驻采集 */
   function paintAgent(target) {
     var S = C.settings || {};
     U.clear(target.body);
 
-    var a = state.agent || {};
-    var running = !!a.running;
-    var installed = !!a.installed;
-    var bad = String(a.state || "") === "error";
+    /* 一次渲染，一份快照：下面所有判断只准读 snap，不再回头读 state.agent */
+    var snap = agentSnapshot();
 
     var head = U.el("div", "setting-line");
-    /* 接口都不在时不能写「未安装」——那是猜的；只写「未开启」 */
-    var kind = state.agentAbsent ? "na" : (running ? "ok" : (bad ? "crit" : "na"));
-    var label = state.agentAbsent ? (S.agentStateUnknown || "")
-      : (running ? S.agentStateOn : (bad ? S.agentStateErr : S.agentStateOff));
+    /* 接口都不在时不能写「未安装」——那是猜的；只写「未开启」。
+       没装且没跑时 chip 固定「未安装」，错误详情另起一行，不抢 chip 的位置。 */
+    var kind = snap.absent ? "na"
+      : (snap.running ? "ok" : (snap.installed && snap.bad ? "crit" : "na"));
+    var label = snap.absent ? (S.agentStateUnknown || "")
+      : (snap.running ? S.agentStateOn
+        : (snap.installed && snap.bad ? S.agentStateErr : S.agentStateOff));
     head.appendChild(U.chip(kind, label));
-    if (installed && a.interval_s) {
+    if (snap.installed && snap.interval_s) {
       head.appendChild(document.createTextNode("　" + (S.agentInterval || "") + "：" +
-        U.tpl(S.agentIntervalVal || "{n}", { n: a.interval_s })));
+        U.tpl(S.agentIntervalVal || "{n}", { n: snap.interval_s })));
     }
     target.body.appendChild(head);
 
-    if (state.agentAbsent || !installed) {
+    if (snap.absent || !snap.installed) {
       /* 三种情况必须分开写，否则同一个卡片会自相矛盾：
          · 接口都没有（agentAbsent）—— 别猜「未安装」，只写「未开启」；
          · 进程在跑但没装计划任务（手动 `--daemon`）—— 写「未安装计划任务」，
            不能一边显示「运行中」一边写「采集未开启」；
          · 没装也没跑 —— 引导安装。 */
-      var manual = running && !state.agentAbsent;
+      var manual = snap.running && !snap.absent;
       var off = U.el("div", "set-off");
       off.appendChild(U.el("b", "", manual ? (S.agentManualTitle || S.agentOffTitle || "")
         : (S.agentOffTitle || "")));
-      off.appendChild(U.el("p", "", state.agentAbsent ? (S.agentOffBody || "")
+      off.appendChild(U.el("p", "", snap.absent ? (S.agentOffBody || "")
         : (manual ? (S.agentManualBody || S.agentInstallHint || "") : (S.agentInstallHint || ""))));
-      if (state.agentAbsent) off.appendChild(U.el("p", "set-why", S.agentOffWhy || ""));
+      if (snap.absent) off.appendChild(U.el("p", "set-why", S.agentOffWhy || ""));
       target.body.appendChild(off);
     }
 
-    if (bad && a.last_error) {
-      target.body.appendChild(U.el("p", "set-why", U.tpl(S.agentErr || "{reason}", { reason: a.last_error })));
+    if (snap.bad && snap.last_error) {
+      target.body.appendChild(U.el("p", "set-why", U.tpl(S.agentErr || "{reason}", { reason: snap.last_error })));
     }
 
-    /* 采样间隔：装上计划任务或已经有进程在跑时才有意义（改完下一轮生效） */
-    if (!state.agentAbsent && (installed || running)) {
+    /* 采样间隔只对「已装计划任务」有意义：没装（哪怕手动 --daemon 在跑）
+       时不出下拉，免得同一张卡上「未安装」和「可改间隔」自相矛盾 */
+    if (!snap.absent && snap.installed) {
       var row = U.el("div", "set-row");
       var f = U.el("div", "field");
       f.appendChild(U.el("label", "", S.agentInterval || ""));
@@ -194,16 +242,17 @@
         var o = document.createElement("option");
         o.value = String(sec);
         o.textContent = U.tpl(S.agentIntervalVal || "{n}", { n: sec });
-        if (Number(a.interval_s) === sec) o.selected = true;
+        if (Number(snap.interval_s) === sec) o.selected = true;
         sel.appendChild(o);
       });
       sel.addEventListener("change", function () {
         var v = Number(sel.value);
         ND.api.agentConfig({ interval_s: v }).then(function (res) {
           if (res && res.ok) {
-            state.agent = clone(a);
-            state.agent.interval_s = v;
-            /* 卡片顶部那行「采样间隔：N 秒」也要跟着变，否则同一张卡上两个数打架 */
+            /* 从当前 state 重取，不闭包捕获渲染时的 a：期间状态变过也不会回写旧值 */
+            var cur = clone(state.agent || {});
+            cur.interval_s = v;
+            state.agent = cur;
             var bg = currentAgentCard();
             if (bg) paintAgent(bg);
             U.toast(S.agentIntervalSaved || S.targetsSaved || "", "ok");
@@ -217,19 +266,18 @@
       target.body.appendChild(row);
     }
 
-    /* 最近一次采样：后端给的是带时区的 ISO，直接贴出来像日志；
-       走全站同一个时间渲染（今天/昨天 时:分），新鲜度靠「多少秒前」也能看出来 */
+    /* 最近一次采样：走全站同一个时间渲染（今天/昨天 时:分） */
     var last = U.el("p", "set-last");
     last.appendChild(U.el("b", "", (S.agentLast || "") + "："));
-    last.appendChild(document.createTextNode(a.last_sample_at
-      ? U.when(a.last_sample_epoch, a.last_sample_at)
+    last.appendChild(document.createTextNode(snap.last_sample_at
+      ? U.when(snap.last_sample_epoch, snap.last_sample_at)
       : (S.agentLastNone || "")));
     target.body.appendChild(last);
 
     /* 装了就给「卸载」，没装才给「安装」：两个按钮同时挂着，用户不知道该按哪个 */
-    if (!state.agentAbsent) {
+    if (!snap.absent) {
       var acts = U.el("div", "setting-acts");
-      if (!installed) {
+      if (!snap.installed) {
         var inst = U.btn(S.agentInstall || "", { kind: "ghost", size: "sm", icon: "download" });
         inst.addEventListener("click", function () { install(inst); });
         acts.appendChild(inst);
@@ -242,28 +290,36 @@
     }
   }
 
+  /* 装 / 没装只认一份真实状态：成功与失败都重新拉一次 /api/agent/status，
+     然后整卡重画。按钮文字、chip、说明、下拉全从同一份快照派生，
+     不再出现「只把按钮文字改回去、chip 还停在正在安装」的半张卡。 */
+  function refreshAgent(paint) {
+    return ND.api.agent().then(function (r) {
+      if (r && r.ok && r.data) {
+        state.agent = r.data;
+        state.agentAbsent = false;
+      } else {
+        state.agent = { installed: false, running: false, state: "stopped" };
+        state.agentAbsent = !!(r && ND.api.absent && ND.api.absent(r));
+      }
+      if (paint) {
+        var bg = currentAgentCard();
+        if (bg) paintAgent(bg);
+      }
+      return agentSnapshot();
+    });
+  }
+
   function install(btn) {
     var S = C.settings || {};
     btn.disabled = true;
     var label = btn.querySelector(".btn-t");
-    var old = label ? label.textContent : "";
-    if (label) label.textContent = S.agentInstalling || old;
+    if (label) label.textContent = S.agentInstalling || label.textContent;
     ND.api.agentInstall().then(function (res) {
-      if (!res || !res.ok) { installFailed(res, btn, old); return; }
-      /* 接口成功回的就是装完那一刻的状态，先收下再说；
-         随后重取一次是为了别的字段（interval_s / last_sample_at）也跟上。 */
-      if (res.data && res.data.status) state.agent = res.data.status;
-      state.agentAbsent = false;
-      return ND.api.agent().then(function (r) {
-        if (r && r.ok && r.data) state.agent = r.data;
-        state.agentAbsent = false;
-      }).then(function () {
-        /* 不重画的话按钮还停在「安装」上，看着像没装上 —— 于是人会再点一次。
-           重画之后按 installed 走，按钮自然是「卸载」。 */
-        var bg = currentAgentCard();
-        if (bg) paintAgent(bg);
-        /* 成功提示与卡片说明区是两个状态，不许共用同一个 key：
-           共用了以后，改「还没装 / 怎么装」的说明会把成功 toast 变成小作文。 */
+      if (!res || !res.ok) { installFailed(res); return; }
+      return refreshAgent(true).then(function (snap) {
+        if (!snap.installed) return;   /* 后端说没装上就不谎报成功 */
+        /* 成功提示与卡片说明区是两个状态，不共用同一个 key */
         U.toast(S.agentInstalled || "", "ok");
       });
     });
@@ -282,14 +338,12 @@
     return "perm";
   }
 
-  /* 失败不甩原文给使用者：模态框先讲人话与下一步，技术原文折叠在下面（排障才展开）。 */
-  function installFailed(res, btn, oldLabel) {
+  /* 失败不甩原文给使用者：模态框先讲人话与下一步，技术原文折叠在下面（排障才展开）。
+     同时整卡重画回真实状态 —— 按钮文字由 paintAgent 按快照给，不在这里单独改，
+     否则「按钮回到安装、chip 还停在正在安装」又是一张自相矛盾的卡。 */
+  function installFailed(res) {
     var S = C.settings || {};
-    if (btn) {
-      btn.disabled = false;
-      var lb = btn.querySelector(".btn-t");
-      if (lb) lb.textContent = oldLabel;
-    }
+    refreshAgent(true);
     var say = failKind(res && res.error) === "policy"
       ? (S.agentFailPolicy || "") : (S.agentFailPerm || "");
 
@@ -700,5 +754,10 @@
     target.body.appendChild(acts);
   }
 
-  ND.settings = { render: render };
+  ND.settings = {
+    render: render,
+    confirmQuit: confirmQuit,        /* 顶栏与设置页共用同一套二次确认 */
+    agentSnapshot: agentSnapshot,
+    agentAssert: agentAssert
+  };
 })(window.ND = window.ND || {});

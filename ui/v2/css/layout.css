@@ -143,13 +143,22 @@
   font-weight: 600;
   letter-spacing: -.01em;
 }
-.topbar .tb-right { display: flex; gap: var(--sp-2); margin-left: auto; }
+/* 顶栏右侧：状态 chip 与退出图标按钮共用一段，gap 固定，
+   按钮 flex:none 不参与 chip 换行，1024 紧凑档也不会叠在一起 */
+.topbar .tb-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+  min-width: 0;
+}
+.topbar .chips { flex-wrap: nowrap; }
 
 .scroll { flex: 1 1 auto; min-height: 0; }
 
 /* 内容列：单列、最大 1120px、居中 */
 .wrap {
-  max-width: 1120px;
+  max-width: var(--wrap-max);
   margin: 0 auto;
   padding: var(--sp-6) var(--sp-5) 96px;
   display: flex;
@@ -199,4 +208,15 @@
 @media (max-width: 720px) {
   .app { grid-template-columns: 56px minmax(0, 1fr); }
   .wrap { padding: var(--sp-4) var(--sp-3) 80px; }
+}
+
+/* ---------------------------------------------------------------- 宽屏 / 超宽
+   四档断点：≤1100 紧凑（上面）、1101–1439 标准（默认样式）、
+   ≥1440 宽屏、≥1920 超宽。只改 --wrap-max 一个变量，
+   内容上限不散落到各组件里。 */
+@media (min-width: 1440px) {
+  :root { --wrap-max: 1280px; }
+}
+@media (min-width: 1920px) {
+  :root { --wrap-max: 1440px; }
 }

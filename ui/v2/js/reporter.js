@@ -273,7 +273,7 @@
           v: val,
           u: r.unit,
           state: r.state,
-          judge: r.state ? ND.metrics.stateText(r.state) : "",
+          judge: r.judge || (r.state ? ND.metrics.stateText(r.state) : ""),
           flag: l7row ? "" : r.flag
         };
       }),

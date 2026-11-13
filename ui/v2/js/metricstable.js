@@ -175,14 +175,18 @@
   }
 
   /* ------------------------------------------------------------ 行模型 */
-  function row(key, value, unit, state, flag) {
+  /* judge 是「判定列写什么」的覆盖值：多数行由 stateText(state) 推出来，
+     但「DNS 9/0 无响应」这类事实不能写成通用的「异常」——页面、导出 md、
+     导出 json 都读同一个字段，才不会页面写「无响应」、导出写「异常」。 */
+  function row(key, value, unit, state, flag, judge) {
     return {
       key: key,
       label: RP[key] || "",
       value: value === null || value === undefined ? "—" : value,
       unit: value === null || value === undefined ? "" : (unit || ""),
       state: state || "",
-      flag: flag || ""
+      flag: flag || "",
+      judge: judge || ""
     };
   }
 
@@ -231,21 +235,41 @@
       state: grade(n(meta.dup_ack), 3, 10), flag: ""
     });
 
-    out.push(row("mRst", num(meta.rst, 0) === null ? "0" : num(meta.rst, 0), " 次", grade(n(meta.rst), 1, 5)));
+    /* RST：≥10 次异常、2~9 关注、<2 中性。原来的 1/5 会把「2 次」直接染红 */
+    out.push(row("mRst", num(meta.rst, 0) === null ? "0" : num(meta.rst, 0), " 次", grade(n(meta.rst), 2, 10)));
     out.push(row("mZeroWin", num(meta.zero_win, 0) === null ? "0" : num(meta.zero_win, 0), " 次", grade(n(meta.zero_win), 1, 3)));
 
+    /* DNS 无响应是一条独立事实：9 发 0 收时「耗时 0 ms」「失败率 0 %」都是
+       **没测到**，不是「测到很快」。同屏出现「DNS 9 / 0」+ 绿点「正常 · 0 ms」
+       会直接误导。证据优先级：后端显式 dns_noresp → fail_rate>=100 →
+       这两个字段缺失时按 dns_resp==0 兜底（B 后续会补前两个字段）。 */
+    var dnsTotal = n(meta.dns_total);
+    var dnsResp = n(meta.dns_resp);
+    var dnsFailVal = pick(meta.dns_fail_rate, metrics.dns_fail_rate);
+    var dnsNoResp = false;
+    if (dnsTotal !== null && dnsTotal > 0) {
+      if (meta.dns_noresp === true) dnsNoResp = true;
+      else if (meta.dns_noresp === false) dnsNoResp = false;
+      else if (dnsFailVal !== null && dnsFailVal >= 100) dnsNoResp = true;
+      else dnsNoResp = (dnsResp === 0);
+    }
     out.push({
       key: "mDns", label: RP.mDns || "",
-      value: (num(meta.dns_total, 0) === null ? "0" : num(meta.dns_total, 0)) + " / " +
-             (num(meta.dns_resp, 0) === null ? "0" : num(meta.dns_resp, 0)),
-      unit: "", state: "", flag: ""
+      value: (dnsTotal === null ? "0" : String(Math.round(dnsTotal))) + " / " +
+             (dnsResp === null ? "0" : String(Math.round(dnsResp))),
+      unit: "", state: dnsNoResp ? "crit" : "", flag: "",
+      judge: dnsNoResp ? (RP.mDnsNoResp || "") : ""
     });
 
     var dnsMs = pick(meta.dns_avg_ms, metrics.dns_avg_ms);
-    out.push(row("mDnsMs", num(dnsMs, 0), " ms", grade(dnsMs, 100, 300)));
-
-    var dnsFail = pick(meta.dns_fail_rate, metrics.dns_fail_rate);
-    out.push(row("mDnsFail", num(dnsFail, 1), " %", grade(dnsFail, 20, 50)));
+    if (dnsNoResp) {
+      /* 无响应时这两格没有实测值：写「—」且中性，不写 0 ms / 0 % / 正常 / 绿点 */
+      out.push(row("mDnsMs", "—", "", "", ""));
+      out.push(row("mDnsFail", "—", "", "", ""));
+    } else {
+      out.push(row("mDnsMs", num(dnsMs, 0), " ms", grade(dnsMs, 100, 300)));
+      out.push(row("mDnsFail", num(dnsFailVal, 1), " %", grade(dnsFailVal, 20, 50)));
+    }
 
     var L = l7(res);
     out.push({
@@ -263,10 +287,10 @@
     return budget(out);
   }
 
-  /* 同屏最多 3 处**颜色标记**：按严重度竞争，先给异常再给关注。
-     落选的不改判定文字，只是不给颜色 —— 「判定」是事实，「染色」是排版。
-     以前把 state 直接抹掉，页面上「正常」与「超阈值但没抢到颜色」看起来一样，
-     等于把事实也一起抹了。 */
+  /* 颜色预算严格 ≤3：参与竞争的**只有** warn / crit（「关注」就是 warn），
+     ok 既不占预算也不给颜色 —— 以前 r.mark = r.state === "ok" 会让满屏小绿点，
+     十几个「正常」比真正超阈值的三项还扎眼，等于把预算架空。
+     按严重度取前 3（crit 优先），其余一律 dim；判定文字照写，只收颜色。 */
   function budget(list) {
     var cand = list.filter(function (r) { return r.state === "warn" || r.state === "crit"; });
     var ranked = cand.slice().sort(function (a, b) {
@@ -277,7 +301,7 @@
     var keep = {};
     ranked.slice(0, MAX_MARKS).forEach(function (r) { keep[r.key] = 1; });
     list.forEach(function (r) {
-      r.mark = (r.state === "warn" || r.state === "crit") ? !!keep[r.key] : r.state === "ok";
+      r.mark = (r.state === "warn" || r.state === "crit") && !!keep[r.key];
     });
     return list;
   }
@@ -311,7 +335,7 @@
       if (r.state) {
         /* 超过 3 处预算的行只去掉颜色，判定文字照写 */
         if (r.mark) sd.appendChild(U.el("i", "mt-dot " + r.state));
-        sd.appendChild(U.el("span", "", stateText(r.state)));
+        sd.appendChild(U.el("span", "", r.judge || stateText(r.state)));
       } else {
         sd.textContent = "—";
       }

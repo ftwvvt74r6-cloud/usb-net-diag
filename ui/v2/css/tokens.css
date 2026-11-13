@@ -71,21 +71,27 @@
   --sh-1: 0 1px 2px rgba(0, 0, 0, .04);
   --sh-2: 0 8px 24px rgba(0, 0, 0, .08);
 
-  /* 字号：6 档，禁止半像素与游离值 */
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-base: 15px;
-  --fs-md: 17px;
-  --fs-lg: 22px;
-  --fs-xl: 28px;
+  /* 字号：仍是 6 档阶梯，只给每档一个随视口伸缩的弹性区间。
+     1024 取下限、1440 附近回到原值、1920 取上限；阶梯数量与顺序不变。
+     clamp() 中间项用 vw 计算，不允许再出现游离字号。 */
+  --fs-xs:   clamp(11px, 0.30vw + 8px,  13px);
+  --fs-sm:   clamp(12px, 0.30vw + 9px,  14px);
+  --fs-base: clamp(14px, 0.30vw + 11px, 16px);
+  --fs-md:   clamp(16px, 0.30vw + 13px, 18px);
+  --fs-lg:   clamp(20px, 0.45vw + 16px, 24px);
+  --fs-xl:   clamp(25px, 0.55vw + 20px, 30px);
 
-  /* 间距：4 的倍数 6 档 */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
+  /* 间距：仍是 4 的倍数 6 档，同样只加弹性区间（下限就是紧凑断点的值） */
+  --sp-1: clamp(4px,  0.15vw + 2px,  5px);
+  --sp-2: clamp(8px,  0.20vw + 5px,  10px);
+  --sp-3: clamp(11px, 0.25vw + 8px,  14px);
+  --sp-4: clamp(15px, 0.30vw + 12px, 18px);
+  --sp-5: clamp(22px, 0.40vw + 18px, 28px);
+  --sp-6: clamp(30px, 0.50vw + 25px, 36px);
+
+  /* 内容列上限：≤1439 用 1120 / ≥1440 用 1280 / ≥1920 用 1440。
+     只由 layout.css 的媒体查询改这一个变量，断点定义不再散落各处。 */
+  --wrap-max: 1120px;
 
   /* 动效：只碰 opacity / transform */
   --ease: cubic-bezier(.2, .8, .2, 1);

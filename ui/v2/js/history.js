@@ -162,16 +162,38 @@
 
     paintSeg();
     load();
-    window.addEventListener("resize", onResize);
+
+    /* 宽度变化重画（A5）：容器自己变宽/变窄时 window.resize 不一定触发
+       （断点切换、CDP 改视口、侧栏折叠都只改容器宽度），用 ResizeObserver 盯 chart。
+       lastChartW 只记上一次实际画过的宽度，避免首屏与抖动重复重画；
+       drawChart 里的 U.clear(box) 会清掉旧 SVG，旧尺寸不会残留。 */
+    lastChartW = 0;
+    if (window.ResizeObserver && chart) {
+      chartRO = new ResizeObserver(function (entries) {
+        var w = Math.floor((entries[0] && entries[0].contentRect.width) || 0);
+        if (!w || !state.el || !state.series.length) return;
+        if (w === lastChartW) return;
+        lastChartW = w;
+        drawChart();
+      });
+      chartRO.observe(chart);
+    } else {
+      window.addEventListener("resize", onResize);
+    }
   }
 
   function unmount() {
+    if (chartRO) { chartRO.disconnect(); chartRO = null; }
+    lastChartW = 0;              /* 清旧尺寸：下次挂载必须按新容器重算 */
+    if (rt) { clearTimeout(rt); rt = 0; }
     window.removeEventListener("resize", onResize);
     state.host = null;
     state.el = null;
     state.seq++;
   }
 
+  var chartRO = null;
+  var lastChartW = 0;
   var rt = 0;
   function onResize() {
     if (rt) clearTimeout(rt);
@@ -435,15 +457,22 @@
       svgRoot.appendChild(svg("line", "hp-ev", { x1: x(t), y1: T, x2: x(t), y2: T + PH }));
     });
 
-    /* 横轴刻度 */
-    [0, 1 / 3, 2 / 3, 1].forEach(function (f, i) {
+    /* 横轴刻度：按可用宽度决定刻数，窄屏少刻、宽屏多刻，
+       避免 1024 紧凑栏与 2560 超宽栏共用 4 个固定标签时相邻文字叠在一起。
+       text-anchor 首尾贴边、中间居中；7d 带日期，每个标签要留更宽的位置。 */
+    var labelWide = state.range === "7d";
+    var slots = (W - L - R) / (labelWide ? 86 : 52);
+    var count = Math.max(2, Math.min(labelWide ? 4 : 6, Math.floor(slots)));
+    var fracs = [];
+    for (var q = 0; q < count; q++) fracs.push(q / (count - 1));
+    fracs.forEach(function (f, i) {
       var t = t0 + (t1 - t0) * f;
       var tx = svg("text", "hp-xtick", {
         x: Math.min(W - R, Math.max(L, x(t))),
         y: T + PH + 15,
-        "text-anchor": i === 0 ? "start" : (i === 3 ? "end" : "middle")
+        "text-anchor": i === 0 ? "start" : (i === count - 1 ? "end" : "middle")
       });
-      tx.textContent = state.range === "7d" ? (mmdd(t) + " " + hhmm(t)) : hhmm(t);
+      tx.textContent = labelWide ? (mmdd(t) + " " + hhmm(t)) : hhmm(t);
       svgRoot.appendChild(tx);
     });
 

@@ -48,6 +48,26 @@
 
 /* ---------------------------------------------------------------- 标签 */
 .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+/* 顶栏「退出后台」：32px 图标按钮，颜色/边框全用 token，不写裸色值。
+   图标取 icons.js 的 power，文案（title / aria-label / 确认框）全取 copy.settings。 */
+.tb-quit {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--n-0);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.tb-quit:hover { background: var(--n-100); color: var(--text); }
+.tb-quit svg { display: block; width: 18px; height: 18px; }
+.tb-quit:disabled { opacity: .5; cursor: default; }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -488,13 +508,15 @@
 /* 目标列必须放得下 www.baidu.com:443 这种「域名:端口」：1024 下 .evi-table 的
    媒体查询会把第 3 列撑到 236px，把目标挤成 112px 折成两行。用复合选择器提权，
    顺序按「时间 / 目标 / 类型 / 实测 / 阈值 / 时长 / AP」重新分配。 */
-.evi-table.hist-table th:nth-child(1), .evi-table.hist-table td:nth-child(1) { width: 108px; }
-.evi-table.hist-table th:nth-child(2), .evi-table.hist-table td:nth-child(2) { width: 172px; }
-.evi-table.hist-table th:nth-child(3), .evi-table.hist-table td:nth-child(3) { width: 88px; }
-.evi-table.hist-table th:nth-child(4), .evi-table.hist-table td:nth-child(4) { width: 92px; }
-.evi-table.hist-table th:nth-child(5), .evi-table.hist-table td:nth-child(5) { width: 76px; }
-.evi-table.hist-table th:nth-child(6), .evi-table.hist-table td:nth-child(6) { width: 92px; }
-.evi-table.hist-table th:nth-child(7), .evi-table.hist-table td:nth-child(7) { width: 168px; }
+/* 7 列事件表同样 % + min-width；min-width 保留原来的 1024 单行保底值
+   （目标列要放得下 www.baidu.com:443），% 只负责宽屏时按比例撑开 */
+.evi-table.hist-table th:nth-child(1), .evi-table.hist-table td:nth-child(1) { width: 11%; min-width: 108px; }
+.evi-table.hist-table th:nth-child(2), .evi-table.hist-table td:nth-child(2) { width: 20%; min-width: 172px; }
+.evi-table.hist-table th:nth-child(3), .evi-table.hist-table td:nth-child(3) { width: 10%; min-width: 88px; }
+.evi-table.hist-table th:nth-child(4), .evi-table.hist-table td:nth-child(4) { width: 11%; min-width: 92px; }
+.evi-table.hist-table th:nth-child(5), .evi-table.hist-table td:nth-child(5) { width: 9%;  min-width: 76px; }
+.evi-table.hist-table th:nth-child(6), .evi-table.hist-table td:nth-child(6) { width: 11%; min-width: 92px; }
+.evi-table.hist-table th:nth-child(7), .evi-table.hist-table td:nth-child(7) { width: 18%; min-width: 168px; }
 .hist-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-table tbody tr { cursor: pointer; }
 .hist-table tbody tr:hover { background: var(--n-50); }
@@ -1240,8 +1262,9 @@
 
 /* ---------------------------------------------------------------- 窄屏 */
 @media (max-width: 1100px) {
-  .evi-table th:nth-child(1), .evi-table td:nth-child(1) { width: 96px; }
-  .evi-table th:nth-child(3), .evi-table td:nth-child(3) { width: 170px; }
+  /* 紧凑档只收紧保底宽度，列宽本身仍由 % 弹性分配 */
+  .evi-table th:nth-child(1), .evi-table td:nth-child(1) { min-width: 96px; }
+  .evi-table th:nth-child(3), .evi-table td:nth-child(3) { min-width: 160px; }
   .v-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ev-grid { grid-template-columns: minmax(0, 1fr); }
   .v-title { font-size: var(--fs-md); }
@@ -1321,9 +1344,14 @@
 .rpt-ph-t { margin-bottom: var(--sp-3); font-size: var(--fs-sm); color: var(--text-2); }
 
 /* ---------------------------------------------------------------- ② 证据表 */
+/* collapse 会让相邻行的边框由浏览器合并计算，DPR 1.25 / 1.5 下
+   同一条分隔线会落到不同的设备像素上，看起来像错开半像素。
+   separate + spacing 0 让每个 cell 自己画 border-bottom，
+   同一行所有 td 的底线严格落在同一条 y 上（A4）。 */
 .evi-table, .mt-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
 }
 .evi-table th, .mt-table th {
@@ -1345,27 +1373,35 @@
 }
 .evi-table tr:last-child td, .mt-table tr:last-child td { border-bottom: 0; }
 
-.evi-table th:nth-child(1), .evi-table td:nth-child(1) { width: 124px; }
-.evi-table th:nth-child(3), .evi-table td:nth-child(3) { width: 236px; }
-.evi-table th:nth-child(4), .evi-table td:nth-child(4) { width: 82px; }
+/* 列宽用 %（随容器弹性）+ min-width（窄屏保底），不再写死 px。
+   table-layout: fixed 下列宽由首行 / th 决定，所以两个选择器上都写。 */
+.evi-table th:nth-child(1), .evi-table td:nth-child(1) { width: 16%; min-width: 96px; }
+.evi-table th:nth-child(2), .evi-table td:nth-child(2) { width: 42%; min-width: 140px; }
+.evi-table th:nth-child(3), .evi-table td:nth-child(3) { width: 30%; min-width: 170px; }
+.evi-table th:nth-child(4), .evi-table td:nth-child(4) { width: 12%; min-width: 82px; }
 .evi-lv { color: var(--text-2); font-size: var(--fs-xs); }
 .evi-what { color: var(--text); }
 .evi-num { color: var(--text-2); font-size: var(--fs-xs); }
 .evi-judge { white-space: nowrap; }
 
 /* ---------------------------------------------------------------- 关键指标表 */
-.mt-table th:nth-child(1) { width: 38%; }
-.mt-table th:nth-child(3) { width: 104px; }
+.mt-table th:nth-child(1), .mt-table td:nth-child(1) { width: 38%; min-width: 120px; }
+.mt-table th:nth-child(2), .mt-table td:nth-child(2) { width: auto; min-width: 180px; }
+.mt-table th:nth-child(3), .mt-table td:nth-child(3) { width: 104px; min-width: 92px; }
 .mt-k { color: var(--text-2); }
 .mt-v b { font-weight: 650; font-size: var(--fs-base); }
 .mt-u { margin-left: 2px; font-size: var(--fs-xs); color: var(--text-2); }
 .mt-flag { margin-left: 8px; font-size: var(--fs-xs); color: var(--text-2); }
-.mt-s { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
+/* 判定列必须是真正的 table-cell：以前 display:flex 让它脱离表格行高计算，
+   separate 模式下高度比同行的 mt-k / mt-v 少 3px，border-bottom 就错开 3px。
+   改用 inline 元素 + margin 做间距，td 保持 table-cell，同一行所有底线同 y。 */
+.mt-s { font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
 .mt-dot {
   display: inline-block;
   width: 8px;
   height: 8px;
-  flex: none;
+  margin-right: 6px;
+  vertical-align: -1px;
   border-radius: 50%;
   background: var(--n-300);
 }
