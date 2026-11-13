@@ -190,3 +190,11 @@ OK
 ---
 
 *本包由只读评审生成：未修改仓库任何既有文件。`docs/` 与 `scaffold/` 均为新增目录。*
+
+## 2026-11 新增（接手必读）
+
+- `docs/process.md` 开发与发布流程（A/B/C、红线、本机实测、相对路径）
+- `docs/backlog.md` 当前待办
+- `docs/decisions.md` 关键决策记录
+- `docs/records/INDEX.md` 历史工作记录索引
+- `docs/dev-setup.md` 双机开发环境
