@@ -44,6 +44,37 @@ Npcap 安装器在 `tools/npcap-1.79.exe`（每台机器装一次）。
 推荐插件：Python、GitLens（可选）。
 不需要 C# 插件：启动器由 `scripts/build_launcher.py` 调 `csc` 编译。
 
+
+### 2.1 本地创建 `.vscode/tasks.json`（个人配置，不入库）
+
+`.vscode/` 在 `.gitignore` 里，所以任务配置**不进仓库**；在每台机器上把它粘到
+仓库根目录的 `.vscode/tasks.json` 即可（两台机器各粘一次）：
+
+```jsonc
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "跑全量测试", "type": "shell",
+      "command": "${workspaceFolder}/tools/python/python.exe",
+      "args": ["-m", "unittest", "discover", "-s", "tests"],
+      "group": { "kind": "test", "isDefault": true } },
+    { "label": "3.11 语法检查", "type": "shell",
+      "command": "${workspaceFolder}/tools/python/python.exe",
+      "args": ["-m", "compileall", "-q", "core", "mcp", "tests"] },
+    { "label": "重生成接口文档并自检", "type": "shell",
+      "command": "${workspaceFolder}/tools/python/python.exe",
+      "args": ["scripts/gen_api_doc.py", "--check", "0.95"] },
+    { "label": "构建自包含包", "type": "shell",
+      "command": "${workspaceFolder}/tools/python/python.exe",
+      "args": ["scripts/build_release.py", "--with-tools", "--with-npcap", "--skip-verify"] },
+    { "label": "跑单个测试文件（改 -p）", "type": "shell",
+      "command": "${workspaceFolder}/tools/python/python.exe",
+      "args": ["-m", "unittest", "discover", "-s", "tests", "-p", "test_v2_backend.py"] }
+  ]
+}
+```
+
+家里若用系统 Python，把 `${workspaceFolder}/tools/python/python.exe` 换成 `python`。
 ## 3. 跨机器同步进度
 
 同步的是 **git 仓库**，不是文件：
@@ -76,3 +107,4 @@ git status --short                                 # 确认没有 tools/ logs/ �
 - 无线相关字段（SSID/RSSI/协商速率）需要本机连 Wi-Fi 才有
 - 公司内网环境与家用网络差异大：**不要预设网络结构**（代理/DNS/网关都可能不同），
   这正是"流程 C 陌生环境测试"要覆盖的
+
